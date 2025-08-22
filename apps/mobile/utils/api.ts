@@ -1,11 +1,11 @@
 // lib/api.ts
 
 import {
-  getAuth,
   getIdToken,
   signInAnonymously
 } from "firebase/auth";
 import { Group, Item } from "../types/types";
+import { auth } from "./firebase";
 
 // your API root
 const BASE_URL = "http://192.168.2.193:3000/api"
@@ -20,7 +20,6 @@ async function authorizedFetch(
   input: RequestInfo,
   init: RequestInit = {}
 ): Promise<Response> {
-  const auth = getAuth();
   let user = auth.currentUser
   if (!user) {
     const result = await signInAnonymously(auth)

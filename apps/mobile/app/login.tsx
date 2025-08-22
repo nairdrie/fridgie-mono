@@ -1,42 +1,38 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
-// --- Core Firebase and Expo Recaptcha Imports ---
-// This is the required package to bridge Firebase Auth with Expo's environment
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+
 // These are the functions from the Firebase JS SDK you installed
 import {
-    ConfirmationResult,
-    getAuth,
-    signInWithPhoneNumber,
+  ConfirmationResult,
+  RecaptchaVerifier,
+  signInWithPhoneNumber
 } from 'firebase/auth';
 
 // --- Your Project's Imports ---
 // IMPORTANT: Make sure you have a firebaseConfig.js file that exports your config
-import { firebaseConfig } from '@/utils/firebase';
+import { auth, firebaseConfig } from '@/utils/firebase';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { useRouter } from 'expo-router';
 import Logo from '../components/Logo';
 import { loginWithToken } from '../utils/api';
 import { toE164 } from '../utils/utils';
 
 
-
 export default function LoginScreen() {
-    const router = useRouter();
+  const router = useRouter();
 
-  // Ref for the reCAPTCHA modal
-  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
+  const recaptchaVerifier = useRef<any>(null);
 
-  const auth = getAuth();
 
   // --- State Management ---
   const [phone, setPhone] = useState('');
@@ -46,6 +42,19 @@ export default function LoginScreen() {
   
   // This state will hold the confirmation object returned by Firebase
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+
+
+  // --- WEB-ONLY: Initialize invisible reCAPTCHA ---
+  useEffect(() => {
+    // This effect runs only on the web
+    if (Platform.OS === 'web') {
+      if (!recaptchaVerifier.current) {
+        recaptchaVerifier.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          'size': 'invisible',
+        });
+      }
+    }
+  }, []);
 
   /**
    * Sends a verification code to the user's phone number.
@@ -109,13 +118,19 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.outerContainer}
     >
-      {/* This modal component handles the reCAPTCHA flow */}
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaVerifier}
-        firebaseConfig={firebaseConfig}
-        title="Confirm you're not a robot"
-        cancelLabel="Close"
-      />
+      {/* --- CONDITIONAL RENDERING --- */}
+      {Platform.OS === 'web' ? (
+        // On web, render the invisible div
+        <View id="recaptcha-container" />
+      ) : (
+        // On mobile, render the modal from the expo package
+        <FirebaseRecaptchaVerifierModal
+          ref={recaptchaVerifier}
+          firebaseConfig={firebaseConfig}
+          title="Confirm you're not a robot"
+          cancelLabel="Close"
+        />
+      )}
 
       <Logo variant="wide" style={{ alignSelf: 'center', marginBottom: 24 }} />
       <View style={styles.loginCard}>

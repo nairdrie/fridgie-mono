@@ -1,6 +1,6 @@
 import { Group } from '@/types/types';
+import { auth } from '@/utils/firebase';
 import { useRouter } from 'expo-router';
-import { getAuth } from 'firebase/auth'; // ← assuming Firebase
 import React, { useEffect, useState } from 'react';
 import {
   Button,
@@ -16,7 +16,6 @@ import { createGroup, getGroups } from '../utils/api';
 export default function GroupsScreen() {
   const router = useRouter(); 
   const [groups, setGroups] = useState<Group[]>([]);
-  const auth = getAuth();
 
   useEffect(() => {
     getGroups().then(setGroups);

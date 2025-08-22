@@ -28,7 +28,7 @@ export default function ListScreen() {
 
   const dirtyUntilRef = useRef<number>(0);
   const markDirty = () => {
-    const until = Date.now() + 700; // tweak if you want a longer freeze
+    const until = Date.now() + 1200; // tweak if you want a longer freeze
     dirtyUntilRef.current = until;
     setDirtyUntil(until); // keep your state if you read it elsewhere (optional)
   };
@@ -87,10 +87,30 @@ export default function ListScreen() {
     return () => clearTimeout(timeout);
   }, [items, selectedList?.id, groupId]);
 
+  // whenever editingId (or items) changes, ensure focus
+  useEffect(() => {
+    if (!editingId) return;
+    // next tick so the newly-rendered TextInput is mounted
+    requestAnimationFrame(() => focusAtEnd(editingId));
+  }, [editingId, items]);
+
 
   const assignRef = useCallback((id: string) => (ref: TextInput | null) => { inputRefs.current[id] = ref; }, []);
   const updateItemText = (id: string, text: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item))); markDirty(); };
   const toggleCheck = (id: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, checked: !item.checked } : item))); markDirty(); };
+
+  const focusAtEnd = (id: string) => {
+    const ref = inputRefs.current[id];
+    if (!ref) return;
+    ref.focus?.();
+
+    // place caret at end (RN quirk: do it on a tick)
+    const len = (items.find(i => i.id === id)?.text || '').length;
+    setTimeout(() => {
+      // @ts-ignore - setNativeProps selection is supported on RN TextInput
+      ref.setNativeProps?.({ selection: { start: len, end: len } });
+    }, 0);
+  };
 
    const addItemAfter = (id: string) => {
     // This function now only runs if there is already a selected list.
@@ -116,19 +136,34 @@ export default function ListScreen() {
   };
 
   const deleteItem = (id: string) => {
+    // if we’re at a single empty row, replace with placeholder like before
     if (items.length === 1) {
-      const placeholderItem = { id: uuid.v4() as string, text: '', checked: false, order: LexoRank.middle().toString(), isSection: false };
+      const placeholderItem = {
+        id: uuid.v4() as string,
+        text: '',
+        checked: false,
+        order: LexoRank.middle().toString(),
+        isSection: false,
+      };
       setItems([placeholderItem]);
       setEditingId(placeholderItem.id);
       markDirty();
       return;
     }
+
     const index = items.findIndex(i => i.id === id);
     if (index === -1) return;
+
+    // remove ref for the deleted row
+    delete inputRefs.current[id];
+
     const updated = items.filter(item => item.id !== id);
     setItems(updated);
     markDirty();
-    setEditingId(updated[Math.max(0, index - 1)]?.id);
+
+    // focus previous item if possible, else the new first row
+    const nextFocusId = updated[Math.max(0, index - 1)]?.id;
+    if (nextFocusId) setEditingId(nextFocusId);
   };
 
   const handleAutoCategorize = async () => {

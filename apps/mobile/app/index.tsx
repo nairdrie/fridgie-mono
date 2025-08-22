@@ -1,3 +1,4 @@
+import "@/utils/firebase";
 import { Redirect } from 'expo-router';
 
 export default function RootIndex() {

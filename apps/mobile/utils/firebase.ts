@@ -1,4 +1,6 @@
-import { initializeApp } from 'firebase/app';
+// utils/firebase.ts
+import { getApp, getApps, initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyCcWf4ImzldQDYMMEK5UmAgTCpLZ_vBlTo",
@@ -11,4 +13,16 @@ export const firebaseConfig = {
   measurementId: "G-M35FBJHZZL"
 }
 
-const app = initializeApp(firebaseConfig);
+// A helper function to initialize and retrieve the Firebase app instance.
+const getFirebaseApp = () => {
+  if (getApps().length === 0) {
+    return initializeApp(firebaseConfig);
+  }
+  return getApp();
+};
+
+const app = getFirebaseApp();
+const auth = getAuth(app);
+
+// Export the initialized services
+export { app, auth };

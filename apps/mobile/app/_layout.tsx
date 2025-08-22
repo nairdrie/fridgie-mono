@@ -1,4 +1,5 @@
 // app/_layout.tsx
+import "@/utils/firebase";
 import { Stack } from 'expo-router';
 import React from 'react';
 import { Platform, View } from 'react-native';
