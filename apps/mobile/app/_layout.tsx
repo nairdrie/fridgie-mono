@@ -1,29 +1,59 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
+// app/_layout.tsx
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import React from 'react';
+import { Platform, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import { useColorScheme } from '@/hooks/useColorScheme';
+// Import your components
+import { ListProvider } from '@/context/ListContext';
+import ListHeader from '../components/ListHeader';
+import UserProfile from '../components/UserProfile';
+
+// Create a wrapper component that conditionally applies GestureHandlerRootView
+const RootView = ({ children }: { children: React.ReactNode }) => {
+  if (Platform.OS === 'web') {
+    // On web, a standard View is sufficient.
+    return <View style={{ flex: 1 }}>{children}</View>;
+  }
+  // On mobile, the GestureHandler is required for proper touch handling.
+  return <GestureHandlerRootView style={{ flex: 1 }}>{children}</GestureHandlerRootView>;
+};
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
-
-  if (!loaded) {
-    // Async font loading only occurs in development.
-    return null;
-  }
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <ListProvider>
+      <RootView>
+        {/* The Stack component defines the navigator */}
+        <Stack initialRouteName="groups">
+          <Stack.Screen
+            name="groups" // This matches the file name: groups.tsx
+            options={{
+              title: 'Your Groups',
+              headerRight: () => (
+                <View style={{ paddingRight: 12 }}>
+                  <UserProfile />
+                </View>
+              ),
+            }}
+          />
+          <Stack.Screen
+            name="list" // This matches the file name: list.tsx
+            options={{
+              headerShown: true,
+              headerTitle: () => <ListHeader />,
+              headerRight: () => (
+                <View style={{ paddingRight: 12 }}>
+                  <UserProfile />
+                </View>
+              ),
+            }}
+          />
+          <Stack.Screen
+            name="login" // This matches the file name: login.tsx
+            options={{ title: 'Login' }}
+          />
+        </Stack>
+      </RootView>
+    </ListProvider>
   );
 }
