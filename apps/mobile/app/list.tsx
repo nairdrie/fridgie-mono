@@ -26,7 +26,12 @@ export default function ListScreen() {
   const [dirtyUntil, setDirtyUntil] = useState<number>(0);
   const inputRefs = useRef<Record<string, TextInput | null>>({});
 
-  const markDirty = () => setDirtyUntil(Date.now() + 700);
+  const dirtyUntilRef = useRef<number>(0);
+  const markDirty = () => {
+    const until = Date.now() + 700; // tweak if you want a longer freeze
+    dirtyUntilRef.current = until;
+    setDirtyUntil(until); // keep your state if you read it elsewhere (optional)
+  };
 
   // EFFECT 1: Handles ALL incoming data (Initial Fetch + Real-time Updates)
   useEffect(() => {
@@ -35,40 +40,52 @@ export default function ListScreen() {
       return;
     }
 
-    const unsubscribe = listenToList(
-      groupId,
-      selectedList.id,
-      (data: List) => {
-        if (Date.now() < dirtyUntil) return;
-        
-        const rawItems = Array.isArray(data.items) ? data.items : [];
-        const withOrder = rawItems
-          .map((item: Item) => ({ ...item, order: item.order ?? LexoRank.middle().toString() }))
-          .sort((a: Item, b: Item) => a.order.localeCompare(b.order));
-        
-        if (withOrder.length === 0) {
-          setItems([{ id: uuid.v4() as string, text: '', checked: false, order: LexoRank.middle().toString(), isSection: false }]);
-        } else {
-          setItems(withOrder);
-        }
-      }
-    );
+    const unsubscribe = listenToList(groupId, selectedList.id, (data: List) => {
+      // ignore server echoes while the user is actively typing
+      if (Date.now() < dirtyUntilRef.current) return;
 
-    return () => {
-      unsubscribe();
-    };
-  }, [selectedList, groupId]);
+      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const withOrder = rawItems
+        .map((item: Item) => ({ ...item, order: item.order ?? LexoRank.middle().toString() }))
+        .sort((a: Item, b: Item) => a.order.localeCompare(b.order));
+
+      // optional: avoid pointless state updates (prevents cursor weirdness)
+      setItems(prev => {
+        const sameLength = prev.length === withOrder.length;
+        const sameAll = sameLength && prev.every((p, i) =>
+          p.id === withOrder[i].id &&
+          p.text === withOrder[i].text &&
+          p.checked === withOrder[i].checked &&
+          p.order === withOrder[i].order &&
+          p.isSection === withOrder[i].isSection
+        );
+        if (sameAll) return prev;
+
+        if (withOrder.length === 0) {
+          return [{
+            id: uuid.v4() as string,
+            text: '',
+            checked: false,
+            order: LexoRank.middle().toString(),
+            isSection: false,
+          }];
+        }
+        return withOrder;
+      });
+    });
+
+    return () => unsubscribe();
+  }, [selectedList, groupId]); // note: no need to depend on dirtyUntil now
 
   // EFFECT 2: Handles ALL outgoing data (Debounced Saving)
   useEffect(() => {
     if (!selectedList?.id || !groupId) return;
     const timeout = setTimeout(() => {
       const itemsToSave = items.filter(item => item.text !== '');
-      updateList(groupId, selectedList.id, { items: itemsToSave }).catch(err => console.error(err));
+      updateList(groupId, selectedList.id, { items: itemsToSave }).catch(console.error);
     }, 500);
-
     return () => clearTimeout(timeout);
-  }, [items]);
+  }, [items, selectedList?.id, groupId]);
 
 
   const assignRef = useCallback((id: string) => (ref: TextInput | null) => { inputRefs.current[id] = ref; }, []);
