@@ -51,6 +51,7 @@ serve({
   },
 
   // Step 2: Bun-native WebSocket handlers
+  // TODO: maybe use admin sdk here. depends once we set up access restrictions for who can read/write from which group. 
   websocket: {
     // onOpen: subscribe to Firebase
     open(ws: ServerWebSocket<{ groupId: string, listId: string; unsubscribe?: () => void }>) {
