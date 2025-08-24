@@ -5,10 +5,21 @@ import {
   signInAnonymously
 } from "firebase/auth";
 import { Group, Item } from "../types/types";
+import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
 // your API root
 const BASE_URL = "http://192.168.2.193:3000/api"
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
 
 /**
  * Wraps fetch() to:
@@ -20,6 +31,9 @@ async function authorizedFetch(
   input: RequestInfo,
   init: RequestInit = {}
 ): Promise<Response> {
+  // ✅ Wait for the initial auth check to complete
+  await authStatePromise;
+  console.log(`try authorized fetch for ${input}. current auth state:  ${auth.currentUser} ${auth.currentUser?.uid} (${auth.currentUser?.isAnonymous})`);
   let user = auth.currentUser
   if (!user) {
     const result = await signInAnonymously(auth)
@@ -27,20 +41,28 @@ async function authorizedFetch(
   }
   const token = await getIdToken(user, /* forceRefresh= */ true)
 
-  return fetch(input, {
+  const res = await fetch(input, {
     ...init,
     headers: {
       ...(init.headers as Record<string, string>),
       Authorization: `Bearer ${token}`,
     },
   })
+
+  if (!res.ok) {
+    // Try to get a more specific error message from the response body
+    const errorBody = await res.text();
+    const errorMessage = errorBody || `Request failed with status ${res.status}`;
+    throw new ApiError(errorMessage, res.status);
+  }
+
+  return res;
 }
 
 // ─────── LISTS ───────────────────────────────────────────────────────────────
 
 export async function getLists(groupId: string) {
   const res = await authorizedFetch(`${BASE_URL}/list?groupId=${groupId}`)
-  if (!res.ok) throw new Error('Failed to fetch lists')
   return res.json()
 }
 
@@ -48,7 +70,6 @@ export async function getList(groupId: string, listId: string) {
   const res = await authorizedFetch(
     `${BASE_URL}/list/${listId}?groupId=${groupId}`
   )
-  if (!res.ok) throw new Error('Failed to fetch list')
   return res.json()
 }
 
@@ -61,7 +82,6 @@ export async function createList(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ weekStart }),
   })
-  if (!res.ok) throw new Error('Failed to create list')
   return res.json()
 }
 
@@ -78,7 +98,7 @@ export async function updateList(
       body: JSON.stringify(data),
     }
   )
-  if (!res.ok) throw new Error('Failed to update list')
+  return res.json()
 }
 
 export async function categorizeList(
@@ -89,7 +109,6 @@ export async function categorizeList(
     `${BASE_URL}/list/categorize/${listId}?groupId=${groupId}`,
     { method: 'POST' }
   )
-  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
@@ -97,7 +116,6 @@ export async function categorizeList(
 
 export async function getGroups(): Promise<Group[]> {
   const res = await authorizedFetch(`${BASE_URL}/group`)
-  if (!res.ok) throw new Error(`Failed to fetch groups (${res.status})`)
   return res.json()
 }
 
@@ -107,10 +125,6 @@ export async function createGroup(name: string): Promise<Group> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`Failed to create group: ${text}`)
-  }
   return res.json()
 }
 

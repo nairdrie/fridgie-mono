@@ -6,6 +6,7 @@ import { Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Import your components
+import { AuthProvider } from "@/context/AuthContext";
 import { ListProvider } from '@/context/ListContext';
 import ListHeader from '../components/ListHeader';
 import UserProfile from '../components/UserProfile';
@@ -22,39 +23,42 @@ const RootView = ({ children }: { children: React.ReactNode }) => {
 
 export default function RootLayout() {
   return (
-    <ListProvider>
-      <RootView>
-        {/* The Stack component defines the navigator */}
-        <Stack initialRouteName="groups">
-          <Stack.Screen
-            name="groups" // This matches the file name: groups.tsx
-            options={{
-              title: 'Your Groups',
-              headerRight: () => (
-                <View style={{ paddingRight: 12 }}>
-                  <UserProfile />
-                </View>
-              ),
-            }}
-          />
-          <Stack.Screen
-            name="list" // This matches the file name: list.tsx
-            options={{
-              headerShown: true,
-              headerTitle: () => <ListHeader />,
-              headerRight: () => (
-                <View style={{ paddingRight: 12 }}>
-                  <UserProfile />
-                </View>
-              ),
-            }}
-          />
-          <Stack.Screen
-            name="login" // This matches the file name: login.tsx
-            options={{ title: 'Login' }}
-          />
-        </Stack>
-      </RootView>
-    </ListProvider>
+    <AuthProvider>
+      <ListProvider>
+        <RootView>
+          {/* The Stack component defines the navigator */}
+          <Stack initialRouteName="groups">
+            <Stack.Screen
+              name="groups" // This matches the file name: groups.tsx
+              options={{
+                title: 'Your Groups',
+                headerRight: () => (
+                  <View style={{ paddingRight: 12 }}>
+                    <UserProfile />
+                  </View>
+                ),
+              }}
+            />
+            <Stack.Screen
+              name="list" // This matches the file name: list.tsx
+              options={{
+                headerShown: true,
+                headerTitle: () => <ListHeader />,
+                headerRight: () => (
+                  <View style={{ paddingRight: 12 }}>
+                    <UserProfile />
+                  </View>
+                ),
+              }}
+            />
+            <Stack.Screen
+              name="login" // This matches the file name: login.tsx
+              options={{ title: 'Login' }}
+            />
+          </Stack>
+        </RootView>
+      </ListProvider>
+    </AuthProvider>
+  
   );
 }

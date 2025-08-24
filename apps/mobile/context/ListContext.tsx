@@ -1,7 +1,7 @@
-import { useGlobalSearchParams } from 'expo-router'; // ✅ 1. Import the correct hook
+import { useGlobalSearchParams, useRouter } from 'expo-router'; // ✅ 1. Import the correct hook
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { List } from '../types/types';
-import { getLists } from '../utils/api';
+import { ApiError, getLists } from '../utils/api';
 
 interface ListContextType {
   groupId: string | undefined;
@@ -16,6 +16,8 @@ const ListContext = createContext<ListContextType | undefined>(undefined);
 export function ListProvider({ children }: { children: React.ReactNode }) {
   // ✅ 2. Use the global params hook instead of the local one
   const params = useGlobalSearchParams(); 
+  const router = useRouter();
+
   const groupId = Array.isArray(params.groupId) ? params.groupId[0] : (params.groupId as string | undefined);
 
   const [allLists, setAllLists] = useState<List[]>([]);
@@ -35,7 +37,12 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
           setSelectedList(null);
         }
       } catch (error) {
-        console.error("Failed to fetch lists:", error);
+        if (error instanceof ApiError) {
+          console.error("Failed to fetch lists:", error);
+          if(error.status == 403) {
+            router.navigate('/groups');
+          }
+        }
       } finally {
         setIsLoading(false);
       }
