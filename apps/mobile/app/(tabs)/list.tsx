@@ -5,6 +5,7 @@ import { LexoRank } from 'lexorank';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,7 +13,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
@@ -28,6 +29,7 @@ export default function ListScreen() {
   const [editingId, setEditingId] = useState<string>('');
   const [isCategorizing, setIsCategorizing] = useState(false);
   const [dirtyUntil, setDirtyUntil] = useState<number>(0);
+  const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const inputRefs = useRef<Record<string, TextInput | null>>({});
 
   const dirtyUntilRef = useRef<number>(0);
@@ -101,6 +103,23 @@ export default function ListScreen() {
     requestAnimationFrame(() => focusAtEnd(editingId));
   }, [editingId, items]);
 
+  // useEffect to listen for keyboard events
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => setKeyboardVisible(true)
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+
+    return () => {
+      keyboardDidHideListener.remove();
+      keyboardDidShowListener.remove();
+    };
+  }, []);
+
 
   const assignRef = useCallback((id: string) => (ref: TextInput | null) => { inputRefs.current[id] = ref; }, []);
   const updateItemText = (id: string, text: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item))); markDirty(); };
@@ -154,7 +173,10 @@ export default function ListScreen() {
   };
 
   const deleteItem = (id: string) => {
-    // if we’re at a single empty row, replace with placeholder like before
+    const index = items.findIndex(i => i.id === id);
+    if (index === -1) return;
+
+    // This part remains the same
     if (items.length === 1) {
       const placeholderItem = {
         id: uuid.v4() as string,
@@ -169,19 +191,19 @@ export default function ListScreen() {
       return;
     }
 
-    const index = items.findIndex(i => i.id === id);
-    if (index === -1) return;
-
-    // remove ref for the deleted row
     delete inputRefs.current[id];
-
     const updated = items.filter(item => item.id !== id);
     setItems(updated);
     markDirty();
 
-    // focus previous item if possible, else the new first row
-    const nextFocusId = updated[Math.max(0, index - 1)]?.id;
-    if (nextFocusId) setEditingId(nextFocusId);
+    if (isKeyboardVisible) {
+      const nextFocusId = updated[Math.max(0, index - 1)]?.id;
+      if (nextFocusId) {
+        setEditingId(nextFocusId);
+      }
+    } else {
+      setEditingId('');
+    }
   };
 
   const handleAutoCategorize = async () => {
@@ -286,6 +308,7 @@ export default function ListScreen() {
             keyExtractor={item => item.id}
             renderItem={renderItem}
             keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
           />
         ) : (
           <MealPlanView
