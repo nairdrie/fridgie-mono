@@ -58,6 +58,15 @@ export default function ListScreen() {
 
       // optional: avoid pointless state updates (prevents cursor weirdness)
       setItems(prev => {
+        // if(prev.length == 0) {
+        //   return [{
+        //     id: uuid.v4() as string,
+        //     text: '',
+        //     checked: false,
+        //     order: LexoRank.middle().toString(),
+        //     isSection: false,
+        //   }];
+        // }
         const sameLength = prev.length === withOrder.length;
         const sameAll = sameLength && prev.every((p, i) =>
           p.id === withOrder[i].id &&
@@ -90,8 +99,7 @@ export default function ListScreen() {
   useEffect(() => {
     if (!selectedList?.id || !groupId) return;
     const timeout = setTimeout(() => {
-      const itemsToSave = items.filter(item => item.text !== '');
-      updateList(groupId, selectedList.id, { items: itemsToSave, meals: meals }).catch(console.error);
+      updateList(groupId, selectedList.id, { items, meals: meals }).catch(console.error);
     }, 500);
     return () => clearTimeout(timeout);
   }, [items, meals, selectedList?.id, groupId]);
