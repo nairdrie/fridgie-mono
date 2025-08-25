@@ -4,17 +4,31 @@ export type Item = {
     checked: boolean;
     order: string; // LexoRank string
     isSection: boolean; // Optional property to indicate if the item is a section
+    mealId?: string;
   };
   
 export type List = {
     id: string; // Firestore document ID
     weekStart: string;
     hasContent?: boolean;
-    items?: Item[];
+    items: Item[];
+    meals: Meal[];
 };
 
 // types/types.ts
 export interface Group {
   id: string;
   name: string;
+}
+
+export interface Meal {
+  id: string;
+  listId: string;
+  dayOfWeek?: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
+  name: string;
+}
+
+export enum ListView {
+  GroceryList = 'list',
+  MealPlan = 'plan'
 }

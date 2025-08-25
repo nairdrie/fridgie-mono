@@ -1,5 +1,6 @@
+import MealPlanView from '@/components/MealPlanView';
 import { useLists } from '@/context/ListContext';
-import { Item, List } from '@/types/types';
+import { Item, List, ListView, Meal } from '@/types/types';
 import { LexoRank } from 'lexorank';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -15,12 +16,15 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import { categorizeList, listenToList, updateList } from '../utils/api';
+import { categorizeList, createMeal, listenToList, updateList } from '../../utils/api';
+
 
 export default function ListScreen() {
-  const { selectedList, isLoading, groupId } = useLists();
-
+  const { selectedList, isLoading, groupId, selectedView } = useLists();
+  
+  const [meals, setMeals] = useState<Meal[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+
   const [editingId, setEditingId] = useState<string>('');
   const [isCategorizing, setIsCategorizing] = useState(false);
   const [dirtyUntil, setDirtyUntil] = useState<number>(0);
@@ -37,14 +41,15 @@ export default function ListScreen() {
   useEffect(() => {
     if (!selectedList || !groupId) {
       setItems([]);
+      setMeals([]);
       return;
     }
 
-    const unsubscribe = listenToList(groupId, selectedList.id, (data: List) => {
+    const unsubscribe = listenToList(groupId, selectedList.id, (list: List) => {
       // ignore server echoes while the user is actively typing
       if (Date.now() < dirtyUntilRef.current) return;
 
-      const rawItems = Array.isArray(data.items) ? data.items : [];
+      const rawItems = Array.isArray(list.items) ? list.items : [];
       const withOrder = rawItems
         .map((item: Item) => ({ ...item, order: item.order ?? LexoRank.middle().toString() }))
         .sort((a: Item, b: Item) => a.order.localeCompare(b.order));
@@ -72,6 +77,8 @@ export default function ListScreen() {
         }
         return withOrder;
       });
+
+      setMeals(Array.isArray(list.meals) ? list.meals : []);
     });
 
     return () => unsubscribe();
@@ -82,10 +89,10 @@ export default function ListScreen() {
     if (!selectedList?.id || !groupId) return;
     const timeout = setTimeout(() => {
       const itemsToSave = items.filter(item => item.text !== '');
-      updateList(groupId, selectedList.id, { items: itemsToSave }).catch(console.error);
+      updateList(groupId, selectedList.id, { items: itemsToSave, meals: meals }).catch(console.error);
     }, 500);
     return () => clearTimeout(timeout);
-  }, [items, selectedList?.id, groupId]);
+  }, [items, meals, selectedList?.id, groupId]);
 
   // whenever editingId (or items) changes, ensure focus
   useEffect(() => {
@@ -110,6 +117,17 @@ export default function ListScreen() {
       // @ts-ignore - setNativeProps selection is supported on RN TextInput
       ref.setNativeProps?.({ selection: { start: len, end: len } });
     }, 0);
+  };
+
+  const handleAddMeal = async (day: Meal['dayOfWeek']) => {
+    if (!groupId || !selectedList) return;
+    try {
+      const newMeal = await createMeal(groupId, selectedList.id, day);
+      setMeals(prev => [...prev, newMeal]);
+      markDirty();
+    } catch (err) {
+      console.error("Failed to create meal", err);
+    }
   };
 
    const addItemAfter = (id: string) => {
@@ -194,6 +212,25 @@ export default function ListScreen() {
     setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
   };
 
+  const handleAddIngredientToMeal = (meal: Meal, ingredientText: string) => {
+    if (!ingredientText) return;
+
+    // 1. Create a new Item object, linking it to the meal
+    const newItem: Item = {
+      id: uuid.v4() as string,
+      text: ingredientText,
+      checked: false,
+      order: LexoRank.middle().toString(), // You'll want better ranking logic
+      isSection: false,
+      mealId: meal.id, // ✅ Link it!
+    };
+
+    // 2. Add the new item to the single source of truth
+    setItems(prevItems => [...prevItems, newItem]);
+
+    markDirty(); // To trigger the debounced save
+  };
+
   const renderItem = ({ item, drag }: RenderItemParams<Item>) => {
     const isEditing = item.id === editingId;
     return (
@@ -236,33 +273,49 @@ export default function ListScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
+      {/* MAIN BODY */}
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={100}
       >
-        <DraggableFlatList
-          data={items}
-          onDragEnd={({ data }) => { setItems(reRankItems(data)); markDirty(); }}
-          keyExtractor={item => item.id}
-          renderItem={renderItem}
-          keyboardDismissMode="interactive"
-        />
+        { selectedView == ListView.GroceryList ? (
+          <DraggableFlatList
+            data={items}
+            onDragEnd={({ data }) => { setItems(reRankItems(data)); markDirty(); }}
+            keyExtractor={item => item.id}
+            renderItem={renderItem}
+            keyboardDismissMode="interactive"
+          />
+        ) : (
+          <MealPlanView
+            meals={meals}
+            items={items} // ✅ Pass down all items
+            onAddMeal={handleAddMeal}
+            onAddIngredient={handleAddIngredientToMeal} // Pass the handler
+          />
+        )}
       </KeyboardAvoidingView>
+
+      {/* BUTTON ROW */}
       <View style={styles.buttonRow}>
         <TouchableOpacity style={styles.actionButton} onPress={handleAddItem}>
           <Text style={styles.buttonText}>+ Item</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
-          <Text style={styles.buttonText}>+ Section</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.actionButton, isCategorizing && { opacity: 0.5 }]}
-          onPress={handleAutoCategorize}
-          disabled={isCategorizing || !selectedList}
-        >
-          <Text style={styles.buttonText}>{isCategorizing ? 'Categorizing…' : 'Auto-Categorize'}</Text>
-        </TouchableOpacity>
+        {selectedView == ListView.GroceryList && 
+          <>
+            <TouchableOpacity style={styles.actionButton}>
+              <Text style={styles.buttonText}>+ Section</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, isCategorizing && { opacity: 0.5 }]}
+              onPress={handleAutoCategorize}
+              disabled={isCategorizing || !selectedList}
+            >
+              <Text style={styles.buttonText}>{isCategorizing ? 'Categorizing…' : 'Auto-Categorize'}</Text>
+            </TouchableOpacity>
+          </>
+        }
       </View>
     </View>
   );

@@ -8,8 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 // Import your components
 import { AuthProvider } from "@/context/AuthContext";
 import { ListProvider } from '@/context/ListContext';
-import ListHeader from '../components/ListHeader';
-import UserProfile from '../components/UserProfile';
+import { StatusBar } from 'expo-status-bar';
 
 // Create a wrapper component that conditionally applies GestureHandlerRootView
 const RootView = ({ children }: { children: React.ReactNode }) => {
@@ -26,39 +25,17 @@ export default function RootLayout() {
     <AuthProvider>
       <ListProvider>
         <RootView>
+          <StatusBar style="dark" />
           {/* The Stack component defines the navigator */}
-          <Stack initialRouteName="groups">
+          <Stack>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             <Stack.Screen
-              name="groups" // This matches the file name: groups.tsx
-              options={{
-                title: 'Your Groups',
-                headerRight: () => (
-                  <View style={{ paddingRight: 12 }}>
-                    <UserProfile />
-                  </View>
-                ),
-              }}
-            />
-            <Stack.Screen
-              name="list" // This matches the file name: list.tsx
-              options={{
-                headerShown: true,
-                headerTitle: () => <ListHeader />,
-                headerRight: () => (
-                  <View style={{ paddingRight: 12 }}>
-                    <UserProfile />
-                  </View>
-                ),
-              }}
-            />
-            <Stack.Screen
-              name="login" // This matches the file name: login.tsx
+              name="login"
               options={{ title: 'Login' }}
             />
           </Stack>
         </RootView>
       </ListProvider>
     </AuthProvider>
-  
   );
 }

@@ -4,7 +4,7 @@ import {
   getIdToken,
   signInAnonymously
 } from "firebase/auth";
-import { Group, Item } from "../types/types";
+import { Group, Item, Meal } from "../types/types";
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
@@ -126,6 +126,39 @@ export async function createGroup(name: string): Promise<Group> {
     body: JSON.stringify({ name }),
   })
   return res.json()
+}
+
+export async function createMeal(
+  groupId: string,
+  listId: string,
+  dayOfWeek: Meal['dayOfWeek']
+): Promise<Meal> {
+  console.log('FAKE API: Creating meal', { groupId, listId, dayOfWeek });
+  // In a real app, this would hit your backend.
+  const newMeal: Meal = {
+    id: Math.random().toString(36).substring(2, 15),
+    listId: listId,
+    name: 'New Meal', // Default name
+    dayOfWeek: dayOfWeek,
+  };
+  // Here, you would typically wait for the backend response.
+  // We'll return the mock object directly.
+  return newMeal;
+}
+
+export async function updateMeal(
+  groupId: string,
+  mealId: string,
+  data: Partial<Meal>
+) {
+  console.log('FAKE API: Updating meal', { groupId, mealId, data });
+  // This would hit your backend to save changes to a meal.
+  // Since our listener will provide the "updated" data, we don't need to return anything.
+}
+
+export async function deleteMeal(groupId: string, mealId: string) {
+  console.log('FAKE API: Deleting meal', { groupId, mealId });
+  // This would hit your backend to delete a meal.
 }
 
 // ─────── REAL-TIME UPDATES ──────────────────────────────────────────────────

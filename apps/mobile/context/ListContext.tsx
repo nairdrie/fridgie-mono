@@ -1,13 +1,15 @@
 import { useGlobalSearchParams, useRouter } from 'expo-router'; // ✅ 1. Import the correct hook
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { List } from '../types/types';
+import { List, ListView } from '../types/types';
 import { ApiError, getLists } from '../utils/api';
 
 interface ListContextType {
   groupId: string | undefined;
   allLists: List[];
   selectedList: List | null;
+  selectedView: ListView;
   selectList: (list: List | null) => void;
+  selectView: (view: ListView) => void;
   isLoading: boolean;
 }
 
@@ -23,6 +25,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
   const [allLists, setAllLists] = useState<List[]>([]);
   const [selectedList, setSelectedList] = useState<List | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedView, setSelectedView] = useState<ListView>(ListView.GroceryList);
 
   useEffect(() => {
 
@@ -65,7 +68,11 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
     setSelectedList(list);
   };
 
-  const value = { groupId, allLists, selectedList, selectList, isLoading };
+   const selectView = (view: ListView) => {
+    setSelectedView(view);
+  };
+
+  const value = { groupId, allLists, selectedList, selectList, selectedView, selectView, isLoading };
 
   return <ListContext.Provider value={value}>{children}</ListContext.Provider>;
 }

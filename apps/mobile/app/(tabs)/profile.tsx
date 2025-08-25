@@ -1,4 +1,5 @@
 import { Group } from '@/types/types';
+import { createGroup, getGroups } from '@/utils/api';
 import { auth } from '@/utils/firebase';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -10,7 +11,6 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { createGroup, getGroups } from '../utils/api';
 
 
 export default function GroupsScreen() {
