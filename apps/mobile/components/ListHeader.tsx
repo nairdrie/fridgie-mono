@@ -106,51 +106,53 @@ export default function ListHeader() {
           </View>
       </View>
       </SafeAreaView>
-      <Modal
-        isVisible={isModalVisible}
-        onBackdropPress={() => setModalVisible(false)}
-        onBackButtonPress={() => setModalVisible(false)}   // Android back
-        swipeDirection="down"
-        onSwipeComplete={() => setModalVisible(false)}
-        backdropOpacity={0.4}
-        style={styles.modal}               // { justifyContent: 'flex-end', margin: 0 }
-        statusBarTranslucent               // Android: draw under status bar
-        coverScreen                        // ensure full-screen overlay (default true, explicit here)
-        deviceHeight={DEVICE_HEIGHT}       // avoids being “short” inside a custom header
-        useNativeDriver
-        useNativeDriverForBackdrop
-      >
-        <View style={styles.sheet}>
-          {/* little grabber for UX */}
-          <View style={{ alignItems: 'center', paddingBottom: 8 }}>
-            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0E0E0' }} />
-          </View>
+      <View>
+          <Modal
+            isVisible={isModalVisible}
+            onBackdropPress={() => setModalVisible(false)}
+            onBackButtonPress={() => setModalVisible(false)}   // Android back
+            swipeDirection="down"
+            onSwipeComplete={() => setModalVisible(false)}
+            backdropOpacity={0.4}
+            style={styles.modal}               // { justifyContent: 'flex-end', margin: 0 }
+            statusBarTranslucent               // Android: draw under status bar
+            coverScreen                        // ensure full-screen overlay (default true, explicit here)
+            deviceHeight={DEVICE_HEIGHT}       // avoids being “short” inside a custom header
+            useNativeDriverForBackdrop
+            useNativeDriver={false}
+          >
+            <View style={styles.sheet}>
+              {/* little grabber for UX */}
+              <View style={{ alignItems: 'center', paddingBottom: 8 }}>
+                <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0E0E0' }} />
+              </View>
 
-          <Text style={styles.sheetTitle}>Select a Week</Text>
+              <Text style={styles.sheetTitle}>Select a Week</Text>
 
-          <FlatList
-            data={allLists}
-            keyExtractor={(list) => list.id}
-            contentContainerStyle={{ paddingBottom: 16 }}
-            renderItem={({ item }) => (
-              <TouchableOpacity onPress={() => handleSelectList(item)} style={styles.weekItem}>
-                <View>
-                  <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
-                  <Text style={styles.weekRange}>
-                    {new Date(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
-                    {new Date(new Date(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
-                      undefined,
-                      { month: 'short', day: 'numeric' }
-                    )}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            )}
-            // If list is long, allow inside scroll without closing the sheet
-            // react-native-modal handles scroll/propagation well
-          />
-        </View>
-      </Modal>
+              <FlatList
+                data={allLists}
+                keyExtractor={(list) => list.id}
+                contentContainerStyle={{ paddingBottom: 16 }}
+                renderItem={({ item }) => (
+                  <TouchableOpacity onPress={() => handleSelectList(item)} style={styles.weekItem}>
+                    <View>
+                      <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
+                      <Text style={styles.weekRange}>
+                        {new Date(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
+                        {new Date(new Date(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
+                          undefined,
+                          { month: 'short', day: 'numeric' }
+                        )}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+                // If list is long, allow inside scroll without closing the sheet
+                // react-native-modal handles scroll/propagation well
+              />
+            </View>
+          </Modal>
+      </View>
     </>
   );
 }

@@ -2,7 +2,8 @@ export type Item = {
     id: string;
     text: string;
     checked: boolean;
-    order: string; // LexoRank string
+    listOrder: string; // ✅ Renamed from 'order'
+    mealOrder?: string; // ✅ New optional field for ordering within a meal
     isSection: boolean; // Optional property to indicate if the item is a section
     mealId?: string;
   };

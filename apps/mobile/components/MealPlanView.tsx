@@ -1,98 +1,113 @@
 // components/MealPlanView.tsx
 import { Item, Meal } from "@/types/types";
-import React, { useMemo, useState } from 'react';
-import { SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import React, { useMemo } from 'react';
+import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import MealCard from "./MealCard"; // Import the new component
 
 const DAYS_OF_WEEK: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const dayOrder = new Map(DAYS_OF_WEEK.map((day, i) => [day, i]));
 
 interface MealPlanViewProps {
   meals: Meal[];
   items: Item[];
-  onAddMeal: (day: Meal['dayOfWeek']) => void;
-  onAddIngredient: (meal: Meal, text: string) => void;
-  // You would also pass in functions for updating/deleting meals and items
+  setAllItems: (callback: (prevItems: Item[]) => Item[]) => void;
+  onUpdateMeal: (mealId: string, updates: Partial<Meal>) => void;
+  onDeleteMeal: (mealId: string) => void;
+  onAddMeal: () => void;
+  
+  // ✅ Add the new props to the interface
+  editingId: string;
+  setEditingId: React.Dispatch<React.SetStateAction<string>>;
+  inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
+  isKeyboardVisible: boolean;
+  markDirty: () => void;
 }
 
-export default function MealPlanView({ meals, items, onAddMeal, onAddIngredient }: MealPlanViewProps) {
-  // Local state for the text input of a new ingredient
-  const [newIngredientText, setNewIngredientText] = useState<Record<string, string>>({});
+export default function MealPlanView({
+  meals,
+  items,
+  setAllItems,
+  onUpdateMeal,
+  onDeleteMeal,
+  onAddMeal,
+  // ✅ Destructure the new props
+  editingId,
+  setEditingId,
+  inputRefs,
+  isKeyboardVisible,
+  markDirty
+}: MealPlanViewProps) {
 
-  const sections = useMemo(() => {
-    return DAYS_OF_WEEK.map(day => {
-      const mealsForDay = meals.filter(meal => meal.dayOfWeek === day);
-      return {
-        title: day,
-        data: mealsForDay,
-      };
+  const sortedMeals = useMemo(() => {
+    return [...meals].sort((a, b) => {
+      const aHasDay = a.dayOfWeek && dayOrder.has(a.dayOfWeek);
+      const bHasDay = b.dayOfWeek && dayOrder.has(b.dayOfWeek);
+
+      if (aHasDay && !bHasDay) return -1; // a comes first
+      if (!aHasDay && bHasDay) return 1;  // b comes first
+      
+      if (aHasDay && bHasDay) {
+        // Both have days, sort by day of the week
+        return dayOrder.get(a.dayOfWeek!)! - dayOrder.get(b.dayOfWeek!)!;
+      }
+      
+      // Neither have days, sort alphabetically by name
+      return a.name.localeCompare(b.name);
     });
-  }, [meals, items]);
-
-  const renderMeal = ({ item: meal }: { item: Meal }) => {
-    const ingredients = items.filter(i => i.mealId === meal.id);
-    return (
-      <View style={styles.mealCard}>
-        <Text style={styles.mealName}>{meal.name}</Text>
-        {ingredients.map(ing => (
-          <Text key={ing.id} style={styles.ingredientText}>- {ing.text}</Text>
-        ))}
-        <View style={styles.addIngredientContainer}>
-          <TextInput
-            style={styles.ingredientInput}
-            placeholder="+ Add ingredient"
-            value={newIngredientText[meal.id] || ''}
-            onChangeText={(text) => setNewIngredientText(prev => ({ ...prev, [meal.id]: text }))}
-            onSubmitEditing={() => {
-              if (newIngredientText[meal.id]) {
-                onAddIngredient(meal, newIngredientText[meal.id]);
-                setNewIngredientText(prev => ({ ...prev, [meal.id]: '' })); // Clear input
-              }
-            }}
-          />
-        </View>
-      </View>
-    );
-  };
+  }, [meals]);
 
   return (
-    <SectionList
-      sections={sections}
-      keyExtractor={(item) => item.id}
-      renderItem={renderMeal}
-      renderSectionHeader={({ section: { title, data } }) => (
-        <View style={styles.dayHeader}>
-          <Text style={styles.dayTitle}>{title}</Text>
-          {data.length === 0 && (
-            <TouchableOpacity onPress={() => onAddMeal(title as Meal['dayOfWeek'])}>
-              <Text style={styles.addMealText}>+ Add Meal</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-      renderSectionFooter={({ section: { title, data } }) => {
-        // Show "Add another meal" button if there's at least one meal for the day
-        if (data.length > 0) {
-          return (
-            <TouchableOpacity style={styles.addAnotherMealButton} onPress={() => onAddMeal(title as Meal['dayOfWeek'])}>
-              <Text style={styles.addMealText}>+ Add Another Meal</Text>
-            </TouchableOpacity>
-          );
-        }
-        return null;
-      }}
-      contentContainerStyle={{ padding: 10 }}
-      stickySectionHeadersEnabled={false}
-    />
+    <>
+     { sortedMeals.length == 0 && 
+      <View style={styles.emptyMealsContainer}>
+        <Text style={styles.emptyMealsText}>Let's get cooking!</Text>
+        <TouchableOpacity 
+            style={styles.addMealButton}
+            onPress={onAddMeal}>
+            <Text style={styles.addMealText}>+ Add Meal</Text>
+        </TouchableOpacity>
+      </View>
+     }
+      <FlatList
+        data={sortedMeals}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item: meal }) => (
+          <MealCard
+            meal={meal}
+            allItems={items}
+            setAllItems={setAllItems}
+            onUpdateMeal={onUpdateMeal}
+            onDeleteMeal={onDeleteMeal}
+            // ✅ Pass the props down to each MealCard
+            editingId={editingId}
+            setEditingId={setEditingId}
+            inputRefs={inputRefs}
+            isKeyboardVisible={isKeyboardVisible}
+            markDirty={markDirty}
+          />
+        )}
+        contentContainerStyle={styles.container}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  dayHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 15, marginBottom: 5 },
-  dayTitle: { fontSize: 18, fontWeight: 'bold' },
-  addMealText: { color: '#007AFF', fontSize: 14 },
-  addAnotherMealButton: { alignSelf: 'flex-start', paddingVertical: 5 },
-  mealCard: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 8, marginBottom: 10 },
-  mealName: { fontWeight: '600', fontSize: 16, marginBottom: 5 },
-  ingredientText: { color: '#333', marginLeft: 5 },
-  addIngredientContainer: { marginTop: 8 },
-  ingredientInput: { fontSize: 14, color: '#555', paddingVertical: 4 },
+  container: {
+    padding: 10,
+  },
+  emptyMealsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 100
+  },
+  emptyMealsText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: 'grey'
+
+  },
+  addMealButton: { paddingVertical: 5 },
+  addMealText: { color: '#007AFF', fontSize: 16, textAlign: 'center'  }
 });

@@ -1,6 +1,7 @@
 import MealPlanView from '@/components/MealPlanView';
 import { useLists } from '@/context/ListContext';
 import { Item, List, ListView, Meal } from '@/types/types';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { LexoRank } from 'lexorank';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -17,7 +18,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import { categorizeList, createMeal, listenToList, updateList } from '../../utils/api';
+import { categorizeList, listenToList, updateList } from '../../utils/api';
 
 
 export default function ListScreen() {
@@ -53,8 +54,8 @@ export default function ListScreen() {
 
       const rawItems = Array.isArray(list.items) ? list.items : [];
       const withOrder = rawItems
-        .map((item: Item) => ({ ...item, order: item.order ?? LexoRank.middle().toString() }))
-        .sort((a: Item, b: Item) => a.order.localeCompare(b.order));
+        .map((item: Item) => ({ ...item, listOrder: item.listOrder ?? LexoRank.middle().toString() }))
+        .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
 
       // optional: avoid pointless state updates (prevents cursor weirdness)
       setItems(prev => {
@@ -63,7 +64,7 @@ export default function ListScreen() {
           p.id === withOrder[i].id &&
           p.text === withOrder[i].text &&
           p.checked === withOrder[i].checked &&
-          p.order === withOrder[i].order &&
+          p.listOrder === withOrder[i].listOrder &&
           p.isSection === withOrder[i].isSection
         );
         if (sameAll) return prev;
@@ -73,7 +74,7 @@ export default function ListScreen() {
             id: uuid.v4() as string,
             text: '',
             checked: false,
-            order: LexoRank.middle().toString(),
+            listOrder: LexoRank.middle().toString(),
             isSection: false,
           }];
         }
@@ -137,15 +138,34 @@ export default function ListScreen() {
     }, 0);
   };
 
-  const handleAddMeal = async (day: Meal['dayOfWeek']) => {
+  const handleAddMeal = () => {
     if (!groupId || !selectedList) return;
-    try {
-      const newMeal = await createMeal(groupId, selectedList.id, day);
-      setMeals(prev => [...prev, newMeal]);
-      markDirty();
-    } catch (err) {
-      console.error("Failed to create meal", err);
-    }
+    
+    // Note: In a real app, the `createMeal` API call would happen here
+    // For now, we'll create it client-side to demonstrate the UI.
+    const newMeal: Meal = {
+      id: uuid.v4() as string,
+      listId: selectedList.id,
+      name: '', // Default name
+      // dayOfWeek is optional and thus omitted
+    };
+
+    setMeals(prev => [...prev, newMeal]);
+    setEditingId(newMeal.id);
+    markDirty(); // Trigger debounced save
+  };
+
+  // ✅ NEW: Handler to update a meal
+  const handleUpdateMeal = (mealId: string, updates: Partial<Meal>) => {
+    setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
+    markDirty();
+  };
+  
+  // ✅ NEW: Handler to delete a meal and its associated items
+  const handleDeleteMeal = (mealId: string) => {
+    setMeals(prev => prev.filter(meal => meal.id !== mealId));
+    setItems(prev => prev.filter(item => item.mealId !== mealId)); // Also remove ingredients
+    markDirty();
   };
 
    const addItemAfter = (id: string) => {
@@ -154,9 +174,9 @@ export default function ListScreen() {
     
     const index = items.findIndex(i => i.id === id);
     if (index === -1) return;
-    const current = LexoRank.parse(items[index].order);
-    const next = items[index + 1] ? LexoRank.parse(items[index + 1].order) : current.genNext();
-    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, order: current.between(next).toString(), isSection: false };
+    const current = LexoRank.parse(items[index].listOrder);
+    const next = items[index + 1] ? LexoRank.parse(items[index + 1].listOrder) : current.genNext();
+    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: current.between(next).toString(), isSection: false };
     
     const updated = [...items];
     updated.splice(index + 1, 0, newItem);
@@ -181,7 +201,7 @@ export default function ListScreen() {
         id: uuid.v4() as string,
         text: '',
         checked: false,
-        order: LexoRank.middle().toString(),
+        listOrder: LexoRank.middle().toString(),
         isSection: false,
       };
       setItems([placeholderItem]);
@@ -224,8 +244,8 @@ export default function ListScreen() {
     // This function now only runs if there is already a selected list.
     if (!selectedList) return;
 
-    const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].order) : LexoRank.middle();
-    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, order: lastOrder.genNext().toString(), isSection: false };
+    const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].listOrder) : LexoRank.middle();
+    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: lastOrder.genNext().toString(), isSection: false };
     const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
     setItems(newItems);
     setEditingId(newItem.id);
@@ -241,7 +261,7 @@ export default function ListScreen() {
       id: uuid.v4() as string,
       text: ingredientText,
       checked: false,
-      order: LexoRank.middle().toString(), // You'll want better ranking logic
+      listOrder: LexoRank.middle().toString(), // You'll want better ranking logic
       isSection: false,
       mealId: meal.id, // ✅ Link it!
     };
@@ -279,9 +299,16 @@ export default function ListScreen() {
           blurOnSubmit={false}
           returnKeyType="done"
         />
-        {isEditing && (
+        { item.mealId && (
+          <Text style={ styles.mealName }>{meals.find(m => m.id === item.mealId)?.name || ''}</Text>
+        )}
+        {isEditing ? (
           <TouchableOpacity onPress={() => deleteItem(item.id)} style={styles.clearButton}>
             <Text style={styles.clearText}>✕</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity style={styles.clearButton}>
+            <Text style={styles.clearText}></Text>
           </TouchableOpacity>
         )}
       </View>
@@ -301,43 +328,69 @@ export default function ListScreen() {
         keyboardVerticalOffset={100}
       >
         { selectedView == ListView.GroceryList ? (
-          <DraggableFlatList
-            data={items}
-            onDragEnd={({ data }) => { setItems(reRankItems(data)); markDirty(); }}
-            keyExtractor={item => item.id}
-            renderItem={renderItem}
-            keyboardDismissMode="interactive"
-            keyboardShouldPersistTaps="handled"
-          />
+          <>
+            {items.length === 0 && (
+              <TouchableOpacity 
+                  style={styles.addFirstIngredientButton}
+                  onPress={() => handleAddItem()}>
+                  <Text style={styles.addIngredientText}>+ Add Item</Text>
+              </TouchableOpacity>
+            )}
+            <DraggableFlatList
+              data={items}
+              onDragEnd={({ data }) => { setItems(reRankItems(data)); markDirty(); }}
+              keyExtractor={item => item.id}
+              renderItem={renderItem}
+              keyboardDismissMode="interactive"
+              keyboardShouldPersistTaps="handled"
+            />
+          </>
+          
         ) : (
           <MealPlanView
             meals={meals}
-            items={items} // ✅ Pass down all items
+            items={items}
+            setAllItems={setItems}
+            onUpdateMeal={handleUpdateMeal}
+            onDeleteMeal={handleDeleteMeal}
             onAddMeal={handleAddMeal}
-            onAddIngredient={handleAddIngredientToMeal} // Pass the handler
+            // ✅ Pass down the required props
+            editingId={editingId}
+            setEditingId={setEditingId}
+            inputRefs={inputRefs}
+            isKeyboardVisible={isKeyboardVisible}
+            markDirty={markDirty}
           />
         )}
       </KeyboardAvoidingView>
 
       {/* BUTTON ROW */}
       <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.actionButton} onPress={handleAddItem}>
-          <Text style={styles.buttonText}>+ Item</Text>
-        </TouchableOpacity>
-        {selectedView == ListView.GroceryList && 
-          <>
-            <TouchableOpacity style={styles.actionButton}>
-              <Text style={styles.buttonText}>+ Section</Text>
+        {selectedView === ListView.MealPlan ? (
+            <TouchableOpacity style={styles.actionButton} onPress={handleAddMeal}>
+              <Ionicons name="add-circle" size={18} color="#666" />
+              <Text style={styles.buttonText}>Add Meal</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionButton, isCategorizing && { opacity: 0.5 }]}
-              onPress={handleAutoCategorize}
-              disabled={isCategorizing || !selectedList}
-            >
-              <Text style={styles.buttonText}>{isCategorizing ? 'Categorizing…' : 'Auto-Categorize'}</Text>
-            </TouchableOpacity>
-          </>
-        }
+        ) : (
+            <>
+                <TouchableOpacity style={styles.actionButton} onPress={handleAddItem}>
+                  <Ionicons name="add-circle" size={18} color="#666" />
+                  <Text style={styles.buttonText}>Item</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionButton}>
+                  <Ionicons name="add-circle" size={18} color="#666" />
+                  <Text style={styles.buttonText}>Section</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.actionButton, isCategorizing && { opacity: 0.5 }]}
+                    onPress={handleAutoCategorize}
+                    disabled={isCategorizing || !selectedList}
+                >
+                  <Ionicons name="sparkles" size={18} color="#666" />
+                  <Text style={[styles.buttonText, { marginLeft: 8 }]}>{isCategorizing ? 'Categorizing…' : 'Categorize'}</Text>
+                </TouchableOpacity>
+            </>
+        )}
       </View>
     </View>
   );
@@ -349,12 +402,15 @@ const styles = StyleSheet.create({
   dragHandle: { width: 40, alignItems: 'center', justifyContent: 'center' },
   dragIcon: { fontSize: 18 },
   checkbox: { width: 24, height: 24, marginHorizontal: 10, borderWidth: 1, borderColor: '#999', alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
-  editInput: { fontSize: 16, flex: 1, paddingVertical: 0, borderWidth: 0, borderColor: 'transparent' },
+  editInput: { fontSize: 16, flex: 1, paddingRight: 40, paddingVertical: 0, borderWidth: 0, borderColor: 'transparent' },
   checked: { textDecorationLine: 'line-through', color: '#999' },
   clearButton: { paddingHorizontal: 8, paddingVertical: 4 },
-  clearText: { fontSize: 16, color: '#999' },
+  clearText: { fontSize: 16, color: '#999', width: 15 },
   sectionText: { fontWeight: 'bold', fontSize: 16 },
   buttonRow: { flexDirection: 'row', justifyContent: 'flex-start', gap: 8, padding: 16, borderTopWidth: 1, borderColor: '#eee', backgroundColor: '#fff' },
-  actionButton: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 4 },
-  buttonText: { fontSize: 14, color: '#444' },
+  actionButton: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 4, flexDirection:'row', alignItems:'center', justifyContent:'center' },
+  buttonText: { fontSize: 16, color: '#444', marginLeft:5, fontWeight: 'bold'  },
+  addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
+  addIngredientText: { color: '#007AFF', fontSize: 16 },
+  mealName: {fontStyle: 'italic', color: 'grey', fontSize: 12, textAlign: 'right', paddingRight:20}
 });
