@@ -14,6 +14,8 @@ const openai = new OpenAI({
   apiKey: Bun.env.OPENAI_API_KEY
 });
 
+// TODO: CHECK DB BEFORE LLM QUERY
+
 // POST /api/lists/categorize/:id
 route.post('/', async (c) => {
   const id = c.req.param('id');
@@ -25,35 +27,50 @@ route.post('/', async (c) => {
   const list = snap.val();
   if (!list) return c.text('List not found', 404);
 
-  // Extract raw item texts (skip existing sections)
-  const rawItems: string[] = Array.isArray(list.items)
-    ? list.items
-        .filter((i: any) => !i.isSection)
-        .map((i: any) => i.text)
+  // ✅ 1. Get the FULL original items to preserve their data (id, checked, mealId, etc.)
+  const originalItems = Array.isArray(list.items)
+    ? list.items.filter((i: any) => !i.isSection)
     : [];
+  
+  const itemTextsForAI = originalItems.map((i: any) => i.text);
 
-  // Build LLM prompt
+  // If there are no items to categorize, return the original list
+  if (itemTextsForAI.length === 0) {
+    return c.json(list.items || []);
+  }
+  
+  // ✅ 2. Create a lookup map to easily find original items by their text.
+  // This handles cases where you might have duplicate item names (e.g., "Milk" twice).
+  const itemMap = new Map<string, any[]>();
+  for (const item of originalItems) {
+    const key = item.text.toLowerCase(); // Use lowercase for case-insensitive matching
+    if (!itemMap.has(key)) {
+      itemMap.set(key, []);
+    }
+    itemMap.get(key)?.push(item);
+  }
+
+  // Build LLM prompt (remains the same)
   const prompt = [
-    `Group items:${JSON.stringify(rawItems)} into sections;`,
+    `Group items:${JSON.stringify(itemTextsForAI)} into sections;`,
     `Return only raw JSON—no markdown, no code fences—of the form`,
     `{"sections":[{"name":string,"items":[string]}]}.`,
-    `Use sections:Produce,Meat & Poultry,Seafood,Deli,Bakery,Dairy & Eggs,Frozen Foods,Pantry,Canned Goods,Baking,Beverages,Snacks & Candy,Health & Beauty,Household Essentials,Pet Supplies,International,Floral,Alcohol`
+    `Use sections:Produce,Meat & Poultry,Seafood,Deli,Bakery,Dairy & Eggs,Frozen Foods,Pantry,Canned Goods,Baking,Beverages,Snacks & Candy,Health & Beauty,Household Essentials,Pet Supplies,International,Floral,Alcohol.`,
+    `Only include sections that contain one or more items from the provided list.`
   ].join(' ');
   
-  // Call the OpenAI API
+  // Call the OpenAI API (remains the same)
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [{ role: 'user', content: prompt }],
   });
 
-  // Safely extract content
   const content = completion.choices?.[0]?.message?.content;
   if (!content) {
     console.error('LLM returned empty content');
     return c.text('Categorization failed: empty response', 500);
   }
-  console.log('LLM response:', content);
-  // Parse the JSON response
+
   let parsed: { sections: { name: string; items: string[] }[] };
   try {
     parsed = JSON.parse(content);
@@ -62,30 +79,43 @@ route.post('/', async (c) => {
     return c.text('Categorization failed: invalid JSON', 500);
   }
 
-  // Rebuild `items` array with sections + ranked items
+  // ✅ Guard against empty sections returned by the AI
+  const nonEmptySections = parsed.sections.filter(
+    sec => Array.isArray(sec.items) && sec.items.length > 0
+  );
+
+  // ✅ 3. Rebuild the `newItems` array by finding original items and updating their listOrder
   let rank = LexoRank.middle();
   const newItems: any[] = [];
-  for (const sec of parsed.sections) {
-    // Section header
+  for (const sec of nonEmptySections) {
+    // Add new section header
     newItems.push({
       id: uuid(),
       text: sec.name,
       checked: false,
       isSection: true,
-      order: rank.toString(),
+      listOrder: rank.toString(), // Use listOrder
     });
     rank = rank.genNext();
 
-    // Individual items
+    // Find and place original items under the new section
     for (const text of sec.items) {
-      newItems.push({
-        id: uuid(),
-        text,
-        checked: false,
-        isSection: false,
-        order: rank.toString(),
-      });
-      rank = rank.genNext();
+      const key = text.toLowerCase();
+      const matchingItems = itemMap.get(key);
+      
+      // If a match is found, take the first one off the list and use it
+      if (matchingItems && matchingItems.length > 0) {
+        const originalItem = matchingItems.shift(); // Use shift() to handle duplicates correctly
+        newItems.push({
+          ...originalItem, // <-- This preserves id, text, checked, mealId, mealOrder, etc.
+          listOrder: rank.toString(), // <-- Only the listOrder is updated
+        });
+        rank = rank.genNext();
+      } else {
+        // This can happen if the AI hallucinates an item that wasn't in the original list.
+        // It's safest to just log it and move on.
+        console.warn(`AI returned item "${text}" which was not in the original list or was a duplicate.`);
+      }
     }
   }
 
