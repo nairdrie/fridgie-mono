@@ -58,15 +58,6 @@ export default function ListScreen() {
 
       // optional: avoid pointless state updates (prevents cursor weirdness)
       setItems(prev => {
-        // if(prev.length == 0) {
-        //   return [{
-        //     id: uuid.v4() as string,
-        //     text: '',
-        //     checked: false,
-        //     order: LexoRank.middle().toString(),
-        //     isSection: false,
-        //   }];
-        // }
         const sameLength = prev.length === withOrder.length;
         const sameAll = sameLength && prev.every((p, i) =>
           p.id === withOrder[i].id &&

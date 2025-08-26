@@ -4,17 +4,25 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  Dimensions,
+  FlatList,
   LayoutChangeEvent,
+  Platform,
   Pressable,
   SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
+import Modal from 'react-native-modal';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { getWeekLabel } from '../utils/date';
 import UserProfile from './UserProfile';
+
+const DEVICE_HEIGHT =
+  Dimensions.get('window').height + (Platform.OS === 'android' ? (StatusBar?.currentHeight ?? 0) : 0);
 
 // TODO: The android top statusbar is hidden? 
 export default function ListHeader() {
@@ -24,6 +32,7 @@ export default function ListHeader() {
 
  // State to hold the width of a single segment for the animation
   const [segmentWidth, setSegmentWidth] = useState(0);
+  
 
   const handleSelectList = (list: List) => {
     setModalVisible(false);
@@ -53,49 +62,96 @@ export default function ListHeader() {
     return <></>;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.headerLeft}>
-          {/* {router.canGoBack() && (
-            <TouchableOpacity onPress={() => router.back()} style={styles.backNav}>
-              <Ionicons name="chevron-back" size={28} color="#007AFF" />
-              <Text style={styles.backNavText}>Groups</Text>
-            </TouchableOpacity>
-          )} */}
-          {/* WEEK SELECTOR */}
-          <View style={styles.weekSelector}>
-            <Pressable onPress={() => setModalVisible(true)} style={styles.weekSelectorInner}>
-              <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
-              <Text style={styles.subtitle}>
-                {new Date(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(new Date(selectedList.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-              </Text>
-            </Pressable>
+    <>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <View style={styles.headerLeft}>
+            {/* {router.canGoBack() && (
+              <TouchableOpacity onPress={() => router.back()} style={styles.backNav}>
+                <Ionicons name="chevron-back" size={28} color="#007AFF" />
+                <Text style={styles.backNavText}>Groups</Text>
+              </TouchableOpacity>
+            )} */}
+            {/* WEEK SELECTOR */}
+            <View style={styles.weekSelector}>
+              <Pressable onPress={() => setModalVisible(true)} style={styles.weekSelectorInner}>
+                <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
+                <Text style={styles.subtitle}>
+                  {new Date(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(new Date(selectedList.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                </Text>
+              </Pressable>
+            </View>
+            {/* VIEW SELECTOR */}
+            <View style={styles.viewSelector}>
+              {segmentWidth > 0 && (
+                <Animated.View style={[styles.activeSegmentBackground, { width: segmentWidth }, animatedStyle]} />
+              )}
+              <TouchableOpacity
+                style={styles.segment}
+                onLayout={onSegmentLayout} // Measure the first segment
+                onPress={() => selectView(ListView.GroceryList)}
+              >
+                <Text style={[styles.segmentText, selectedView === ListView.GroceryList && styles.segmentTextActive]}>List</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.segment}
+                onPress={() => selectView(ListView.MealPlan)}
+              >
+                <Text style={[styles.segmentText, selectedView === ListView.MealPlan && styles.segmentTextActive]}>Meals</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-          {/* VIEW SELECTOR */}
-          <View style={styles.viewSelector}>
-            {segmentWidth > 0 && (
-              <Animated.View style={[styles.activeSegmentBackground, { width: segmentWidth }, animatedStyle]} />
+          <View style={styles.headerRight}>
+            <UserProfile/>
+          </View>
+      </View>
+      </SafeAreaView>
+      <Modal
+        isVisible={isModalVisible}
+        onBackdropPress={() => setModalVisible(false)}
+        onBackButtonPress={() => setModalVisible(false)}   // Android back
+        swipeDirection="down"
+        onSwipeComplete={() => setModalVisible(false)}
+        backdropOpacity={0.4}
+        style={styles.modal}               // { justifyContent: 'flex-end', margin: 0 }
+        statusBarTranslucent               // Android: draw under status bar
+        coverScreen                        // ensure full-screen overlay (default true, explicit here)
+        deviceHeight={DEVICE_HEIGHT}       // avoids being “short” inside a custom header
+        useNativeDriver
+        useNativeDriverForBackdrop
+      >
+        <View style={styles.sheet}>
+          {/* little grabber for UX */}
+          <View style={{ alignItems: 'center', paddingBottom: 8 }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0E0E0' }} />
+          </View>
+
+          <Text style={styles.sheetTitle}>Select a Week</Text>
+
+          <FlatList
+            data={allLists}
+            keyExtractor={(list) => list.id}
+            contentContainerStyle={{ paddingBottom: 16 }}
+            renderItem={({ item }) => (
+              <TouchableOpacity onPress={() => handleSelectList(item)} style={styles.weekItem}>
+                <View>
+                  <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
+                  <Text style={styles.weekRange}>
+                    {new Date(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
+                    {new Date(new Date(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
+                      undefined,
+                      { month: 'short', day: 'numeric' }
+                    )}
+                  </Text>
+                </View>
+              </TouchableOpacity>
             )}
-            <TouchableOpacity
-              style={styles.segment}
-              onLayout={onSegmentLayout} // Measure the first segment
-              onPress={() => selectView(ListView.GroceryList)}
-            >
-              <Text style={[styles.segmentText, selectedView === ListView.GroceryList && styles.segmentTextActive]}>List</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.segment}
-              onPress={() => selectView(ListView.MealPlan)}
-            >
-              <Text style={[styles.segmentText, selectedView === ListView.MealPlan && styles.segmentTextActive]}>Meals</Text>
-            </TouchableOpacity>
-          </View>
+            // If list is long, allow inside scroll without closing the sheet
+            // react-native-modal handles scroll/propagation well
+          />
         </View>
-        <View style={styles.headerRight}>
-          <UserProfile/>
-        </View>
-    </View>
-    </SafeAreaView>
+      </Modal>
+    </>
   );
 }
 

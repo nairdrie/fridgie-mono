@@ -43,7 +43,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
         if (error instanceof ApiError) {
           console.error("Failed to fetch lists:", error);
           if(error.status == 403) {
-            router.navigate('/groups');
+            router.navigate('/(tabs)/profile');
           }
         }
       } finally {
