@@ -14,7 +14,11 @@ const openai = new OpenAI({
   apiKey: Bun.env.OPENAI_API_KEY
 });
 
-// TODO: CHECK DB BEFORE LLM QUERY
+// Helper to normalize text for consistent cache keys
+const normalizeItemText = (text: string) => {
+  return text.toLowerCase().replace(/\s+/g, '');
+};
+
 
 // POST /api/lists/categorize/:id
 route.post('/', async (c) => {
@@ -50,71 +54,121 @@ route.post('/', async (c) => {
     itemMap.get(key)?.push(item);
   }
 
-  // Build LLM prompt (remains the same)
-  const prompt = [
-    `Group items:${JSON.stringify(itemTextsForAI)} into sections;`,
-    `Return only raw JSON—no markdown, no code fences—of the form`,
-    `{"sections":[{"name":string,"items":[string]}]}.`,
-    `Use sections:Produce,Meat & Poultry,Seafood,Deli,Bakery,Dairy & Eggs,Frozen Foods,Pantry,Canned Goods,Baking,Beverages,Snacks & Candy,Health & Beauty,Household Essentials,Pet Supplies,International,Floral,Alcohol.`,
-    `Only include sections that contain one or more items from the provided list.`
-  ].join(' ');
+  const cacheRef = adminRtdb.ref('itemCategoryCache');
+  const cacheSnap = await cacheRef.once('value');
+  const cache: { [key: string]: string } = cacheSnap.val() || {};
+
+  const itemsForAI: string[] = [];
+  const allCategorizedItems = new Map<string, string[]>(); // Map<Category, ItemText[]>
+
+  // 1. Partition items into cached (known) and uncached (unknown)
+  for (const item of originalItems) {
+    const normalizedText = normalizeItemText(item.text);
+    const cachedCategory = cache[normalizedText];
+
+    if (cachedCategory) {
+      // Item category is known, add it to our categorized map
+      if (!allCategorizedItems.has(cachedCategory)) {
+        allCategorizedItems.set(cachedCategory, []);
+      }
+      allCategorizedItems.get(cachedCategory)?.push(item.text);
+    } else {
+      // Item category is unknown, add it to the list for the LLM
+      itemsForAI.push(item.text);
+    }
+  }
+
+  // 2. Conditionally call the LLM only for unknown items
+  if (itemsForAI.length > 0) {
+    const prompt = [
+      `Group items:${JSON.stringify(itemsForAI)} into sections;`,
+      `Return only raw JSON—no markdown, no code fences—of the form`,
+      `{"sections":[{"name":string,"items":[string]}]}.`,
+      `Use sections:Produce,Meat & Poultry,Seafood,Deli,Bakery,Dairy & Eggs,Frozen Foods,Pantry,Canned Goods,Baking,Beverages,Snacks & Candy,Health & Beauty,Household Essentials,Pet Supplies,International,Floral,Alcohol.`,
+      `Only include sections that contain one or more items from the provided list.`
+    ].join(' ');
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = completion.choices?.[0]?.message?.content;
+    if (!content) {
+      console.error('LLM returned empty content');
+      return c.text('Categorization failed: empty response', 500);
+    }
+
+    let parsed: { sections: { name: string; items: string[] }[] };
+    try {
+      parsed = JSON.parse(content);
+    } catch (err) {
+      console.error('Failed to parse LLM JSON:', err);
+      return c.text('Categorization failed: invalid JSON', 500);
+    }
+
+    const cacheUpdates: { [key: string]: string } = {};
+
+    // 3. Process LLM response, merge results, and prepare cache updates
+    for (const sec of parsed.sections) {
+      if (Array.isArray(sec.items) && sec.items.length > 0) {
+        // Merge with existing categories
+        if (!allCategorizedItems.has(sec.name)) {
+          allCategorizedItems.set(sec.name, []);
+        }
+        const existingItems = allCategorizedItems.get(sec.name)!;
+        
+        for (const itemText of sec.items) {
+          existingItems.push(itemText);
+          // Prepare to update the cache for this new item
+          cacheUpdates[normalizeItemText(itemText)] = sec.name;
+        }
+      }
+    }
+
+    // 4. Update the cache in a single batch operation
+    if (Object.keys(cacheUpdates).length > 0) {
+      await cacheRef.update(cacheUpdates);
+    }
+  }
+  // highlight-end
   
-  // Call the OpenAI API (remains the same)
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: prompt }],
-  });
+  // --- Rebuild the List ---
+  // This logic now works with the combined results from both cache and LLM
 
-  const content = completion.choices?.[0]?.message?.content;
-  if (!content) {
-    console.error('LLM returned empty content');
-    return c.text('Categorization failed: empty response', 500);
-  }
-
-  let parsed: { sections: { name: string; items: string[] }[] };
-  try {
-    parsed = JSON.parse(content);
-  } catch (err) {
-    console.error('Failed to parse LLM JSON:', err);
-    return c.text('Categorization failed: invalid JSON', 500);
-  }
-
-  // ✅ Guard against empty sections returned by the AI
-  const nonEmptySections = parsed.sections.filter(
-    sec => Array.isArray(sec.items) && sec.items.length > 0
-  );
-
-  // ✅ 3. Rebuild the `newItems` array by finding original items and updating their listOrder
   let rank = LexoRank.middle();
   const newItems: any[] = [];
-  for (const sec of nonEmptySections) {
+  
+  // Sort sections alphabetically for a consistent user experience
+  const sortedCategories = Array.from(allCategorizedItems.keys()).sort();
+
+  for (const categoryName of sortedCategories) {
+    const itemsInSection = allCategorizedItems.get(categoryName)!;
+
     // Add new section header
     newItems.push({
       id: uuid(),
-      text: sec.name,
+      text: categoryName,
       checked: false,
       isSection: true,
-      listOrder: rank.toString(), // Use listOrder
+      listOrder: rank.toString(),
     });
     rank = rank.genNext();
 
     // Find and place original items under the new section
-    for (const text of sec.items) {
+    for (const text of itemsInSection) {
       const key = text.toLowerCase();
       const matchingItems = itemMap.get(key);
       
-      // If a match is found, take the first one off the list and use it
       if (matchingItems && matchingItems.length > 0) {
-        const originalItem = matchingItems.shift(); // Use shift() to handle duplicates correctly
+        const originalItem = matchingItems.shift(); // Handles duplicates
         newItems.push({
-          ...originalItem, // <-- This preserves id, text, checked, mealId, mealOrder, etc.
-          listOrder: rank.toString(), // <-- Only the listOrder is updated
+          ...originalItem,
+          listOrder: rank.toString(),
         });
         rank = rank.genNext();
       } else {
-        // This can happen if the AI hallucinates an item that wasn't in the original list.
-        // It's safest to just log it and move on.
-        console.warn(`AI returned item "${text}" which was not in the original list or was a duplicate.`);
+        console.warn(`Categorized item "${text}" could not be found in the original item map.`);
       }
     }
   }

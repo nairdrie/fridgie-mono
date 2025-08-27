@@ -4,6 +4,7 @@ import { initializeApp as initClientApp } from 'firebase/app'
 import { getDatabase as getClientDatabase } from 'firebase/database'
 import { getDatabase } from 'firebase-admin/database'
 import { readFileSync } from 'fs'
+import { getFirestore } from 'firebase-admin/firestore'
 
 const rtdbUrl = 'https://grocerease-5abbb-default-rtdb.firebaseio.com' // 👈 correct RTDB URL
 // --- Client SDK (for onValue, streaming)
@@ -28,3 +29,4 @@ if (!admin.apps.length) {
 
 export const adminRtdb = getDatabase(admin.app())
 export const adminAuth = admin.auth()
+export const fs = getFirestore('fridgie-db')
