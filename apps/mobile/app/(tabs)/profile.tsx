@@ -1,11 +1,13 @@
+import { useAuth } from '@/context/AuthContext';
 import { Group } from '@/types/types';
-import { createGroup, getGroups } from '@/utils/api';
+import { createGroup } from '@/utils/api';
 import { auth } from '@/utils/firebase';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   Button,
   FlatList,
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,34 +15,44 @@ import {
 } from 'react-native';
 
 
-export default function GroupsScreen() {
+export default function UserProfile() {
   const router = useRouter(); 
-  const [groups, setGroups] = useState<Group[]>([]);
-
-  useEffect(() => {
-    getGroups().then(setGroups);
-  }, []);
+  const { profile, loading, groups, selectGroup } = useAuth(); 
 
   const handleCreateGroup = async () => {
     const user = auth.currentUser;
     if (!user || user.isAnonymous) {
-      // if there’s no real user, send them to Login (or modal) first
-      router.push('/login' /* make sure this route exists */);
+      router.push('/login');
       return;
     }
 
-    // otherwise, proceed with creation
     try {
       const newGroup = await createGroup('New Group');
-      setGroups((prev) => [...prev, newGroup]);
+      // The `onAuthStateChanged` listener will handle refetching the groups,
+      // but for immediate feedback you might want to optimistically update the state.
+      // A full solution would add the new group to your `AuthContext` state.
     } catch (err) {
       console.error('failed to create group', err);
-      // you might show a toast or alert here
     }
   };
 
+  const navigateToList = (group: Group) => {
+    selectGroup(group); // ⬅️ Set the selected group in state
+    router.push('/list'); // ⬅️ Navigate to the list screen without passing a param
+  };
+
+
   return (
     <View style={styles.container}>
+      <View style={styles.profileContainer}>
+        {profile?.photoURL && (
+          <Image
+            source={{ uri: profile.photoURL }}
+            style={styles.profileImage}
+          />
+        )}
+        <Text style={styles.profileText}>Phone: {profile?.phoneNumber}</Text>
+      </View>
       <FlatList
         data={groups}
         keyExtractor={g => g.id}
@@ -68,6 +80,28 @@ export default function GroupsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
+  profileContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 12,
+  },
+  profileText: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#333',
+  },
   item: { padding: 12, borderBottomWidth: 1, borderColor: '#eee' },
   text: { fontSize: 16 },
 });

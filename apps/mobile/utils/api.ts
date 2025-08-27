@@ -39,7 +39,7 @@ async function authorizedFetch(
     const result = await signInAnonymously(auth)
     user = result.user
   }
-  const token = await getIdToken(user, /* forceRefresh= */ true)
+  const token = await getIdToken(user, true)
 
   const res = await fetch(input, {
     ...init,
@@ -192,12 +192,17 @@ export function listenToList(
 }
 
 // lib/api.ts
-export async function loginWithToken(idToken: string) {
+export async function loginWithToken(idToken: string, setUserProfile: (profile: any) => void) {
   const res = await fetch(`${BASE_URL}/authentication/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ idToken }),
   });
   if (!res.ok) throw new Error('Login failed');
+
+  const { user } = await res.json(); // ⬅️ Parse the user profile from the response
+  if (user) {
+    setUserProfile(user); // ⬅️ Pass it to the callback
+  }
 }
 

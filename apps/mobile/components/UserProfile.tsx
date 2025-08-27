@@ -1,3 +1,4 @@
+// TODO depricate
 import { auth } from '@/utils/firebase';
 import { useRouter } from 'expo-router';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';

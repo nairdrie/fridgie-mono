@@ -1,3 +1,5 @@
+// TODO: Loading state while we get the group and lists
+
 import MealPlanView from '@/components/MealPlanView';
 import { useLists } from '@/context/ListContext';
 import { Item, List, ListView, Meal } from '@/types/types';

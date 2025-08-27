@@ -28,7 +28,6 @@ import { auth, firebaseConfig } from '@/utils/firebase';
 import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import { useRouter } from 'expo-router';
 import Logo from '../components/Logo';
-import { loginWithToken } from '../utils/api';
 import { toE164 } from '../utils/utils';
 
 export default function LoginScreen() {
@@ -87,16 +86,16 @@ export default function LoginScreen() {
         await signInWithCredential(auth, phoneCredential);
       }
       
-      const finalUser = auth.currentUser;
-      if (finalUser) {
-        const idToken = await finalUser.getIdToken();
-        await loginWithToken(idToken);
-        if(router.canGoBack()) {
-          router.back();
-        } else {
-          router.push('/');
-        }
+      // const finalUser = auth.currentUser; // TODO MAYBE NOT NEEDED. IDEALLY THE AUTHCONTEXT AUTHSTATECHANGED SHOULD HANDLE THIS.
+      // if (finalUser) {
+        // const idToken = await finalUser.getIdToken();
+        // await loginWithToken(idToken);
+      if(router.canGoBack()) {
+        router.back();
+      } else {
+        router.push('/list');
       }
+      // }
     } catch (err: any) {
       // ✅ Use the correct error code and just show the modal
       if (err.code === 'auth/account-exists-with-different-credential' || err.code === 'auth/credential-already-in-use') {
@@ -119,12 +118,12 @@ export default function LoginScreen() {
       // This signs out the anonymous user and signs in the permanent one.
       const credential = await confirmationResult.confirm(code);
       if (credential.user) {
-        const idToken = await credential.user.getIdToken();
-        await loginWithToken(idToken);
+        // const idToken = await credential.user.getIdToken(); TODO same here? AUTHCONTEXT AUTHSTATECHANGED SHOULD HANDLE THIS.
+        // await loginWithToken(idToken);
         if(router.canGoBack()) {
           router.back();
         } else {
-          router.push('/');
+          router.push('/list');
         }
       }
     } catch (err: any) {

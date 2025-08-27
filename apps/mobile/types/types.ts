@@ -33,3 +33,11 @@ export enum ListView {
   GroceryList = 'list',
   MealPlan = 'plan'
 }
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  phoneNumber: string | null;
+  photoURL: string | null;
+  // Add other properties from your user document here
+}

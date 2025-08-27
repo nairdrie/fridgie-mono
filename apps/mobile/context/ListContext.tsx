@@ -1,7 +1,8 @@
-import { useGlobalSearchParams, useRouter } from 'expo-router'; // ✅ 1. Import the correct hook
+import { useRouter } from 'expo-router'; // ✅ 1. Import the correct hook
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { List, ListView } from '../types/types';
 import { ApiError, getLists } from '../utils/api';
+import { useAuth } from './AuthContext';
 
 interface ListContextType {
   groupId: string | undefined;
@@ -17,10 +18,8 @@ const ListContext = createContext<ListContextType | undefined>(undefined);
 
 export function ListProvider({ children }: { children: React.ReactNode }) {
   // ✅ 2. Use the global params hook instead of the local one
-  const params = useGlobalSearchParams(); 
   const router = useRouter();
-
-  const groupId = Array.isArray(params.groupId) ? params.groupId[0] : (params.groupId as string | undefined);
+  const { selectedGroup } = useAuth();
 
   const [allLists, setAllLists] = useState<List[]>([]);
   const [selectedList, setSelectedList] = useState<List | null>(null);
@@ -53,16 +52,16 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
 
     setIsLoading(true);
 
-    if (!groupId) {
+    if (!selectedGroup) {
       setAllLists([]);
       setSelectedList(null);
       setIsLoading(false);
       return;
     } 
     else {
-      fetchAllLists(groupId);
+      fetchAllLists(selectedGroup.id);
     }
-  }, [groupId]);
+  }, [selectedGroup]);
 
   const selectList = (list: List | null) => {
     setSelectedList(list);
@@ -72,7 +71,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
     setSelectedView(view);
   };
 
-  const value = { groupId, allLists, selectedList, selectList, selectedView, selectView, isLoading };
+  const value = { groupId: selectedGroup?.id, allLists, selectedList, selectList, selectedView, selectView, isLoading };
 
   return <ListContext.Provider value={value}>{children}</ListContext.Provider>;
 }
