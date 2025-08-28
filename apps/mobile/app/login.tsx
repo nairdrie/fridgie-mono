@@ -2,9 +2,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Button,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -26,6 +24,7 @@ import {
 import { useRecaptcha } from '@/context/RecaptchaContext';
 import { auth } from '@/utils/firebase';
 import { useRouter } from 'expo-router';
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import Logo from '../components/Logo';
 import { toE164 } from '../utils/utils';
 
@@ -124,9 +123,12 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.outerContainer}
+    <KeyboardAwareScrollView
+      enableOnAndroid={true} // makes sure Android scrolls too
+      extraScrollHeight={60} // bump focused input just above keyboard
+      keyboardOpeningTime={0} // avoid flicker
+      // behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      contentContainerStyle={styles.outerContainer}
     > 
       <Modal
         visible={showConflictModal} // Controlled by the new boolean state
@@ -195,7 +197,7 @@ export default function LoginScreen() {
         {error && <Text style={styles.error}>{error}</Text>}
       </View>
       
-    </KeyboardAvoidingView>
+    </KeyboardAwareScrollView>
   );
 }
 

@@ -14,14 +14,14 @@ import {
   Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 
 async function updateUserProfile(data: { name: string; photoURL: string }) {
@@ -145,7 +145,12 @@ export default function CompleteProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <KeyboardAwareScrollView
+          enableOnAndroid={true} // makes sure Android scrolls too
+          extraScrollHeight={60} // bump focused input just above keyboard
+          keyboardOpeningTime={0} // avoid flicker
+          // behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          contentContainerStyle={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>Welcome!</Text>
         <Text style={styles.subtitle}>Let's set up your profile.</Text>
@@ -215,7 +220,7 @@ export default function CompleteProfileScreen() {
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue</Text>}
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </KeyboardAwareScrollView>
   );
 }
 
