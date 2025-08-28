@@ -1,12 +1,12 @@
 export const defaultPhotoUrls =  [
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/banana.png?alt=media&token=2471e74e-1900-4fe5-9596-e87c59c7b14a',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/blueberry.png?alt=media&token=9afece36-8a7e-432c-8d85-1232f3fcc859',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/bread.png?alt=media&token=73b3c5fc-ef8a-4a29-86fb-811ee56f501b',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/broccoli.png?alt=media&token=2053886a-da8e-4f0a-96f3-0f9e926192c9',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/carrot.png?alt=media&token=cd4d5ab4-4447-4efe-aa8e-ce2ea9b2f4ad',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/egg.png?alt=media&token=47ce73b6-993a-4eb1-a604-0d4d1889dd44',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/eggplant.png?alt=media&token=4227bee7-1de5-434c-a7d0-a33dd57b244f',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/rigatoni.png?alt=media&token=2a422847-81ad-45e4-9951-5485ecdadad0',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/strawberry.png?alt=media&token=56f6156b-1dbd-4480-a6c8-205f0ac48e48',
-    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/tomato.png?alt=media&token=d45af5a5-c54f-41bd-b907-9ae575fbae04'
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/banana.png?alt=media&token=f526e5f1-787d-4aef-a49d-9a46bec49b10',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/blueberry.png?alt=media&token=9c240245-7406-4941-b952-d7deefc81106',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/bread.png?alt=media&token=70e4987f-4abe-4343-ab58-6454f0cf3cef',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/broccoli.png?alt=media&token=b9ea1eb9-cb43-4fa6-ad16-3f966cdee557',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/carrot.png?alt=media&token=d4be362c-fdf9-4796-80af-a5734d3911fa',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/egg.png?alt=media&token=c6ae9e8d-6c3a-4f2e-b861-4b2e9e3ff306',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/eggplant.png?alt=media&token=3bffba05-4623-4791-b8b1-f5cbb495791b',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/rigatoni.png?alt=media&token=f6e582ba-2d6d-4c2f-8728-8bc702864f88',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/strawberry.png?alt=media&token=8d02e3bf-d00f-4e3b-910f-e85ffdfd6986',
+    'https://firebasestorage.googleapis.com/v0/b/grocerease-5abbb.firebasestorage.app/o/tomato.png?alt=media&token=58ac15bd-e172-456b-beea-9803d888e6b5'
 ]

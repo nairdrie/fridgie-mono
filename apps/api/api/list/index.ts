@@ -48,7 +48,7 @@ route.get('/', async (c) => {
 
   // 2. Calculate the start dates for this week and next week
   const now = new Date()
-  const thisWeekStart = startOfWeek(now, { weekStartsOn: 1 }) // Monday
+  const thisWeekStart = startOfWeek(now, { weekStartsOn: 0 }) // Sunday
   const nextWeekStart = addWeeks(thisWeekStart, 1)
 
   // 3. Check if lists for these weeks already exist
