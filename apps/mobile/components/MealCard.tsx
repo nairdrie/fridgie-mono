@@ -3,10 +3,14 @@ import { Item, Meal } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
-import React, { useCallback, useMemo } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import React, { useCallback, useMemo, useState } from 'react';
+import { LayoutAnimation, Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, UIManager, View } from "react-native";
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const DAYS: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -39,6 +43,7 @@ export default function MealCard({
   markDirty
 }: MealCardProps) {
   const [isCollapsed, setIsCollapsed] = React.useState(false);
+  const [isDaySelectorVisible, setIsDaySelectorVisible] = useState(false);
 
   const placeholder = useMemo(() => {
     return mealPlaceholders[Math.floor(Math.random() * mealPlaceholders.length)];
@@ -58,11 +63,18 @@ export default function MealCard({
 
   // ✅ 2. Add a handler for selecting/deselecting a day
   const handleDaySelect = (day: Meal['dayOfWeek']) => {
-    // If the user taps the currently selected day, unassign it.
     const newDay = meal.dayOfWeek === day ? undefined : day;
     onUpdateMeal(meal.id, { dayOfWeek: newDay });
+    // Trigger animation and hide the selector
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setIsDaySelectorVisible(false);
+    markDirty();
   };
 
+  const toggleDaySelector = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setIsDaySelectorVisible(prev => !prev);
+  };
 
   // Handlers adapted from ListScreen to work within the context of a meal
   const handleUpdateIngredientText = (id: string, text: string) => {
@@ -185,22 +197,32 @@ export default function MealCard({
     <View style={styles.mealCard}>
         {/* The main content is now wrapped in a View to group the selector and header */}
       <View style={styles.mainContent}>
-        {/* ✅ 3. Add the Day Selector UI */}
-        <View style={styles.daySelectorContainer}>
-          {DAYS.map((day) => (
-            <TouchableOpacity
-              key={day}
-              style={[
-                styles.dayButton,
-                meal.dayOfWeek === day && styles.dayButtonActive, // Apply active style
-              ]}
-              onPress={() => handleDaySelect(day)}
-            >
-              <Text style={[styles.dayText, meal.dayOfWeek === day && styles.dayTextActive]}>
-                {day?.charAt(0)}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.dayPickerContainer}>
+          <TouchableOpacity onPress={toggleDaySelector} style={styles.dayPickerCollapsed}>
+            <Ionicons name="calendar-outline" size={18} color="#007AFF" />
+            {meal.dayOfWeek && !isDaySelectorVisible && (
+              <Text style={styles.selectedDayText}>{meal.dayOfWeek}</Text>
+            )}
+          </TouchableOpacity>
+
+          {isDaySelectorVisible && (
+            <View style={styles.daySelectorContainer}>
+              {DAYS.map((day) => (
+                <TouchableOpacity
+                  key={day}
+                  style={[
+                    styles.dayButton,
+                    meal.dayOfWeek === day && styles.dayButtonActive,
+                  ]}
+                  onPress={() => handleDaySelect(day)}
+                >
+                  <Text style={[styles.dayText, meal.dayOfWeek === day && styles.dayTextActive]}>
+                    {day?.charAt(0)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
         <View style={styles.mealHeader}>
             <TouchableOpacity onPress={() => setIsCollapsed(!isCollapsed)} style={styles.collapseButton}>
@@ -258,7 +280,7 @@ const styles = StyleSheet.create({
     daySelectorContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
-        marginBottom: 10,
+        alignItems: 'center',
         paddingHorizontal: 20, // Give some space on the sides
     },
     dayButton: {
@@ -268,6 +290,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#e9e9e9',
+        marginHorizontal: 2
     },
     dayButtonActive: {
         backgroundColor: '#007AFF',
@@ -289,5 +312,20 @@ const styles = StyleSheet.create({
     clearButton: { paddingHorizontal: 8 },
     clearText: { fontSize: 16, color: '#999' },
     addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
-    addIngredientText: { color: '#007AFF', fontSize: 16 }
+    addIngredientText: { color: '#007AFF', fontSize: 16 },
+    dayPickerContainer: {
+      flexDirection: 'row',
+      margin: 0,
+      padding: 0,
+      alignItems: 'center',
+    },
+    dayPickerCollapsed: {
+      flexDirection: 'row',
+      alignItems: 'center'
+    },
+    selectedDayText: {
+      marginLeft: 8,
+      fontSize: 16,
+      color: '#007AFF',
+    }
 });

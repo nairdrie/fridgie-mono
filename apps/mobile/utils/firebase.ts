@@ -2,6 +2,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { browserLocalPersistence, getReactNativePersistence, initializeAuth } from 'firebase/auth'; // TODO: this is just a TS error, it compiles and works
+import { getDatabase } from 'firebase/database';
+import { getStorage } from 'firebase/storage';
 import { Platform } from 'react-native';
 
 export const firebaseConfig = {
@@ -23,6 +25,7 @@ const getFirebaseApp = () => {
   return getApp();
 };
 
+
 const app = getFirebaseApp();
 
 console.log(`INITIALIZING AUTH FOR ${Platform.OS}`)
@@ -32,7 +35,10 @@ const auth = initializeAuth(app, {
     : getReactNativePersistence(AsyncStorage), // Use AsyncStorage for native
 });
 
+const db = getDatabase(app);
+
+const storage = getStorage(app);
 
 // Export the initialized services
-export { app, auth };
+export { app, auth, db, storage };
 

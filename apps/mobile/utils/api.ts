@@ -192,7 +192,8 @@ export function listenToList(
 }
 
 // lib/api.ts
-export async function loginWithToken(idToken: string, setUserProfile: (profile: any) => void) {
+// export async function loginWithToken(idToken: string, setUserProfile: (profile: any) => void) {
+export async function loginWithToken(idToken: string) {
   const res = await fetch(`${BASE_URL}/authentication/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -200,9 +201,10 @@ export async function loginWithToken(idToken: string, setUserProfile: (profile: 
   });
   if (!res.ok) throw new Error('Login failed');
 
-  const { user } = await res.json(); // ⬅️ Parse the user profile from the response
-  if (user) {
-    setUserProfile(user); // ⬅️ Pass it to the callback
-  }
+  // const { user } = await res.json(); // ⬅️ Parse the user profile from the response
+  // if (user) {
+    // setUserProfile(user); // ⬅️ Pass it to the callback
+  // }
+  await res.json();
 }
 

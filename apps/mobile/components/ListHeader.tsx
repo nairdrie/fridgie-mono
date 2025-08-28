@@ -19,12 +19,11 @@ import {
 import Modal from 'react-native-modal';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { getWeekLabel } from '../utils/date';
-import UserProfile from './UserProfile';
+import GroupIndicator from './GroupIndicator';
 
 const DEVICE_HEIGHT =
   Dimensions.get('window').height + (Platform.OS === 'android' ? (StatusBar?.currentHeight ?? 0) : 0);
 
-// TODO: The android top statusbar is hidden? 
 export default function ListHeader() {
   const router = useRouter();
   const { allLists, selectedList, selectList, selectedView, selectView } = useLists();
@@ -40,9 +39,9 @@ export default function ListHeader() {
   };
   
   // This function captures the width of the segment on layout
-  const onSegmentLayout = (event: LayoutChangeEvent) => {
+  const onSelectorLayout = (event: LayoutChangeEvent) => {
     const { width } = event.nativeEvent.layout;
-    setSegmentWidth(width);
+    setSegmentWidth(width / 2);
   };
   
   // Animated style for the sliding background
@@ -50,7 +49,7 @@ export default function ListHeader() {
     return {
       transform: [
         {
-          translateX: withTiming(selectedView === ListView.GroceryList ? 0 : segmentWidth, {
+          translateX: withTiming(selectedView === ListView.GroceryList ? 0 : segmentWidth-4, {
             duration: 250, // Animation speed
           }),
         },
@@ -81,14 +80,15 @@ export default function ListHeader() {
                 </Text>
               </Pressable>
             </View>
-            {/* VIEW SELECTOR */}
-            <View style={styles.viewSelector}>
+          </View>
+          <View style={styles.headerCenter}>
+              {/* VIEW SELECTOR */}
+            <View style={styles.viewSelector} onLayout={onSelectorLayout}>
               {segmentWidth > 0 && (
                 <Animated.View style={[styles.activeSegmentBackground, { width: segmentWidth }, animatedStyle]} />
               )}
               <TouchableOpacity
                 style={styles.segment}
-                onLayout={onSegmentLayout} // Measure the first segment
                 onPress={() => selectView(ListView.GroceryList)}
               >
                 <Text style={[styles.segmentText, selectedView === ListView.GroceryList && styles.segmentTextActive]}>List</Text>
@@ -102,7 +102,7 @@ export default function ListHeader() {
             </View>
           </View>
           <View style={styles.headerRight}>
-            <UserProfile/>
+            <GroupIndicator />
           </View>
       </View>
       </SafeAreaView>
@@ -180,8 +180,13 @@ const styles = StyleSheet.create({
     fontSize: 16
   },
   headerLeft: {
+    width:'33.33%'
+  },
+  headerCenter: {
+    width:'33.33%'
   },
   headerRight: {
+    width:'33.33%'
   },
   weekSelector: {
 
@@ -200,7 +205,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: {
-    fontSize: 24, // Bigger title
+    fontSize: 22, // Bigger title
     fontWeight: 'bold',
     paddingTop: 4,
   },
@@ -214,7 +219,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   segmentText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
     color: '#8e8e93', // Grayer unselected text
   },

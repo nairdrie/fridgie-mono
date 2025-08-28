@@ -24,7 +24,7 @@ import { categorizeList, listenToList, updateList } from '../../utils/api';
 
 
 export default function ListScreen() {
-  const { selectedList, isLoading, groupId, selectedView } = useLists();
+  const { selectedList, isLoading, selectedGroup, selectedView } = useLists();
   
   const [meals, setMeals] = useState<Meal[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -44,13 +44,13 @@ export default function ListScreen() {
 
   // EFFECT 1: Handles ALL incoming data (Initial Fetch + Real-time Updates)
   useEffect(() => {
-    if (!selectedList || !groupId) {
+    if (!selectedList || !selectedGroup) {
       setItems([]);
       setMeals([]);
       return;
     }
 
-    const unsubscribe = listenToList(groupId, selectedList.id, (list: List) => {
+    const unsubscribe = listenToList(selectedGroup.id, selectedList.id, (list: List) => {
       // ignore server echoes while the user is actively typing
       if (Date.now() < dirtyUntilRef.current) return;
 
@@ -87,16 +87,16 @@ export default function ListScreen() {
     });
 
     return () => unsubscribe();
-  }, [selectedList, groupId]); // note: no need to depend on dirtyUntil now
+  }, [selectedList, selectedGroup]); // note: no need to depend on dirtyUntil now
 
   // EFFECT 2: Handles ALL outgoing data (Debounced Saving)
   useEffect(() => {
-    if (!selectedList?.id || !groupId) return;
+    if (!selectedList?.id || !selectedGroup) return;
     const timeout = setTimeout(() => {
-      updateList(groupId, selectedList.id, { items, meals: meals }).catch(console.error);
+      updateList(selectedGroup.id, selectedList.id, { items, meals: meals }).catch(console.error);
     }, 500);
     return () => clearTimeout(timeout);
-  }, [items, meals, selectedList?.id, groupId]);
+  }, [items, meals, selectedList?.id, selectedGroup]);
 
   // whenever editingId (or items) changes, ensure focus
   useEffect(() => {
@@ -141,7 +141,7 @@ export default function ListScreen() {
   };
 
   const handleAddMeal = () => {
-    if (!groupId || !selectedList) return;
+    if (!selectedGroup || !selectedList) return;
     
     // Note: In a real app, the `createMeal` API call would happen here
     // For now, we'll create it client-side to demonstrate the UI.
@@ -228,11 +228,11 @@ export default function ListScreen() {
   };
 
   const handleAutoCategorize = async () => {
-    if (!groupId || !selectedList?.id) return;
+    if (!selectedGroup || !selectedList?.id) return;
     setIsCategorizing(true);
     markDirty();
     try {
-      const newItems = await categorizeList(groupId, selectedList.id);
+      const newItems = await categorizeList(selectedGroup.id, selectedList.id);
       setItems(newItems);
       setEditingId('');
     } catch (err) {
@@ -242,12 +242,12 @@ export default function ListScreen() {
     }
   };
 
-  const handleAddItem = () => {
+  const handleAddItem = (isSection=false) => {
     // This function now only runs if there is already a selected list.
     if (!selectedList) return;
 
     const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].listOrder) : LexoRank.middle();
-    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: lastOrder.genNext().toString(), isSection: false };
+    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: lastOrder.genNext().toString(), isSection: isSection };
     const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
     setItems(newItems);
     setEditingId(newItem.id);
@@ -375,11 +375,11 @@ export default function ListScreen() {
             </TouchableOpacity>
         ) : (
             <>
-                <TouchableOpacity style={styles.actionButton} onPress={handleAddItem}>
+                <TouchableOpacity style={styles.actionButton} onPress={() => handleAddItem()}>
                   <Ionicons name="add-circle" size={18} color="#666" />
                   <Text style={styles.buttonText}>Item</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.actionButton}>
+                <TouchableOpacity style={styles.actionButton} onPress={() => handleAddItem(true)}>
                   <Ionicons name="add-circle" size={18} color="#666" />
                   <Text style={styles.buttonText}>Section</Text>
                 </TouchableOpacity>

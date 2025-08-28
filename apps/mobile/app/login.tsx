@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Button,
@@ -9,31 +9,29 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 // ✅ Updated imports for the final, correct flow
 import {
   ConfirmationResult,
   PhoneAuthProvider,
-  RecaptchaVerifier,
   linkWithCredential,
   signInWithCredential,
-  signInWithPhoneNumber,
+  signInWithPhoneNumber
 } from 'firebase/auth';
 
 // --- Your Project's Imports ---
 // IMPORTANT: Make sure you have a firebaseConfig.js file that exports your config
-import { auth, firebaseConfig } from '@/utils/firebase';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { useRecaptcha } from '@/context/RecaptchaContext';
+import { auth } from '@/utils/firebase';
 import { useRouter } from 'expo-router';
 import Logo from '../components/Logo';
 import { toE164 } from '../utils/utils';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const recaptchaVerifier = useRef<any>(null);
-
+  const { recaptchaVerifier } = useRecaptcha();
   // --- State Management ---
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
@@ -44,28 +42,22 @@ export default function LoginScreen() {
   // ✅ Changed state to a simple boolean to control the modal
   const [showConflictModal, setShowConflictModal] = useState(false);
 
-  useEffect(() => {
-    if (Platform.OS === 'web' && !recaptchaVerifier.current) {
-      recaptchaVerifier.current = new RecaptchaVerifier(auth, 'recaptcha-container', { 'size': 'invisible' });
-    }
+  const [formKey, setFormKey] = useState(0);
 
-    // ✅ Add this cleanup function
-    // This will run when the component is unmounted
-    return () => {
-      recaptchaVerifier.current?.clear();
-    };
-  }, []);
 
   const sendCode = async () => {
-    // This function remains the same
+    console.log("sending code...")
     setLoading(true);
     setError(null);
     try {
       const e164PhoneNumber = toE164(phone);
-      if (!recaptchaVerifier.current) { throw new Error("Recaptcha Verifier is not available."); }
+      if (!recaptchaVerifier?.current) { throw new Error("Recaptcha Verifier is not available."); }
       const confirmation = await signInWithPhoneNumber(auth, e164PhoneNumber, recaptchaVerifier.current);
+
       setConfirmationResult(confirmation);
+      setFormKey(k => k + 1); 
     } catch (err: any) {
+      console.error(err.message);
       setError(err.message || 'Could not send verification code.');
     } finally {
       setLoading(false);
@@ -82,18 +74,14 @@ export default function LoginScreen() {
 
       if (anonymousUser && anonymousUser.isAnonymous) {
         await linkWithCredential(anonymousUser, phoneCredential);
+        router.replace('/complete-profile');
       } else {
         await signInWithCredential(auth, phoneCredential);
-      }
-      
-      // const finalUser = auth.currentUser; // TODO MAYBE NOT NEEDED. IDEALLY THE AUTHCONTEXT AUTHSTATECHANGED SHOULD HANDLE THIS.
-      // if (finalUser) {
-        // const idToken = await finalUser.getIdToken();
-        // await loginWithToken(idToken);
-      if(router.canGoBack()) {
-        router.back();
-      } else {
-        router.push('/list');
+        if(router.canGoBack()) {
+          router.back();
+        } else {
+          router.push('/list');
+        }
       }
       // }
     } catch (err: any) {
@@ -118,12 +106,14 @@ export default function LoginScreen() {
       // This signs out the anonymous user and signs in the permanent one.
       const credential = await confirmationResult.confirm(code);
       if (credential.user) {
-        // const idToken = await credential.user.getIdToken(); TODO same here? AUTHCONTEXT AUTHSTATECHANGED SHOULD HANDLE THIS.
-        // await loginWithToken(idToken);
-        if(router.canGoBack()) {
-          router.back();
+        if (!credential.user.displayName) {
+          router.replace('/complete-profile');
         } else {
-          router.push('/list');
+          if (router.canGoBack()) {
+            router.back();
+          } else {
+            router.replace('/list');
+          }
         }
       }
     } catch (err: any) {
@@ -137,18 +127,7 @@ export default function LoginScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.outerContainer}
-    >
-      {Platform.OS === 'web' ? (
-        <View id="recaptcha-container" />
-      ) : (
-        <FirebaseRecaptchaVerifierModal
-          ref={recaptchaVerifier}
-          firebaseConfig={firebaseConfig}
-          title="Confirm you're not a robot"
-          cancelLabel="Close"
-        />
-      )}
-      
+    > 
       <Modal
         visible={showConflictModal} // Controlled by the new boolean state
         transparent={true}
@@ -169,9 +148,9 @@ export default function LoginScreen() {
         </View>
       </Modal>
 
-      {/* The rest of your UI (Logo, loginCard, inputs) remains the same */}
+        {/* The rest of your UI (Logo, loginCard, inputs) remains the same */}
       <Logo variant="wide" style={{ alignSelf: 'center', marginBottom: 24 }} />
-      <View style={styles.loginCard}>
+      <View key={formKey} style={styles.loginCard}>
         <Text style={styles.heading}>Sign in</Text>
         {!confirmationResult ? (
           <>
@@ -186,7 +165,7 @@ export default function LoginScreen() {
             />
             <TouchableOpacity
               style={[styles.primaryButton, (loading || phone.length < 10) && styles.disabledButton]}
-              onPress={sendCode}
+              onPressIn={sendCode}
               disabled={loading || phone.length < 10}
             >
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Send Code</Text>}
@@ -206,7 +185,7 @@ export default function LoginScreen() {
             />
             <TouchableOpacity
               style={[styles.primaryButton, (loading || code.length < 6) && styles.disabledButton]}
-              onPress={confirmCode}
+              onPressIn={confirmCode}
               disabled={loading || code.length < 6}
             >
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Confirm Code</Text>}
@@ -215,6 +194,7 @@ export default function LoginScreen() {
         )}
         {error && <Text style={styles.error}>{error}</Text>}
       </View>
+      
     </KeyboardAvoidingView>
   );
 }
@@ -235,4 +215,10 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
   modalMessage: { textAlign: 'center', marginBottom: 20 },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
+   scrollContentContainer: {
+    flexGrow: 1, // Ensures the container can grow to fill space
+    justifyContent: 'center', // Vertically centers the content
+    alignItems: 'center', // Horizontally centers the content
+    padding: 16,
+  },
 });

@@ -2,12 +2,14 @@ import { useAuth } from '@/context/AuthContext';
 import { Group } from '@/types/types';
 import { createGroup } from '@/utils/api';
 import { auth } from '@/utils/firebase';
+import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
   Button,
   FlatList,
   Image,
+  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -17,7 +19,9 @@ import {
 
 export default function UserProfile() {
   const router = useRouter(); 
-  const { profile, loading, groups, selectGroup } = useAuth(); 
+  // const { profile, loading, groups, selectGroup } = useAuth(); 
+  const { loading, groups, selectGroup, user } = useAuth(); 
+
 
   const handleCreateGroup = async () => {
     const user = auth.currentUser;
@@ -43,15 +47,15 @@ export default function UserProfile() {
 
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.profileContainer}>
-        {profile?.photoURL && (
+        {user?.photoURL && (
           <Image
-            source={{ uri: profile.photoURL }}
+            source={{ uri: user.photoURL }}
             style={styles.profileImage}
           />
         )}
-        <Text style={styles.profileText}>Phone: {profile?.phoneNumber}</Text>
+        <Text style={styles.profileText}>Phone: {user?.phoneNumber}</Text>
       </View>
       <FlatList
         data={groups}
@@ -74,12 +78,17 @@ export default function UserProfile() {
         title="Create Group"
         onPress={handleCreateGroup}
       />
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16 },
+  container: { 
+    flex: 1, 
+    padding: 16,
+    marginTop: Constants.statusBarHeight,
+
+  },
   profileContainer: {
     alignItems: 'center',
     marginBottom: 24,

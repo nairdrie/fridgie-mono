@@ -4,10 +4,10 @@ import { List } from '../types/types';
 export function getWeekLabel(date: Date | string = new Date()) {
   if(typeof date === 'string') date = new Date(date);
 
-  const startOf = (d: Date) => startOfWeek(new Date(d.setHours(0, 0, 0, 0)), { weekStartsOn: 1 });
+  const startOf = (d: Date) => startOfWeek(new Date(d.setHours(0, 0, 0, 0)), { weekStartsOn: 0 });
 
   const weekStart = startOf(date);
-  const weekEnd = endOfWeek(date, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(date, { weekStartsOn: 0 });
 
   const today = startOf(new Date());
   const lastWeek = startOf(subWeeks(today, 1));
@@ -36,5 +36,5 @@ export function getAvailableWeeks(lists: List[]): Date[] {
 }
 
 
-export const weekKeyFromDate = (d: Date) => format(startOfWeek(d, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-export const dateFromWeekKey = (key: string) => startOfWeek(parse(key, 'yyyy-MM-dd', new Date()), { weekStartsOn: 1 });
+export const weekKeyFromDate = (d: Date) => format(startOfWeek(d, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+export const dateFromWeekKey = (key: string) => startOfWeek(parse(key, 'yyyy-MM-dd', new Date()), { weekStartsOn: 0 });

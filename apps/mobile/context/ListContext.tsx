@@ -2,10 +2,10 @@ import { useRouter } from 'expo-router'; // ✅ 1. Import the correct hook
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { List, ListView } from '../types/types';
 import { ApiError, getLists } from '../utils/api';
-import { useAuth } from './AuthContext';
+import { GroupWithPresence, useAuth } from './AuthContext';
 
 interface ListContextType {
-  groupId: string | undefined;
+  selectedGroup: GroupWithPresence | null;
   allLists: List[];
   selectedList: List | null;
   selectedView: ListView;
@@ -71,7 +71,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
     setSelectedView(view);
   };
 
-  const value = { groupId: selectedGroup?.id, allLists, selectedList, selectList, selectedView, selectView, isLoading };
+  const value = { selectedGroup, allLists, selectedList, selectList, selectedView, selectView, isLoading };
 
   return <ListContext.Provider value={value}>{children}</ListContext.Provider>;
 }

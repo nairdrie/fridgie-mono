@@ -20,6 +20,7 @@ export type List = {
 export interface Group {
   id: string;
   name: string;
+  members: UserProfile[]
 }
 
 export interface Meal {
