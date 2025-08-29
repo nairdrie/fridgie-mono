@@ -59,6 +59,8 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
       return;
     } 
     else {
+      setSelectedList(null); 
+      setAllLists([]);  
       fetchAllLists(selectedGroup.id);
     }
   }, [selectedGroup]);

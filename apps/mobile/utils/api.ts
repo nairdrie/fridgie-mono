@@ -2,7 +2,8 @@
 
 import {
   getIdToken,
-  signInAnonymously
+  signInAnonymously,
+  User
 } from "firebase/auth";
 import { Group, Item, Meal } from "../types/types";
 import { authStatePromise } from "./authState";
@@ -119,14 +120,40 @@ export async function getGroups(): Promise<Group[]> {
   return res.json()
 }
 
-export async function createGroup(name: string): Promise<Group> {
+/**
+ * Searches for users by a query string.
+ * @param query The search term (name, email, or phone).
+ * @returns A promise that resolves to an array of matching user profiles.
+ */
+export async function searchUsers(query: string): Promise<User[]> {
+  // Avoid sending empty requests to the backend
+  if (!query.trim()) {
+    return [];
+  }
+  console.log(query);
+  const res = await authorizedFetch(`${BASE_URL}/users?q=${encodeURIComponent(query)}`);
+  return res.json();
+}
+
+/**
+ * Creates a new group with a given name and members.
+ * @param name The name of the group.
+ * @param memberUids An array of user UIDs to invite to the group.
+ * @returns A promise that resolves to the newly created group.
+ */
+export async function createGroup(name: string, memberUids?: string[]): Promise<Group> {
+  const body: {name: string, memberUids?: string[]} = { name };
+  if (memberUids) {
+    body['memberUids'] = memberUids;
+  }
   const res = await authorizedFetch(`${BASE_URL}/group`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  })
-  return res.json()
+    body: JSON.stringify(body), // Pass members in the body
+  });
+  return res.json();
 }
+
 
 export async function createMeal(
   groupId: string,

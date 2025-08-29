@@ -1,6 +1,5 @@
 import { useLists } from '@/context/ListContext';
 import { List, ListView } from '@/types/types';
-import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -161,12 +160,12 @@ export default function ListHeader() {
 const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: '#fff', // Match your header background
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   container: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: Constants.statusBarHeight, // Handles status bar height
     paddingHorizontal: 20,
   },
   backNav: {

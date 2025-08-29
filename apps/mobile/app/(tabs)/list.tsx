@@ -51,6 +51,11 @@ export default function ListScreen() {
     }
 
     const unsubscribe = listenToList(selectedGroup.id, selectedList.id, (list: List) => {
+      if (!list) {
+        console.warn(`Received null data for list ${selectedList.id}, ignoring update.`);
+        return;
+      }
+      
       // ignore server echoes while the user is actively typing
       if (Date.now() < dirtyUntilRef.current) return;
 

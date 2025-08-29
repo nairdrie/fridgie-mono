@@ -3,7 +3,7 @@ import { Group, UserProfile } from '@/types/types';
 import { getGroups, loginWithToken } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, db } from '@/utils/firebase';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { onAuthStateChanged, signInAnonymously, updateProfile, User } from 'firebase/auth';
 import { onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
@@ -125,7 +125,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (nextAppState === 'active') {
         if (presenceInterval.current) clearInterval(presenceInterval.current);
         set(userStatusRef, serverTimestamp());
-        // @ts-ignore
         presenceInterval.current = setInterval(() => {
           set(userStatusRef, serverTimestamp());
         }, PRESENCE_PING_INTERVAL_MS);
@@ -254,3 +253,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 };
 
 export const useAuth = () => useContext(AuthContext);
+
+export function useProtectedRoute() {
+    const { user, loading } = useAuth(); // Assuming you have an 'isInitialized' state
+    const segments = useSegments();
+    const router = useRouter();
+
+    useEffect(() => {
+        // Wait until the auth state is fully initialized
+        if (loading) {
+            return;
+        }
+
+        const inAppGroup = segments[0] === '(tabs)';
+
+        // If the user is signed in and is trying to access an auth screen, redirect to the app.
+        if (user && !inAppGroup) {
+            router.replace('/list');
+        }
+    }, [user, segments, loading, router]); // Re-run effect when these change
+}

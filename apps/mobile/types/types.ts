@@ -40,5 +40,6 @@ export interface UserProfile {
   email: string | null;
   phoneNumber: string | null;
   photoURL: string | null;
+  displayName?: string | null;
   // Add other properties from your user document here
 }
