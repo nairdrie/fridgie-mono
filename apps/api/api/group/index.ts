@@ -37,17 +37,17 @@ route.get('/', async (c) => {
     }))
 
 
-  // ensure the user owns at least one group; if not, create "My Lists"
+  // ensure the user owns at least one group; if not, create "Private"
   if (!userGroups.some(g => g.owner === uid)) {
     const myListsId = uuid()
     const newGroup = {
-      name: 'My Lists',
+      name: 'Private',
       owner: uid,
       members: { [uid]: true },
       createdAt: Date.now(),
     }
     await adminRtdb.ref(`groups/${myListsId}`).set(newGroup)
-    userGroups.unshift({ id: myListsId, name: 'My Lists', owner: uid , members: { [uid]: true }})
+    userGroups.unshift({ id: myListsId, name: 'Private', owner: uid , members: { [uid]: true }})
   }
 
   const allMemberUids = new Set<string>();
@@ -91,18 +91,24 @@ route.get('/', async (c) => {
 // POST /api/groups
 route.post('/', async (c) => {
   const uid = c.get('uid') as string
-  const { name } = await c.req.json<{ name?: string }>()
+  const { name, memberUids } = await c.req.json<{ name?: string, memberUids?: string[] }>()
 
   if (!name || typeof name !== 'string') {
     return c.json({ error: '`name` is required' }, 400)
   }
 
   const id = uuid()
-  const newGroup = {
+  const newGroup: {name: string, owner: string, members: Record<string, boolean>, createdAt: number} = {
     name,
     owner: uid,
-    members: { [uid]: true },
+    members: {},
     createdAt: Date.now(),
+  }
+
+  if(memberUids && Array.isArray(memberUids)) {
+    for (const memberUid of memberUids) {
+      newGroup.members[memberUid] = true;
+    }
   }
 
   // 5) write under this user’s node
