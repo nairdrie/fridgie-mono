@@ -6,10 +6,7 @@ import { auth, db } from '@/utils/firebase';
 import { useRouter, useSegments } from 'expo-router';
 import { onAuthStateChanged, signInAnonymously, updateProfile, User } from 'firebase/auth';
 import { onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
-
-const PRESENCE_PING_INTERVAL_MS = 30000; // 30 seconds
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 interface UserProfileWithPresence extends UserProfile {
   lastOnline?: number;
@@ -50,9 +47,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
-  const presenceListeners = useRef<(() => void)[]>([]);
-  const presenceInterval = useRef<number | null>(null);
-
   const router = useRouter();
 
   // Main Auth State Listener
@@ -70,11 +64,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if(!authUser.isAnonymous && !authUser.displayName) {
           router.replace('/complete-profile');
         }
-
-        // --- User is logged in (real or anonymous) ---
-        const userStatusRef = ref(db, `/status/${authUser.uid}`);
-        onDisconnect(userStatusRef).set(serverTimestamp());
-        set(userStatusRef, serverTimestamp());
 
         try {
           const token = await authUser.getIdToken(true);
@@ -107,53 +96,51 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => unsubscribe();
   }, []);
 
-  // Server Time Offset Listener
   useEffect(() => {
-    const offsetRef = ref(db, '.info/serverTimeOffset');
-    const unsubscribe = onValue(offsetRef, (snapshot) => {
-      setServerTimeOffset(snapshot.val() || 0);
-    });
-    return () => unsubscribe();
-  }, []);
+    if (!user) return; // Only run if a user is logged in
 
-  // App State Listener for Periodic Presence Pings
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (!auth.currentUser) return;
-      const userStatusRef = ref(db, `/status/${auth.currentUser.uid}`);
+    // References to the user's status node and the special .info/connected node
+    const userStatusRef = ref(db, `/status/${user.uid}`);
+    const connectedRef = ref(db, '.info/connected');
 
-      if (nextAppState === 'active') {
-        if (presenceInterval.current) clearInterval(presenceInterval.current);
+    const unsubscribe = onValue(connectedRef, (snapshot) => {
+      // This callback fires when connection state changes
+      if (snapshot.val() === true) {
+        // We're connected.
+        // 1. Set the onDisconnect handler to mark the user as offline when they disconnect.
+        //    This is re-established every time the client reconnects.
+        onDisconnect(userStatusRef).set(serverTimestamp());
+
+        // 2. Set the user's status to online.
         set(userStatusRef, serverTimestamp());
-        presenceInterval.current = setInterval(() => {
-          set(userStatusRef, serverTimestamp());
-        }, PRESENCE_PING_INTERVAL_MS);
-      } else {
-        if (presenceInterval.current) clearInterval(presenceInterval.current);
       }
     });
 
-    return () => {
-      subscription.remove();
-      if (presenceInterval.current) clearInterval(presenceInterval.current);
-    };
-  }, []);
+    // Clean up the listener when the user logs out or the component unmounts
+    return () => unsubscribe();
+  }, [user]); // Re-run this entire logic when the user object changes (login/logout)
 
   // Effect to fetch groups and listen for member presence
   useEffect(() => {
-    if (!user) return; // Only run if we have a user
+    if (!user) {
+      setGroups([]);
+      setSelectedGroup(null);
+      return;
+    }
+
+    let presenceListeners: (()=>void)[] = [];
 
     const fetchGroupsAndListen = async () => {
       try {
         const fetchedGroups = await getGroups();
-        presenceListeners.current.forEach(unsubscribe => unsubscribe());
-        presenceListeners.current = [];
+        presenceListeners.forEach(unsubscribe => unsubscribe());
+        presenceListeners = [];
 
         fetchedGroups.forEach(group => {
           group.members.forEach(member => {
             const memberStatusRef = ref(db, `/status/${member.uid}`);
             const unsubscribe = onValue(memberStatusRef, (snapshot) => {
-              const lastOnlineTimestamp = snapshot.val(); // This will be a number
+              const lastOnlineTimestamp = snapshot.val();
               
               setGroups(currentGroups =>
                 currentGroups.map(g =>
@@ -168,7 +155,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 )
               );
             });
-            presenceListeners.current.push(unsubscribe);
+            presenceListeners.push(unsubscribe);
           });
         });
 
@@ -188,8 +175,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     fetchGroupsAndListen();
 
     return () => {
-      presenceListeners.current.forEach((unsubscribe) => unsubscribe());
-      presenceListeners.current = [];
+      presenceListeners.forEach((unsubscribe) => unsubscribe());
     };
   }, [user]);
 
@@ -220,6 +206,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     }
   }, [groups]);
+
+
+  // Server Time Offset Listener
+  useEffect(() => {
+    const offsetRef = ref(db, '.info/serverTimeOffset');
+    const unsubscribe = onValue(offsetRef, (snapshot) => {
+      setServerTimeOffset(snapshot.val() || 0);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const refreshAuthUser = () => {
     const currentUser = auth.currentUser;
