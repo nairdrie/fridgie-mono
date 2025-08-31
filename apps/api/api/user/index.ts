@@ -19,7 +19,7 @@ const route = new Hono()
 route.use('*', auth)
 
 /**
- * GET /api/users/search?q=<query>
+ * GET /api/user/search?q=<query>
  * Searches for users by display name, email, or phone number.
  */
 route.get('/', async (c) => {

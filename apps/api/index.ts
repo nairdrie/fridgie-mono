@@ -33,6 +33,7 @@ for (const file of files) {
 
 // 2️⃣ Bun.serve that handles BOTH HTTP and WebSocket upgrades
 serve({
+  idleTimeout: 30,
   // Step 1: route HTTP & trigger WS upgrade
   fetch(req, server) {
     const url = new URL(req.url)
