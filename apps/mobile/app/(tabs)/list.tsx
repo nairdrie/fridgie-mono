@@ -220,60 +220,67 @@ export default function ListScreen() {
   };
 
   const handleSaveRecipe = () => {
-    if (!editingRecipe || !mealForRecipeEdit) return;
+  if (!editingRecipe || !mealForRecipeEdit) return;
 
-    // Filter out any empty ingredients or instructions before saving
-    const cleanedRecipe = {
-        ...editingRecipe,
-        ingredients: editingRecipe.ingredients.filter(i => i.name.trim() !== ''),
-        instructions: editingRecipe.instructions.filter(i => i.trim() !== ''),
-    };
+  // Normalize & clean
+  const normIngredients = (editingRecipe.ingredients || []).map((i: any) =>
+    typeof i === 'string' ? { name: i, quantity: '' } : i
+  );
 
-    const mealId = mealForRecipeEdit.id;
+  const cleanedRecipe: Recipe = {
+    ...editingRecipe,
+    ingredients: normIngredients.filter(i => (i.name ?? '').trim() !== ''),
+    instructions: (editingRecipe.instructions || []).filter(i => (i ?? '').trim() !== ''),
+  };
 
-    // --- LOGIC TO CREATE NEW INGREDIENT ITEMS ---
-    const newItemsForRecipe: Item[] = [];
+  const mealId = mealForRecipeEdit.id;
+
+  // Update meal name/recipe
+  setMeals(prevMeals =>
+    prevMeals.map(meal =>
+      meal.id === mealId ? { ...meal, recipe: cleanedRecipe, name: cleanedRecipe.name } : meal
+    )
+  );
+
+  // Build ingredient items using the *current* list inside the updater
+  setItems(currentItems => {
+    // 1) Remove any previous items tied to this meal
+    const base = currentItems.filter(item => item.mealId !== mealId);
+
+    // 2) Seed lastRank from base
     let lastRank =
-      items.length > 0 && items[items.length - 1].text !== ''
-        ? LexoRank.parse(items[items.length - 1].listOrder)
+      base.length > 0 && base[base.length - 1].text !== ''
+        ? LexoRank.parse(base[base.length - 1].listOrder)
         : LexoRank.middle();
 
-    for (const ingredient of cleanedRecipe.ingredients) {
-        lastRank = lastRank.genNext();
-        newItemsForRecipe.push({
-            id: uuid.v4() as string,
-            text: ingredient.name, // Just the name, as requested
-            checked: false,
-            listOrder: lastRank.toString(),
-            isSection: false,
-            mealId: mealId,
-        });
-    }
-    
-    // --- ATOMIC STATE UPDATE FOR ITEMS ---
-    setItems((currentItems) => {
-        // 1. Remove all old items that were linked to this meal
-        const itemsWithoutOldRecipe = currentItems.filter(item => item.mealId !== mealId);
-        // 2. Add the new items
-        return [...itemsWithoutOldRecipe, ...newItemsForRecipe];
+    // 3) Map ingredients -> items with proper ranking
+    const newItemsForRecipe: Item[] = cleanedRecipe.ingredients.map(ingredient => {
+      lastRank = lastRank.genNext();
+      return {
+        id: uuid.v4() as string,
+        text: ingredient.name.trim(),
+        checked: false,
+        listOrder: lastRank.toString(),
+        isSection: false,
+        mealId,
+      };
     });
 
-    // --- UPDATE THE MEAL WITH THE ATTACHED RECIPE ---
-    setMeals(prevMeals => 
-      prevMeals.map(meal => 
-        meal.id === mealId
-          ? { ...meal, recipe: cleanedRecipe, name: cleanedRecipe.name }
-          : meal
-      )
-    );
-    markDirty();
-    
-    // --- CLEANUP ---
-    setAddRecipeModalVisible(false);
-    setEditingRecipe(null);
-    setMealForRecipeEdit(null);
-    setImportUrl('');
-  };
+    // 4) Replace the single empty placeholder if present
+    const isSingleEmpty =
+      base.length === 1 && (base[0].text ?? '') === '' && !base[0].isSection;
+
+    return isSingleEmpty ? newItemsForRecipe : [...base, ...newItemsForRecipe];
+  });
+
+  markDirty();
+
+  // Cleanup
+  setAddRecipeModalVisible(false);
+  setEditingRecipe(null);
+  setMealForRecipeEdit(null);
+  setImportUrl('');
+};
 
   const handleRecipeFieldChange = (field: keyof Recipe, value: string) => {
     setEditingRecipe(prev => prev ? { ...prev, [field]: value } : null);

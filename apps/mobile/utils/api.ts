@@ -10,7 +10,8 @@ import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
 // your API root
-const BASE_URL = "http://192.168.2.193:3000/api"
+// const BASE_URL = "http://192.168.2.193:3000/api"
+const BASE_URL = "http://35.182.135.90:3000/api"
 
 export class ApiError extends Error {
   status: number;
@@ -56,6 +57,8 @@ async function authorizedFetch(
     const errorMessage = errorBody || `Request failed with status ${res.status}`;
     throw new ApiError(errorMessage, res.status);
   }
+
+  console.log(res);
 
   return res;
 }
