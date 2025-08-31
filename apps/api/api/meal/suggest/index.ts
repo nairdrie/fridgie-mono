@@ -1,8 +1,8 @@
 // api/meal/suggest/index.ts
 import { Hono } from 'hono';
 import OpenAI from 'openai';
-import { auth } from '../../../middleware/auth';
-import { fs } from '../../../utils/firebase';
+import { auth } from '@/middleware/auth';
+import { fs } from '@/utils/firebase';
 
 // --- New Types ---
 export interface Ingredient {

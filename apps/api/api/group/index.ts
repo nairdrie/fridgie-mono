@@ -1,8 +1,8 @@
 // api/group/index.ts
 import { Hono } from 'hono'
-import { adminRtdb, fs } from '../../utils/firebase'
+import { adminRtdb, fs } from '@/utils/firebase'
 import { v4 as uuid } from 'uuid'
-import { auth } from '../../middleware/auth'
+import { auth } from '@/middleware/auth'
 import { getAuth } from 'firebase-admin/auth';
 
 // TODO: Centralize

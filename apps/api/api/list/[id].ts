@@ -1,8 +1,8 @@
 // api/list/[id].ts
 import { Hono } from 'hono'
-import { adminRtdb } from '../../utils/firebase'
-import { groupAuth } from '../../middleware/groupAuth'
-import { auth } from '../../middleware/auth'
+import { adminRtdb } from '@/utils/firebase'
+import { groupAuth } from '@/middleware/groupAuth'
+import { auth } from '@/middleware/auth'
 
 const route = new Hono()
 

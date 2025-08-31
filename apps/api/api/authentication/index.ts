@@ -1,9 +1,7 @@
 // api/authentication/index.ts
 import { Hono } from 'hono'
-import { adminAuth, fs } from '../../utils/firebase'
+import { adminAuth, fs } from '@/utils/firebase'
 import { serialize } from 'cookie'
-import { getFirestore } from 'firebase-admin/firestore'
-import { defaultPhotoUrls } from '../../utils/defaultPhotoUrls'
 
 const route = new Hono()
 

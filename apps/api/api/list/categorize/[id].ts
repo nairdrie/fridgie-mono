@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
-import { adminRtdb } from '../../../utils/firebase';
+import { adminRtdb } from '@/utils/firebase';
 import { LexoRank } from 'lexorank';
 import { v4 as uuid } from 'uuid';
 import OpenAI from 'openai';
-import { auth } from '../../../middleware/auth';
-import { groupAuth } from '../../../middleware/groupAuth';
+import { auth } from '@/middleware/auth';
+import { groupAuth } from '@/middleware/groupAuth';
 
 const route = new Hono();
 

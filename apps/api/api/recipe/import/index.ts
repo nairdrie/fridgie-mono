@@ -2,7 +2,7 @@
 
 import { Hono } from 'hono';
 import OpenAI from 'openai';
-import { auth } from '../../../middleware/auth';
+import { auth } from '@/middleware/auth';
 import puppeteer from 'puppeteer'; // You'll need to add a web scraper library
 
 const route = new Hono();

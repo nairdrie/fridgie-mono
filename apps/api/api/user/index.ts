@@ -2,7 +2,7 @@
 
 import { Hono } from 'hono'
 import { getAuth } from 'firebase-admin/auth';
-import { auth } from '../../middleware/auth'
+import { auth } from '@/middleware/auth'
 
 // Define the shape of the user profile data we'll return to the client
 interface UserProfile {
