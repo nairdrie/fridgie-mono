@@ -5,7 +5,7 @@ import {
   signInAnonymously,
   User
 } from "firebase/auth";
-import { Group, Item, Meal } from "../types/types";
+import { Group, Item, Meal, MealPreferences, Recipe } from "../types/types";
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
@@ -131,7 +131,7 @@ export async function searchUsers(query: string): Promise<User[]> {
     return [];
   }
   console.log(query);
-  const res = await authorizedFetch(`${BASE_URL}/users?q=${encodeURIComponent(query)}`);
+  const res = await authorizedFetch(`${BASE_URL}/user?q=${encodeURIComponent(query)}`);
   return res.json();
 }
 
@@ -188,6 +188,29 @@ export async function deleteMeal(groupId: string, mealId: string) {
   // This would hit your backend to delete a meal.
 }
 
+/**
+ * Sends user preferences to the backend to get a meal suggestion.
+ * @param preferences An object containing the user's meal preferences.
+ * @returns A promise that resolves to a meal suggestion.
+ */
+export async function getMealSuggestions(): Promise<Recipe[]> {
+  const res = await authorizedFetch(`${BASE_URL}/meal/suggest`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  return res.json();
+}
+
+export async function saveMealPreferences(preferences: MealPreferences): Promise<MealPreferences> {
+  const res = await authorizedFetch(`${BASE_URL}/meal/preferences`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(preferences),
+  });
+  return res.json();
+
+}
+
 // ─────── REAL-TIME UPDATES ──────────────────────────────────────────────────
 
 export function listenToList(
@@ -234,4 +257,14 @@ export async function loginWithToken(idToken: string) {
   // }
   await res.json();
 }
+
+export async function importRecipeFromUrl(url: string): Promise<Recipe> {
+  const res = await authorizedFetch(`${BASE_URL}/recipe/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  return res.json();
+}
+
 

@@ -49,6 +49,13 @@ export default function RootLayout() {
                   headerShown: false
                 }}
               />
+              <Stack.Screen
+                name="meal-preferences"
+                options={{ 
+                  title: 'Meal Preferences',
+                  headerShown: false
+                }}
+              />
             </Stack>
           </RootView>
         </ListProvider>

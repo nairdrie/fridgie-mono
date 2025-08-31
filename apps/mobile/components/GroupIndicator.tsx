@@ -123,7 +123,7 @@ const styles = StyleSheet.create({
         borderColor: '#038523ff', // Green
     },
     offlinePhoto: {
-        borderColor: '#8e8e93', // Gray
+        borderColor: '#c0c0c0ff', // Gray
         filter: 'grayscale(60%)',
     },
     modal: {

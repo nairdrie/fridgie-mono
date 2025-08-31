@@ -1,5 +1,5 @@
 // components/MealCard.tsx
-import { Item, Meal } from "@/types/types";
+import { Item, Meal, Recipe } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
@@ -25,6 +25,8 @@ interface MealCardProps {
 
   // Functions from parent screen
   markDirty: () => void;
+  onViewRecipe: (recipe: Recipe) => void;
+  onAddRecipe: (meal: Meal) => void;  
 }
 
 export default function MealCard({
@@ -37,8 +39,12 @@ export default function MealCard({
   isKeyboardVisible,
   onUpdateMeal,
   onDeleteMeal,
-  markDirty
+  markDirty,
+  onViewRecipe,
+  onAddRecipe
 }: MealCardProps) {
+  const hasRecipe = !!meal.recipe;
+
   const [isCollapsed, setIsCollapsed] = React.useState(false);
   const [isDaySelectorVisible, setIsDaySelectorVisible] = useState(false);
 
@@ -229,8 +235,12 @@ export default function MealCard({
               ))}
             </Animated.View>
           )}
+          <TouchableOpacity onPress={() => { onDeleteMeal(meal.id) }} style={styles.deleteButton}>
+                <Ionicons name="trash" size={18} color="#db6767ff" /> 
+            </TouchableOpacity>
         </View>
         <View style={styles.mealHeader}>
+          <View style={styles.mealHeaderUpper}>
             <TouchableOpacity onPress={() => setIsCollapsed(!isCollapsed)} style={styles.collapseButton}>
             <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
             </TouchableOpacity>
@@ -241,11 +251,24 @@ export default function MealCard({
                 onChangeText={(text) => onUpdateMeal(meal.id, { name: text })}
                 placeholder={placeholder} 
             />
-            <TouchableOpacity onPress={() => { onDeleteMeal(meal.id) }} style={styles.deleteButton}>
-                <Ionicons name="trash" size={18} color="#db6767ff" /> 
-            </TouchableOpacity>
+          </View>
+          {hasRecipe ? (
+            <View style={styles.mealHeaderLower}>
+              <TouchableOpacity style={styles.recipeIndicator} onPress={() => onViewRecipe(meal.recipe!)}>
+                <Ionicons name="book-outline" size={16} color="#007AFF" />
+                <Text style={styles.recipeIndicatorText}>View Recipe</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.mealHeaderLower}>
+              <TouchableOpacity style={styles.recipeIndicator} onPress={() => onAddRecipe(meal)}>
+                <Ionicons name="add" size={16} color="#007AFF" />
+                <Text style={styles.recipeIndicatorText}>Add Recipe</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
-        </View>
+      </View>
       {!isCollapsed && (
         <View style={styles.ingredientListContainer}>
             <DraggableFlatList
@@ -273,7 +296,14 @@ export default function MealCard({
 
 const styles = StyleSheet.create({
     mealCard: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 8, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
-    mealHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    mealHeader: {
+
+    },
+    mealHeaderUpper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    mealHeaderLower: {
+      flexDirection: 'row',
+      marginLeft: 35
+    },
     collapseButton: { padding: 5 },
     collapseIcon: { fontSize: 16 },
     mealName: { fontWeight: '600', fontSize: 18, flex: 1, marginHorizontal: 10 },
@@ -321,6 +351,7 @@ const styles = StyleSheet.create({
     addIngredientText: { color: '#007AFF', fontSize: 16 },
     dayPickerContainer: {
       flexDirection: 'row',
+      justifyContent: 'space-between',
       margin: 0,
       padding: 0,
       alignItems: 'center',
@@ -334,5 +365,20 @@ const styles = StyleSheet.create({
       marginLeft: 8,
       fontSize: 16,
       color: '#007AFF',
-    }
+    },
+    recipeIndicator: {
+      width: 'auto',
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      backgroundColor: '#eef5ff',
+      borderRadius: 12,
+    },
+    recipeIndicatorText: {
+      marginLeft: 5,
+      color: '#007AFF',
+      fontWeight: '500',
+      fontSize: 12,
+    },
 });

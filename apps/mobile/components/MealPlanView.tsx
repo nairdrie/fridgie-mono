@@ -1,5 +1,5 @@
 // components/MealPlanView.tsx
-import { Item, Meal } from "@/types/types";
+import { Item, Meal, Recipe } from "@/types/types";
 import React, { useMemo } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import MealCard from "./MealCard"; // Import the new component
@@ -14,6 +14,7 @@ interface MealPlanViewProps {
   onUpdateMeal: (mealId: string, updates: Partial<Meal>) => void;
   onDeleteMeal: (mealId: string) => void;
   onAddMeal: () => void;
+  onAddRecipe: (meal: Meal) => void;
   
   // ✅ Add the new props to the interface
   editingId: string;
@@ -21,6 +22,7 @@ interface MealPlanViewProps {
   inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
   isKeyboardVisible: boolean;
   markDirty: () => void;
+  onViewRecipe: (recipe: Recipe) => void; 
 }
 
 export default function MealPlanView({
@@ -30,12 +32,14 @@ export default function MealPlanView({
   onUpdateMeal,
   onDeleteMeal,
   onAddMeal,
+  onViewRecipe,
+  onAddRecipe,
   // ✅ Destructure the new props
   editingId,
   setEditingId,
   inputRefs,
   isKeyboardVisible,
-  markDirty
+  markDirty,
 }: MealPlanViewProps) {
 
   const sortedMeals = useMemo(() => {
@@ -84,6 +88,8 @@ export default function MealPlanView({
             inputRefs={inputRefs}
             isKeyboardVisible={isKeyboardVisible}
             markDirty={markDirty}
+            onViewRecipe={onViewRecipe}
+            onAddRecipe={onAddRecipe}
           />
         )}
         contentContainerStyle={styles.container}

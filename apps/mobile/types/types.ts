@@ -28,6 +28,7 @@ export interface Meal {
   listId: string;
   dayOfWeek?: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
   name: string;
+  recipe?: Recipe
 }
 
 export enum ListView {
@@ -42,4 +43,26 @@ export interface UserProfile {
   photoURL: string | null;
   displayName?: string | null;
   // Add other properties from your user document here
+}
+
+export interface MealPreferences {
+  dietaryNeeds?: string[];
+  cookingStyles?: string[];
+  cuisines?: string[];
+  dislikedIngredients?: string[];
+  query?: string;
+}
+
+export interface Ingredient {
+  name: string;
+  quantity: string;
+}
+
+export interface Recipe {
+  id: string;
+  name: string;
+  description: string;
+  photoURL?: string;
+  ingredients: Ingredient [];
+  instructions: string[];
 }
