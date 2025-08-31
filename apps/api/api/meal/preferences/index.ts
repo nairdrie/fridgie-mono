@@ -1,7 +1,7 @@
 // api/meal/preferences/index.ts
 import { Hono } from 'hono';
-import { auth } from '@/../middleware/auth';
-import { fs } from '@/../utils/firebase';
+import { auth } from '@/middleware/auth';
+import { fs } from '@/utils/firebase';
 
 
 // --- Types ---
