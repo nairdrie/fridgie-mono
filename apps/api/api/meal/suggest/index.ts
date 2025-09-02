@@ -1,19 +1,19 @@
-// api/meal/suggest/index.ts
 import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';
 import { fs } from '@/utils/firebase';
 
-// --- New Types ---
+// --- Types ---
 export interface Ingredient {
   name: string;
   quantity: string;
 }
 
 export interface Recipe {
-  id: string; // e.g., "spicy-thai-green-curry"
-  photoURL?: string; // This will likely be omitted by the AI
+  id: string;
+  photoURL?: string;
   name: string;
+  description: string; // ✅ Added description field
   ingredients: Ingredient[];
   instructions: string[];
 }
@@ -26,15 +26,18 @@ interface MealPreferences {
   query?: string;
 }
 
+// ✅ 1. Define the expected request body structure
+interface SuggestionRequestBody {
+  vetoedTitles?: string[];
+}
+
+
 const route = new Hono();
 
-// Initialize OpenAI client from environment variables
 const openai = new OpenAI({
   apiKey: Bun.env.OPENAI_API_KEY,
 });
 
-// This system prompt provides the core instructions and defines the output structure.
-// It is sent with every request but is static, separating it from the dynamic user preferences.
 const systemPrompt = `
 You are a creative recipe assistant. Your task is to generate 3 unique and varied meal recipes based on user preferences.
 Ensure the recipes are distinct from one another (e.g., different primary proteins, cooking methods, or flavor profiles).
@@ -43,7 +46,7 @@ You MUST return a raw JSON array with exactly 3 recipe objects, matching this st
 [
   {
     "name": "Recipe Name",
-    "description": "A short description providing the main ingredients, and a hook",
+    "description": "A short, enticing description that highlights the main flavors or ingredients.",
     "ingredients": [
       { "name": "Ingredient Name", "quantity": "e.g., 1 cup or 200g" }
     ],
@@ -58,82 +61,68 @@ You MUST return a raw JSON array with exactly 3 recipe objects, matching this st
 Do not include the 'photoURL' field. Do not include markdown, code fences, or any text outside of the JSON array.
 `;
 
-// Protect this route
 route.use('*', auth);
 
-/**
- * POST /api/meal/suggest
- * Generates 3 meal suggestions based on the user's saved preferences.
- */
 route.post('/', async (c) => {
   const uid = c.get('uid') as string;
+
+  // ✅ 2. Read the optional 'vetoedTitles' from the request body
+  let vetoedTitles: string[] = [];
+  try {
+    const body = await c.req.json<SuggestionRequestBody>();
+    if (body.vetoedTitles && Array.isArray(body.vetoedTitles)) {
+      vetoedTitles = body.vetoedTitles;
+    }
+  } catch (e) {
+    // Ignore errors if the body is empty or not valid JSON
+  }
   
-  // 1. Fetch user's saved preferences from Firestore
   const prefRef = fs.collection('userPreferences').doc(uid);
   const prefDoc = await prefRef.get();
 
-  // 2. Check if preferences exist
   if (!prefDoc.exists) {
-    return c.json({
-        error: 'Meal preferences not set.',
-        action: 'redirect_to_preferences'
-    }, 404);
+    return c.json({ error: 'Meal preferences not set.', action: 'redirect_to_preferences' }, 404);
   }
 
   const preferences = prefDoc.data() as MealPreferences;
-
-  // 3. Build a simple user prompt with only the dynamic preferences
   const userPromptParts: string[] = ['Generate recipes based on these preferences:'];
-  if (preferences.dietaryNeeds?.length) {
-    userPromptParts.push(`- Dietary Needs: ${preferences.dietaryNeeds.join(', ')}.`);
-  }
-  if (preferences.cookingStyles?.length) {
-    userPromptParts.push(`- Preferred Cooking Styles: ${preferences.cookingStyles.join(', ')}.`);
-  }
-  if (preferences.cuisines?.length) {
-    userPromptParts.push(`- Preferred Cuisines: ${preferences.cuisines.join(', ')}.`);
-  }
-  if (preferences.dislikedIngredients?.length) {
-    userPromptParts.push(`- Must NOT contain: ${preferences.dislikedIngredients.join(', ')}.`);
-  }
+
+  if (preferences.dietaryNeeds?.length) userPromptParts.push(`- Dietary Needs: ${preferences.dietaryNeeds.join(', ')}.`);
+  if (preferences.cookingStyles?.length) userPromptParts.push(`- Preferred Cooking Styles: ${preferences.cookingStyles.join(', ')}.`);
+  if (preferences.cuisines?.length) userPromptParts.push(`- Preferred Cuisines: ${preferences.cuisines.join(', ')}.`);
+  if (preferences.dislikedIngredients?.length) userPromptParts.push(`- Must NOT contain: ${preferences.dislikedIngredients.join(', ')}.`);
   
+  // ✅ 3. Add the vetoed titles to the user prompt if they exist
+  if (vetoedTitles.length > 0) {
+    userPromptParts.push(`- Do NOT suggest any recipes closely related to the following: ${vetoedTitles.join(', ')}.`);
+  }
+
   const userPrompt = userPromptParts.length > 1 ? userPromptParts.join('\n') : 'Generate any 3 varied recipes.';
 
-  // 4. Call the OpenAI API
   try {
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
-        { role: 'system', content: systemPrompt }, // The static, reusable instructions
-        { role: 'user', content: userPrompt }      // The dynamic, user-specific part
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
       ],
-      response_format: { type: "json_object" }
+      response_format: { type: "json_object" },
     });
 
     const content = completion.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('AI returned empty content.');
-    }
+    if (!content) throw new Error('AI returned empty content.');
     
-    // 5. The API in JSON mode with a detailed prompt should return an array
-    // but the type is `any` so we parse it as an object that contains the array.
-    // GPT models sometimes wrap the array in a root key like "recipes".
     let recipes: Recipe[] = [];
     const parsedContent = JSON.parse(content);
 
-    // Find the array in the parsed JSON, whether it's the root or nested.
     if (Array.isArray(parsedContent)) {
-        recipes = parsedContent;
+      recipes = parsedContent;
     } else if (typeof parsedContent === 'object' && parsedContent !== null) {
-        const key = Object.keys(parsedContent).find(k => Array.isArray(parsedContent[k]));
-        if (key) {
-            recipes = parsedContent[key];
-        }
+      const key = Object.keys(parsedContent).find(k => Array.isArray(parsedContent[k]));
+      if (key) recipes = parsedContent[key];
     }
 
-    if (recipes.length === 0) {
-      throw new Error('Failed to parse a valid recipe array from AI response.');
-    }
+    if (recipes.length === 0) throw new Error('Failed to parse a valid recipe array from AI response.');
     
     return c.json(recipes);
 
