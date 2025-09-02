@@ -107,8 +107,7 @@ route.post('/', async (c) => {
         { role: 'system', content: systemPrompt }, // The static, reusable instructions
         { role: 'user', content: userPrompt }      // The dynamic, user-specific part
       ],
-      response_format: { type: "json_object" },
-      temperature: 2
+      response_format: { type: "json_object" }
     });
 
     const content = completion.choices?.[0]?.message?.content;
