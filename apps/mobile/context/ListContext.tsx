@@ -34,21 +34,16 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
         const fetchedLists = await getLists(id);
         setAllLists(fetchedLists);
         if (fetchedLists.length > 0) {
-            const fetchedListsWithContent = fetchedLists.filter((list: List) => {
-            // ✅ Guard Clause: Make sure .items exists and is an array before using it
-            if (!list.items || !Array.isArray(list.items)) {
-              return false; // If no items array, it has no content.
-            }
-
-            // Now it's safe to filter the items
-            const nonBlankItems = list.items.filter((item) => item && item.text && item.text.trim() !== '');
-            return nonBlankItems.length > 0;
+          const fetchedListsWithContent = fetchedLists.filter((list: List) => {
+            return list.hasContent;
           });
 
-          const listsToSort = fetchedListsWithContent.length > 0 ? fetchedListsWithContent : fetchedLists;
-
-          // This will now work safely because listsToSort is guaranteed to have at least one item
-          setSelectedList([...listsToSort].sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime())[0]);
+          if(fetchedListsWithContent.length > 0) {
+            setSelectedList([...fetchedListsWithContent].sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime())[0]);
+          }
+          else {
+            setSelectedList([...fetchedLists].sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime())[0]);
+          }
         } else {
           setSelectedList(null);
         }

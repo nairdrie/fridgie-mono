@@ -300,6 +300,10 @@ export default function UserProfile() {
                                 editable={true}
                             />
                         }
+                        <TouchableOpacity style={styles.editMealPreferences} onPress={() => router.push('/meal-preferences')}>
+                            <Ionicons name="pencil" size={16} color="#007AFF"></Ionicons>
+                            <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
 
@@ -716,4 +720,16 @@ const styles = StyleSheet.create({
         borderTopColor: '#eee',
         backgroundColor: '#fff',
     },
+    editMealPreferences: {
+        marginTop: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+    },
+    editMealPreferencesText: {
+        color: '#007AFF',
+        fontSize: 16,
+        fontWeight: '500',
+        marginLeft: 5
+    }
 });

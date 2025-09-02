@@ -3,6 +3,7 @@ import { Group, UserProfile } from '@/types/types';
 import { getGroups, loginWithToken } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, db } from '@/utils/firebase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useSegments } from 'expo-router';
 import { onAuthStateChanged, signInAnonymously, updateProfile, User } from 'firebase/auth';
 import { onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
@@ -46,6 +47,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [selectedGroup, setSelectedGroup] = useState<GroupWithPresence | null>(null);
   const [loading, setLoading] = useState(true);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
+  const [storedGroupId, setStoredGroupId] = useState<string | null | undefined>(undefined);
+
 
   const router = useRouter();
 
@@ -94,6 +97,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => unsubscribe();
+  }, []);
+
+  // Effect to load the stored group ID on mount
+  useEffect(() => {
+    const loadSelectedGroup = async () => {
+      try {
+        const groupId = await AsyncStorage.getItem('selectedGroupId');
+        setStoredGroupId(groupId); // Will be string or null
+      } catch (e) {
+        console.error("Failed to load selected group ID.", e);
+      }
+    };
+    loadSelectedGroup();
   }, []);
 
   useEffect(() => {
@@ -161,8 +177,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         setGroups(fetchedGroups);
         if (fetchedGroups.length > 0) {
-            const currentSelected = selectedGroup ? fetchedGroups.find(g => g.id === selectedGroup.id) : undefined;
-            setSelectedGroup(currentSelected || fetchedGroups[0]);
+          const previouslySelected = storedGroupId ? fetchedGroups.find(g => g.id === storedGroupId) : null;
+           setSelectedGroup(previouslySelected || fetchedGroups[0]);
         } else {
             setSelectedGroup(null);
         }
@@ -179,7 +195,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, [user]);
 
-  // ✅ This new effect syncs the current user's profile changes into the groups state
   useEffect(() => {
     // Only run if we have a logged-in user and groups have been loaded
     if (user && groups.length > 0) {
@@ -228,6 +243,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const selectGroup = (group: Group) => {
     setSelectedGroup(group);
+    AsyncStorage.setItem('selectedGroupId', group.id).catch(e => {
+      console.error("Failed to save selected group.", e);
+    });
   };
 
   const value = {

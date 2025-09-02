@@ -68,6 +68,8 @@ export default function ListScreen() {
 
   const [collapsedMeals, setCollapsedMeals] = useState<Record<string, boolean>>({});
 
+  const [vetoedMeals, setVetoedMeals] = useState<string[]>([]);
+
 
   const dirtyUntilRef = useRef<number>(0);
   const markDirty = () => {
@@ -172,7 +174,14 @@ export default function ListScreen() {
   
     // Set up an interval to cycle through messages
     const intervalId = setInterval(() => {
+      // increment the indexref until the end then stop.
+      if (loadingMessageIndexRef.current >= goofyLoadingMessages.length) {
+        clearInterval(intervalId);
+        return;
+      }
+  
       loadingMessageIndexRef.current = (loadingMessageIndexRef.current + 1) % goofyLoadingMessages.length;
+      
       setLoadingMessage(goofyLoadingMessages[loadingMessageIndexRef.current]);
     }, 4000); // Change message every 2.5 seconds
   
@@ -367,13 +376,41 @@ export default function ListScreen() {
     markDirty(); // Trigger debounced save
   };
 
-  // ✅ NEW: Handler to update a meal
+   const handleRerollSuggestions = async () => {
+    if (isSuggesting) return;
+
+    // Add the current suggestions to the list of vetoed meals for this session
+    const currentTitles = mealSuggestions.map(s => s.name);
+    const newVetoedList = [...vetoedMeals, ...currentTitles];
+    setVetoedMeals(newVetoedList);
+    
+    // Set loading state and clear selections
+    setIsSuggesting(true);
+    setSelectedSuggestions({});
+    setMealSuggestions([]);
+
+    try {
+      // Call the API, passing the cumulative list of vetoed titles
+      const suggestionsFromApi = await getMealSuggestions(newVetoedList);
+      const suggestionsWithId = suggestionsFromApi.map(suggestion => ({
+        ...suggestion,
+        id: uuid.v4() as string,
+      }));
+      setMealSuggestions(suggestionsWithId);
+    } catch (error) {
+      console.error('An unexpected error occurred during reroll:', error);
+      // Optionally close the modal or show an error message within it
+      setSuggestionModalVisible(false);
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
+
   const handleUpdateMeal = (mealId: string, updates: Partial<Meal>) => {
     setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
     markDirty();
   };
   
-  // ✅ NEW: Handler to delete a meal and its associated items
   const handleDeleteMeal = (mealId: string) => {
     setMeals(prev => prev.filter(meal => meal.id !== mealId));
     setItems(prev => prev.filter(item => item.mealId !== mealId)); // Also remove ingredients
@@ -481,7 +518,7 @@ export default function ListScreen() {
     }
   };
 
-  // ✅ NEW: Toggles the selection state for a recipe in the modal.
+
   const toggleSuggestionSelection = (recipeId: string) => {
     setSelectedSuggestions((prev) => ({
       ...prev,
@@ -489,7 +526,7 @@ export default function ListScreen() {
     }));
   };
 
-  // ✅ NEW: Adds the selected meals and their ingredients to the main list.
+
   const handleAddSelectedMeals = () => {
     if (!selectedList) return;
 
@@ -740,6 +777,18 @@ export default function ListScreen() {
                 </Text>
             </View>
           ) : (
+            <>
+            <View style={styles.rerollButtonContainer}>
+              <TouchableOpacity
+              style={styles.rerollButton}
+              onPress={handleRerollSuggestions}
+              disabled={isSuggesting}
+            >
+              <Ionicons name="dice" size={18} color="white" />
+              <Text style={styles.rerollButtonText}>Re-roll</Text>
+          </TouchableOpacity>
+            </View>
+            
             <FlatList
               data={mealSuggestions}
               keyExtractor={(item) => item.id}
@@ -761,6 +810,7 @@ export default function ListScreen() {
                 );
               }}
             />
+            </> 
           )}
           <TouchableOpacity
             style={[styles.modalButton, selectedCount === 0 && styles.modalButtonDisabled]}
@@ -818,127 +868,182 @@ export default function ListScreen() {
         </View>
       </Modal>
       <Modal
-            animationType="slide"
-            visible={isAddRecipeModalVisible}
-            onRequestClose={() => setAddRecipeModalVisible(false)}
+      animationType="slide"
+      visible={isAddRecipeModalVisible}
+      onRequestClose={() => setAddRecipeModalVisible(false)}
+    >
+      <SafeAreaView style={styles.modalContainer}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
-          <SafeAreaView style={{ flex: 1 }}>
-            <KeyboardAvoidingView 
-                style={{ flex: 1 }} 
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            >
-            <ScrollView
-                style={styles.addRecipeContainer}
-                contentContainerStyle={styles.addRecipeScrollViewContent}
-                keyboardShouldPersistTaps="handled" // Improves keyboard interaction
-            >
-                <Text style={styles.modalTitle}>Add a Recipe</Text>
+          {/* --- Header --- */}
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Add a Recipe</Text>
+            <TouchableOpacity onPress={() => setAddRecipeModalVisible(false)}>
+              <Ionicons name="close-circle" size={28} color="#aaa" />
+            </TouchableOpacity>
+          </View>
 
-                {/* Import Section */}
-                <View style={styles.importSection}>
-                    <Text style={styles.recipeSectionTitle}>Import from URL</Text>
-                    <TextInput
-                        style={styles.urlInput}
-                        placeholder="e.g., allrecipes.com/..."
-                        value={importUrl}
-                        onChangeText={setImportUrl}
-                        autoCapitalize="none"
-                        keyboardType="url"
-                    />
-                    <TouchableOpacity
-                        style={[styles.modalButton, { opacity: isImportingRecipe ? 0.6 : 1 }]}
-                        onPress={handleImportRecipe}
-                        disabled={isImportingRecipe}
-                    >
-                        {isImportingRecipe ? (
-                            <ActivityIndicator color="#fff" />
-                        ) : (
-                            <Text style={styles.modalButtonText}>Import Recipe</Text>
-                        )}
-                    </TouchableOpacity>
-                </View>
-                
-                {/* The main form content */}
-                {editingRecipe && (
-                    <>
-                        <TextInput
-                            style={styles.recipeTitleInput}
-                            placeholder="Recipe Name"
-                            value={editingRecipe.name}
-                            onChangeText={val => handleRecipeFieldChange('name', val)}
-                        />
-                        <TextInput
-                            style={styles.recipeDescriptionInput}
-                            placeholder="A short, tasty description..."
-                            value={editingRecipe.description}
-                            onChangeText={val => handleRecipeFieldChange('description', val)}
-                            multiline
-                        />
-
-                        {/* Ingredients Form */}
-                        <Text style={styles.recipeSectionTitle}>Ingredients</Text>
-                        {editingRecipe.ingredients.map((ing, index) => (
-                            <View key={`ing-${index}`} style={styles.formRow}>
-                                <TextInput
-                                    style={styles.quantityInput}
-                                    placeholder="1 cup"
-                                    value={ing.quantity}
-                                    onChangeText={val => handleIngredientChange(index, 'quantity', val)}
-                                />
-                                <TextInput
-                                    style={styles.nameInput}
-                                    placeholder="Flour"
-                                    value={ing.name}
-                                    onChangeText={val => handleIngredientChange(index, 'name', val)}
-                                />
-                                <TouchableOpacity onPress={() => removeIngredientField(index)}>
-                                    <Ionicons name="remove-circle-outline" size={24} color="red" />
-                                </TouchableOpacity>
-                            </View>
-                        ))}
-                        <TouchableOpacity style={styles.addButton} onPress={addIngredientField}>
-                            <Text style={styles.addButtonText}>+ Add Ingredient</Text>
-                        </TouchableOpacity>
-
-                        {/* Instructions Form */}
-                        <Text style={styles.recipeSectionTitle}>Instructions</Text>
-                        {editingRecipe.instructions.map((inst, index) => (
-                            <View key={`inst-${index}`} style={styles.formRow}>
-                                <Text style={{marginRight: 8, fontSize: 16}}>{index + 1}.</Text>
-                                <TextInput
-                                    style={styles.nameInput}
-                                    placeholder="Mix the things"
-                                    value={inst}
-                                    onChangeText={val => handleInstructionChange(index, val)}
-                                    multiline
-                                />
-                                <TouchableOpacity onPress={() => removeInstructionField(index)}>
-                                    <Ionicons name="remove-circle-outline" size={24} color="red" />
-                                </TouchableOpacity>
-                            </View>
-                        ))}
-                        <TouchableOpacity style={styles.addButton} onPress={addInstructionField}>
-                            <Text style={styles.addButtonText}>+ Add Step</Text>
-                        </TouchableOpacity>
-                    </>
+          <ScrollView
+            style={styles.modalScrollView}
+            contentContainerStyle={styles.modalScrollViewContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* --- Import Section --- */}
+            <View style={styles.formSectionContainer}>
+              <Text style={styles.formSectionTitle}>Import from URL</Text>
+              <TextInput
+                style={styles.formInput}
+                placeholder="e.g., allrecipes.com/..."
+                placeholderTextColor="#999"
+                value={importUrl}
+                onChangeText={setImportUrl}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  isImportingRecipe && styles.disabledButton,
+                ]}
+                onPress={handleImportRecipe}
+                disabled={isImportingRecipe}
+              >
+                {isImportingRecipe ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Import</Text>
                 )}
+              </TouchableOpacity>
+            </View>
 
-                {/* The footer with action buttons */}
-                <View style={styles.addRecipeFooter}>
-                    <TouchableOpacity
-                        style={[styles.modalButton, { backgroundColor: '#555' }]}
-                        onPress={() => setAddRecipeModalVisible(false)}
-                    >
-                        <Text style={styles.modalButtonText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.modalButton} onPress={handleSaveRecipe}>
-                        <Text style={styles.modalButtonText}>Save Recipe</Text>
-                    </TouchableOpacity>
+            {/* --- Main Form --- */}
+            {editingRecipe && (
+              <>
+                {/* --- Name & Description --- */}
+                <View style={styles.formSectionContainer}>
+                  <TextInput
+                    style={styles.recipeNameInput}
+                    placeholder="Recipe Name"
+                    placeholderTextColor="#999"
+                    value={editingRecipe.name}
+                    onChangeText={(val) => handleRecipeFieldChange('name', val)}
+                  />
+                  <TextInput
+                    style={[styles.formInput, styles.descriptionInput]}
+                    placeholder="A short, tasty description..."
+                    placeholderTextColor="#999"
+                    value={editingRecipe.description}
+                    onChangeText={(val) =>
+                      handleRecipeFieldChange('description', val)
+                    }
+                    multiline
+                  />
                 </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
-          </SafeAreaView>
-        </Modal>
+
+                {/* --- Ingredients --- */}
+                <View style={styles.formSectionContainer}>
+                  <Text style={styles.formSectionTitle}>Ingredients</Text>
+                  {editingRecipe.ingredients.map((ing, index) => (
+                    <View key={`ing-${index}`} style={styles.formRow}>
+                      <TextInput
+                        style={[styles.formInput, styles.quantityInput]}
+                        placeholder="1 cup"
+                        placeholderTextColor="#999"
+                        value={ing.quantity}
+                        onChangeText={(val) =>
+                          handleIngredientChange(index, 'quantity', val)
+                        }
+                      />
+                      <TextInput
+                        style={[styles.formInput, styles.nameInput]}
+                        placeholder="Flour"
+                        placeholderTextColor="#999"
+                        value={ing.name}
+                        onChangeText={(val) =>
+                          handleIngredientChange(index, 'name', val)
+                        }
+                      />
+                      <TouchableOpacity
+                        onPress={() => removeIngredientField(index)}
+                        style={styles.deleteRowButton}
+                      >
+                        <Ionicons
+                          name="remove-circle-outline"
+                          size={24}
+                          color="#EF4444"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.addFieldButton}
+                    onPress={addIngredientField}
+                  >
+                    <Ionicons name="add" size={20} color="#007AFF" />
+                    <Text style={styles.addFieldButtonText}>Add Ingredient</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* --- Instructions --- */}
+                <View style={styles.formSectionContainer}>
+                  <Text style={styles.formSectionTitle}>Instructions</Text>
+                  {editingRecipe.instructions.map((inst, index) => (
+                    <View key={`inst-${index}`} style={styles.formRow}>
+                      <Text style={styles.stepNumber}>{index + 1}.</Text>
+                      <TextInput
+                        style={[styles.formInput, styles.nameInput]}
+                        placeholder="Mix the things..."
+                        placeholderTextColor="#999"
+                        value={inst}
+                        onChangeText={(val) =>
+                          handleInstructionChange(index, val)
+                        }
+                        multiline
+                      />
+                      <TouchableOpacity
+                        onPress={() => removeInstructionField(index)}
+                        style={styles.deleteRowButton}
+                      >
+                        <Ionicons
+                          name="remove-circle-outline"
+                          size={24}
+                          color="#EF4444"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    style={styles.addFieldButton}
+                    onPress={addInstructionField}
+                  >
+                    <Ionicons name="add" size={20} color="#007AFF" />
+                    <Text style={styles.addFieldButtonText}>Add Step</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </ScrollView>
+
+          {/* --- Footer --- */}
+          <View style={styles.modalFooter}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => setAddRecipeModalVisible(false)}
+            >
+              <Text style={styles.secondaryButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleSaveRecipe}
+            >
+              <Text style={styles.primaryButtonText}>Save Recipe</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </Modal>
     </View>
     </>
   );
@@ -1020,6 +1125,30 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  rerollButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  rerollButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 30,
+    width: 'auto',
+    alignItems: 'center',
+    // marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  rerollButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft:5
   },
   modalButtonDisabled: {
     backgroundColor: '#ccc',
@@ -1072,11 +1201,11 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     marginBottom: 10,
   },
-  // ✅ MODIFIED: This now only handles flex behavior
+
     addRecipeContainer: {
         flex: 1,
     },
-    // ✅ NEW: This style applies padding to the scrollable content area
+
     addRecipeScrollViewContent: {
         padding: 20,
         paddingBottom: 60, // Extra space at the bottom for buttons
@@ -1093,6 +1222,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ccc',
     padding: 10,
+    color: 'black',
     borderRadius: 8,
     fontSize: 16,
     marginBottom: 10,
@@ -1145,5 +1275,136 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: 20,
-  }
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#F7F7F7', // A slightly off-white background
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EFEFEF',
+  },
+  addRecipemodalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  modalScrollView: {
+    flex: 1,
+  },
+  modalScrollViewContent: {
+    padding: 16,
+    paddingBottom: 100, // Extra space for footer
+  },
+  formSectionContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  formSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  formInput: {
+    color: '#222222',
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  recipeNameInput: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderColor: '#EFEFEF',
+    paddingBottom: 8,
+  },
+  descriptionInput: {
+    minHeight: 80,
+    textAlignVertical: 'top', // For Android
+  },
+  addRecipeformRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  addRecipequantityInput: {
+    flex: 0.3,
+    marginRight: 8,
+  },
+  addRecipenameInput: {
+    flex: 1,
+  },
+  stepNumber: {
+    marginRight: 8,
+    fontSize: 16,
+    color: '#888',
+  },
+  deleteRowButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  addFieldButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+  },
+  addFieldButtonText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#EFEFEF',
+    backgroundColor: '#FFFFFF',
+  },
+  primaryButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  secondaryButton: {
+    backgroundColor: '#EFEFEF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
+  },
+  secondaryButtonText: {
+    color: '#333',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
 });

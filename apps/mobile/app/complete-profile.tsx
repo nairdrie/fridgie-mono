@@ -79,7 +79,6 @@ export default function CompleteProfileScreen() {
   const carouselData = [...defaultAvatars, 'upload'];
 
   const handlePickImage = async () => {
-    console.log('handlePickImage called');
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Sorry, we need camera roll permissions to make this work!');

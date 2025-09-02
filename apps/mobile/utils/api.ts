@@ -35,7 +35,6 @@ async function authorizedFetch(
 ): Promise<Response> {
   // ✅ Wait for the initial auth check to complete
   await authStatePromise;
-  console.log(`try authorized fetch for ${input}. current auth state:  ${auth.currentUser} ${auth.currentUser?.uid} (${auth.currentUser?.isAnonymous})`);
   let user = auth.currentUser
   if (!user) {
     const result = await signInAnonymously(auth)
@@ -58,7 +57,6 @@ async function authorizedFetch(
     throw new ApiError(errorMessage, res.status);
   }
 
-  console.log(res);
 
   return res;
 }
@@ -133,7 +131,6 @@ export async function searchUsers(query: string): Promise<User[]> {
   if (!query.trim()) {
     return [];
   }
-  console.log(query);
   const res = await authorizedFetch(`${BASE_URL}/user?q=${encodeURIComponent(query)}`);
   return res.json();
 }
@@ -163,7 +160,6 @@ export async function createMeal(
   listId: string,
   dayOfWeek: Meal['dayOfWeek']
 ): Promise<Meal> {
-  console.log('FAKE API: Creating meal', { groupId, listId, dayOfWeek });
   // In a real app, this would hit your backend.
   const newMeal: Meal = {
     id: Math.random().toString(36).substring(2, 15),
@@ -181,13 +177,11 @@ export async function updateMeal(
   mealId: string,
   data: Partial<Meal>
 ) {
-  console.log('FAKE API: Updating meal', { groupId, mealId, data });
   // This would hit your backend to save changes to a meal.
   // Since our listener will provide the "updated" data, we don't need to return anything.
 }
 
 export async function deleteMeal(groupId: string, mealId: string) {
-  console.log('FAKE API: Deleting meal', { groupId, mealId });
   // This would hit your backend to delete a meal.
 }
 
@@ -196,10 +190,11 @@ export async function deleteMeal(groupId: string, mealId: string) {
  * @param preferences An object containing the user's meal preferences.
  * @returns A promise that resolves to a meal suggestion.
  */
-export async function getMealSuggestions(): Promise<Recipe[]> {
+export async function getMealSuggestions(vetoedTitles?: string[]): Promise<Recipe[]> {
   const res = await authorizedFetch(`${BASE_URL}/meal/suggest`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vetoedTitles }),
   });
   return res.json();
 }

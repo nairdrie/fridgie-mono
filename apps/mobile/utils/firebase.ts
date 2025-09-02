@@ -28,7 +28,6 @@ const getFirebaseApp = () => {
 
 const app = getFirebaseApp();
 
-console.log(`INITIALIZING AUTH FOR ${Platform.OS}`)
 const auth = initializeAuth(app, {
   persistence: Platform.OS === 'web'
     ? browserLocalPersistence // Use browser's local storage for web
