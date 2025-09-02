@@ -15,7 +15,8 @@ interface MealPlanViewProps {
   onDeleteMeal: (mealId: string) => void;
   onAddMeal: () => void;
   onAddRecipe: (meal: Meal) => void;
-  
+  collapsedMeals: Record<string, boolean>;
+  onToggleMealCollapse: (mealId: string) => void;
   // ✅ Add the new props to the interface
   editingId: string;
   setEditingId: React.Dispatch<React.SetStateAction<string>>;
@@ -40,6 +41,8 @@ export default function MealPlanView({
   inputRefs,
   isKeyboardVisible,
   markDirty,
+  collapsedMeals,
+  onToggleMealCollapse
 }: MealPlanViewProps) {
 
   const sortedMeals = useMemo(() => {
@@ -82,7 +85,6 @@ export default function MealPlanView({
             setAllItems={setAllItems}
             onUpdateMeal={onUpdateMeal}
             onDeleteMeal={onDeleteMeal}
-            // ✅ Pass the props down to each MealCard
             editingId={editingId}
             setEditingId={setEditingId}
             inputRefs={inputRefs}
@@ -90,6 +92,8 @@ export default function MealPlanView({
             markDirty={markDirty}
             onViewRecipe={onViewRecipe}
             onAddRecipe={onAddRecipe}
+            isCollapsed={!!collapsedMeals[meal.id]}
+            onToggleCollapse={onToggleMealCollapse}
           />
         )}
         contentContainerStyle={styles.container}

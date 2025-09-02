@@ -4,6 +4,7 @@ import MealPlanView from '@/components/MealPlanView';
 import { useLists } from '@/context/ListContext';
 import { Ingredient, Item, List, ListView, Meal, Recipe } from '@/types/types';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LexoRank } from 'lexorank';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -64,6 +65,8 @@ export default function ListScreen() {
   const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
   const [importUrl, setImportUrl] = useState('');
   const [isImportingRecipe, setIsImportingRecipe] = useState(false);
+
+  const [collapsedMeals, setCollapsedMeals] = useState<Record<string, boolean>>({});
 
 
   const dirtyUntilRef = useRef<number>(0);
@@ -176,6 +179,20 @@ export default function ListScreen() {
     // Cleanup function to clear the interval when loading stops or the component unmounts
     return () => clearInterval(intervalId);
   }, [isSuggesting]); // This effect specifically runs when `isSuggesting` changes
+
+  useEffect(() => {
+      const loadCollapsedState = async () => {
+         try {
+            const storedState = await AsyncStorage.getItem('collapsedMealState');
+            if (storedState) {
+               setCollapsedMeals(JSON.parse(storedState));
+            }
+         } catch (e) {
+            console.error("Failed to load collapsed meal state.", e);
+         }
+      };
+      loadCollapsedState();
+   }, []);
 
 
   const assignRef = useCallback((id: string) => (ref: TextInput | null) => { inputRefs.current[id] = ref; }, []);
@@ -526,6 +543,19 @@ export default function ListScreen() {
     setSuggestionModalVisible(false);
   };
 
+  const onToggleMealCollapse = async (mealId: string) => {
+    const updatedStates = {
+      ...collapsedMeals,
+      [mealId]: !collapsedMeals[mealId]
+    };
+    setCollapsedMeals(updatedStates);
+    try {
+      await AsyncStorage.setItem('collapsedMealState', JSON.stringify(updatedStates));
+    } catch (e) {
+      console.error("Failed to save collapsed meal state.", e);
+    }
+  };
+
   const handleAddItem = (isSection=false) => {
     // This function now only runs if there is already a selected list.
     if (!selectedList) return;
@@ -646,7 +676,8 @@ export default function ListScreen() {
             onAddMeal={handleAddMeal}
             onViewRecipe={handleViewRecipe}
             onAddRecipe={handleAddRecipe}
-            // ✅ Pass down the required props
+            collapsedMeals={collapsedMeals}
+            onToggleMealCollapse={onToggleMealCollapse}
             editingId={editingId}
             setEditingId={setEditingId}
             inputRefs={inputRefs}

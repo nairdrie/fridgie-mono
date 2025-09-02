@@ -1,6 +1,6 @@
 // components/Logo.tsx
 import React from 'react';
-import { Image, ImageStyle, StyleProp, ImageResizeMode } from 'react-native';
+import { Image, ImageResizeMode, ImageStyle, StyleProp } from 'react-native';
 
 type LogoVariant = 'tall' | 'wide' | 'small';
 
@@ -30,7 +30,7 @@ export default function Logo({
   const defaultSizes: Record<LogoVariant, { width: number; height: number }> = {
     tall: { width: 240, height: 160 },
     wide: { width: 280, height: 140 },
-    small: { width: 40, height: 40 },
+    small: { width: 200, height: 200 },
   };
 
   const dimensions = {

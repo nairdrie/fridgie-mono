@@ -1,14 +1,13 @@
 // app/_layout.tsx
 import "@/utils/firebase";
 import { Stack } from 'expo-router';
-import React, { useRef } from 'react';
+import React from 'react';
 import { Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Import your components
 import { AuthProvider } from "@/context/AuthContext";
 import { ListProvider } from '@/context/ListContext';
-import { RecaptchaProvider } from "@/context/RecaptchaContext";
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -23,10 +22,8 @@ const RootView = ({ children }: { children: React.ReactNode }) => {
 };
 
 export default function RootLayout() {
-  const recaptchaVerifier = useRef<any>(null);
 
   return (
-    <RecaptchaProvider>
       <SafeAreaProvider>
         <AuthProvider>
         <ListProvider>
@@ -56,12 +53,16 @@ export default function RootLayout() {
                   headerShown: false
                 }}
               />
+              <Stack.Screen
+                name="oauthredirect"
+                options={{ 
+                  headerShown: false
+                }}
+              />
             </Stack>
           </RootView>
         </ListProvider>
       </AuthProvider>
       </SafeAreaProvider>
-  </RecaptchaProvider>
-    
   );
 }

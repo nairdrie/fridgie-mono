@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "725621365755",
+    "firebase_url": "https://grocerease-5abbb-default-rtdb.firebaseio.com",
+    "project_id": "grocerease-5abbb",
+    "storage_bucket": "grocerease-5abbb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:725621365755:android:389d3098981a5229bec95e",
+        "android_client_info": {
+          "package_name": "com.nairdrie.fridgie"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "725621365755-vqpeiaprvh5jlcpnlkuum4m7bg7025qb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCdZz6lHUzLp8cnofLpCVXmC0SsydtKqdc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "725621365755-vqpeiaprvh5jlcpnlkuum4m7bg7025qb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

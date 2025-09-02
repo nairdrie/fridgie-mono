@@ -27,6 +27,8 @@ interface MealCardProps {
   markDirty: () => void;
   onViewRecipe: (recipe: Recipe) => void;
   onAddRecipe: (meal: Meal) => void;  
+  isCollapsed: boolean;
+  onToggleCollapse: (mealId: string) => void;
 }
 
 export default function MealCard({
@@ -41,11 +43,12 @@ export default function MealCard({
   onDeleteMeal,
   markDirty,
   onViewRecipe,
-  onAddRecipe
+  onAddRecipe,
+  isCollapsed,
+  onToggleCollapse
 }: MealCardProps) {
   const hasRecipe = !!meal.recipe;
 
-  const [isCollapsed, setIsCollapsed] = React.useState(false);
   const [isDaySelectorVisible, setIsDaySelectorVisible] = useState(false);
 
   const daySelectorProgress = useSharedValue(0);
@@ -241,7 +244,7 @@ export default function MealCard({
         </View>
         <View style={styles.mealHeader}>
           <View style={styles.mealHeaderUpper}>
-            <TouchableOpacity onPress={() => setIsCollapsed(!isCollapsed)} style={styles.collapseButton}>
+            <TouchableOpacity onPress={() => onToggleCollapse(meal.id)} style={styles.collapseButton}>
             <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
             </TouchableOpacity>
             <TextInput
@@ -250,6 +253,8 @@ export default function MealCard({
                 value={meal.name}
                 onChangeText={(text) => onUpdateMeal(meal.id, { name: text })}
                 placeholder={placeholder} 
+                placeholderTextColor={'grey'}
+
             />
           </View>
           {hasRecipe ? (

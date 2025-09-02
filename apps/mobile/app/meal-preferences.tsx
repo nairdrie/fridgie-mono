@@ -4,16 +4,16 @@ import { saveMealPreferences } from '@/utils/api';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 // --- DATA CONSTANTS ---
@@ -162,6 +162,7 @@ export default function MealPreferencesScreen() {
                 onChangeText={setDislikeInput}
                 onSubmitEditing={handleAddDislike}
                 returnKeyType="done"
+                placeholderTextColor="#999"
               />
               <View style={styles.tagContainer}>
                 {dislikedIngredients.map(ing => (
