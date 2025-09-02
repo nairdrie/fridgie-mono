@@ -102,12 +102,13 @@ route.post('/', async (c) => {
   // 4. Call the OpenAI API
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-5-nano-2025-08-07',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt }, // The static, reusable instructions
         { role: 'user', content: userPrompt }      // The dynamic, user-specific part
       ],
-      response_format: { type: "json_object" }
+      response_format: { type: "json_object" },
+      temperature: 5
     });
 
     const content = completion.choices?.[0]?.message?.content;
