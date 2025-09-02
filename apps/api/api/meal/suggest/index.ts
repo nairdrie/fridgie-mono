@@ -108,6 +108,7 @@ route.post('/', async (c) => {
         { role: 'user', content: userPrompt }      // The dynamic, user-specific part
       ],
       response_format: { type: "json_object" },
+      temperature: 0.9
     });
 
     const content = completion.choices?.[0]?.message?.content;
