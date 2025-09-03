@@ -1,8 +1,8 @@
 // screens/MealPreferencesScreen.tsx
 
-import { saveMealPreferences } from '@/utils/api';
+import { getMealPreferences, saveMealPreferences } from '@/utils/api';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -50,8 +50,26 @@ export default function MealPreferencesScreen() {
   const [dietaryNeeds, setDietaryNeeds] = useState<string[]>([]);
   const [cookingStyles, setCookingStyles] = useState<string[]>([]);
   const [cuisines, setCuisines] = useState<string[]>([]);
-  const [dislikedIngredients, setDislikedIngredients] = useState<string[]>([]);
-  const [dislikeInput, setDislikeInput] = useState('');
+  const [dislikedIngredients, setDislikedIngredients] = useState<string>('');
+
+   useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const prefs = await getMealPreferences();
+        if (prefs) {
+          setDietaryNeeds(prefs.dietaryNeeds || []);
+          setCookingStyles(prefs.cookingStyles || []);
+          setCuisines(prefs.cuisines || []);
+          setDislikedIngredients(prefs.dislikedIngredients || '');
+        }
+      } catch (error) {
+        // This is expected for new users, so we can ignore the error.
+        console.log("No existing preferences found. Starting fresh.");
+      }
+    };
+
+    loadPreferences();
+  }, []);
 
   const toggleSelection = (setter: React.Dispatch<React.SetStateAction<string[]>>, value: string) => {
     setter(prev =>
@@ -61,17 +79,6 @@ export default function MealPreferencesScreen() {
     );
   };
   
-  const handleAddDislike = () => {
-    if (dislikeInput.trim() && !dislikedIngredients.includes(dislikeInput.trim())) {
-      setDislikedIngredients(prev => [...prev, dislikeInput.trim()]);
-      setDislikeInput('');
-    }
-  };
-  
-  const handleRemoveDislike = (ingredientToRemove: string) => {
-      setDislikedIngredients(prev => prev.filter(ing => ing !== ingredientToRemove));
-  };
-
   const handleNext = () => {
     if (currentStep < TOTAL_STEPS) {
       setCurrentStep(currentStep + 1);
@@ -157,23 +164,11 @@ export default function MealPreferencesScreen() {
               <Text style={styles.subtitle}>List any ingredients you dislike.</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g., mushrooms, cilantro, olives..."
-                value={dislikeInput}
-                onChangeText={setDislikeInput}
-                onSubmitEditing={handleAddDislike}
-                returnKeyType="done"
+                placeholder="e.g., mushrooms, cilantro, olives"
+                value={dislikedIngredients}
+                onChangeText={setDislikedIngredients}
                 placeholderTextColor="#999"
               />
-              <View style={styles.tagContainer}>
-                {dislikedIngredients.map(ing => (
-                    <View key={ing} style={styles.tag}>
-                        <Text style={styles.tagText}>{ing}</Text>
-                        <TouchableOpacity onPress={() => handleRemoveDislike(ing)}>
-                            <Text style={styles.tagRemove}>✕</Text>
-                        </TouchableOpacity>
-                    </View>
-                ))}
-              </View>
             </>
           );
       default:

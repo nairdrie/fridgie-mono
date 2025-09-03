@@ -1,7 +1,7 @@
 import { useLists } from '@/context/ListContext';
 import { List, ListView } from '@/types/types';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -30,6 +30,12 @@ export default function ListHeader() {
 
  // State to hold the width of a single segment for the animation
   const [segmentWidth, setSegmentWidth] = useState(0);
+
+  const [activeView, setActiveView] = useState(selectedView);
+
+  useEffect(() => {
+    setActiveView(selectedView);
+  }, [selectedView]);
   
 
   const handleSelectList = (list: List) => {
@@ -48,7 +54,7 @@ export default function ListHeader() {
     return {
       transform: [
         {
-          translateX: withTiming(selectedView === ListView.GroceryList ? 0 : segmentWidth-4, {
+          translateX: withTiming(activeView === ListView.GroceryList ? 0 : segmentWidth-4, {
             duration: 250, // Animation speed
           }),
         },
@@ -90,13 +96,13 @@ export default function ListHeader() {
                 style={styles.segment}
                 onPress={() => selectView(ListView.GroceryList)}
               >
-                <Text style={[styles.segmentText, selectedView === ListView.GroceryList && styles.segmentTextActive]}>List</Text>
+                <Text style={[styles.segmentText, activeView === ListView.GroceryList && styles.segmentTextActive]}>List</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.segment}
                 onPress={() => selectView(ListView.MealPlan)}
               >
-                <Text style={[styles.segmentText, selectedView === ListView.MealPlan && styles.segmentTextActive]}>Meals</Text>
+                <Text style={[styles.segmentText, activeView === ListView.MealPlan && styles.segmentTextActive]}>Meals</Text>
               </TouchableOpacity>
             </View>
           </View>

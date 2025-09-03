@@ -10,8 +10,8 @@ import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
 // your API root
-// const BASE_URL = "http://192.168.2.193:3000/api"
-const BASE_URL = "http://35.182.135.90:3000/api"
+const BASE_URL = "http://192.168.2.193:3000/api" // LOCAL
+// const BASE_URL = "http://35.182.135.90:3000/api" // AWS
 
 export class ApiError extends Error {
   status: number;
@@ -208,6 +208,13 @@ export async function saveMealPreferences(preferences: MealPreferences): Promise
   return res.json();
 
 }
+
+export const getMealPreferences = async (): Promise<MealPreferences> => {
+  const res = await authorizedFetch(`${BASE_URL}/meal/preferences`, {
+    method: 'GET',
+  });
+  return res.json()
+};
 
 // ─────── REAL-TIME UPDATES ──────────────────────────────────────────────────
 

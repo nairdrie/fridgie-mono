@@ -49,7 +49,7 @@ export interface MealPreferences {
   dietaryNeeds?: string[];
   cookingStyles?: string[];
   cuisines?: string[];
-  dislikedIngredients?: string[];
+  dislikedIngredients?: string;
   query?: string;
 }
 
