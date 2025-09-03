@@ -96,6 +96,9 @@ export default function MealPlanView({
             onToggleCollapse={onToggleMealCollapse}
           />
         )}
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        windowSize={10}
         contentContainerStyle={styles.container}
       />
     </>

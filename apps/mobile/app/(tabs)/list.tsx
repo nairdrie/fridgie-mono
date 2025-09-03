@@ -437,7 +437,7 @@ export default function ListScreen() {
     markDirty();
     setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
   };
-
+  
   const reRankItems = (data: Item[]) => {
     let rank = LexoRank.middle();
     return data.map(item => { rank = rank.genNext(); return { ...item, order: rank.toString() }; });
@@ -672,7 +672,7 @@ export default function ListScreen() {
     markDirty(); // To trigger the debounced save
   };
 
-  const renderItem = ({ item, drag }: RenderItemParams<Item>) => {
+  const renderItem = useCallback(({ item, drag }: RenderItemParams<Item>) => {
     const isEditing = item.id === editingId;
     return (
       <View style={styles.itemRow}>
@@ -713,7 +713,7 @@ export default function ListScreen() {
         )}
       </View>
     );
-  };
+  }, [editingId, items]);
   
   if (isLoading) {
     return <View style={styles.container}><ActivityIndicator /></View>;
@@ -746,6 +746,9 @@ export default function ListScreen() {
               renderItem={renderItem}
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
+              initialNumToRender={15}
+              maxToRenderPerBatch={10}
+              windowSize={10}
             />
           </>
           

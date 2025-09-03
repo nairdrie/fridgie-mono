@@ -31,7 +31,7 @@ interface MealCardProps {
   onToggleCollapse: (mealId: string) => void;
 }
 
-export default function MealCard({
+function MealCard({
   meal,
   allItems,
   setAllItems,
@@ -284,6 +284,9 @@ export default function MealCard({
                 // To prevent the parent FlatList from scrolling while dragging
                 containerStyle={{ flex: 1 }}
                 simultaneousHandlers={[]} 
+                initialNumToRender={15}
+                maxToRenderPerBatch={10}
+                windowSize={10}
             />
             {ingredients.length === 0 && (
                 <TouchableOpacity 
@@ -387,3 +390,5 @@ const styles = StyleSheet.create({
       fontSize: 12,
     },
 });
+
+export default React.memo(MealCard);
