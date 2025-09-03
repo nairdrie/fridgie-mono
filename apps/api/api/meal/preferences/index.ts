@@ -46,4 +46,22 @@ route.post('/', async (c) => {
   }
 });
 
+route.get('/', async (c) => {
+  const uid = c.get('uid') as string;
+  const prefRef = fs.collection('userPreferences').doc(uid);
+
+  try {
+    const doc = await prefRef.get();
+    if (!doc.exists) {
+      return c.json({ error: 'Meal preferences not set.', action: 'redirect_to_preferences' }, 404);
+    }
+
+    return c.json(doc.data());
+  } catch (error) {
+    console.error('Failed to fetch preferences:', error);
+    return c.json({ error: 'An error occurred while fetching preferences.' }, 500);
+  }
+
+});
+
 export default route;

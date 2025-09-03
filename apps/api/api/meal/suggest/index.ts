@@ -90,7 +90,7 @@ route.post('/', async (c) => {
   if (preferences.dietaryNeeds?.length) userPromptParts.push(`- Dietary Needs: ${preferences.dietaryNeeds.join(', ')}.`);
   if (preferences.cookingStyles?.length) userPromptParts.push(`- Preferred Cooking Styles: ${preferences.cookingStyles.join(', ')}.`);
   if (preferences.cuisines?.length) userPromptParts.push(`- Preferred Cuisines: ${preferences.cuisines.join(', ')}.`);
-  if (preferences.dislikedIngredients?.length) userPromptParts.push(`- Must NOT contain: ${preferences.dislikedIngredients.join(', ')}.`);
+  if (preferences.dislikedIngredients?.length) userPromptParts.push(`- Must NOT contain: ${preferences.dislikedIngredients}.`);
   
   // ✅ 3. Add the vetoed titles to the user prompt if they exist
   if (vetoedTitles.length > 0) {
