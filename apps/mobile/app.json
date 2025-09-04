@@ -15,6 +15,9 @@
         "googleSignIn": {
           "reservedClientId": "598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj.apps.googleusercontent.com"
         }
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

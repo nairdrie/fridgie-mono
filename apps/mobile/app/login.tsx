@@ -310,8 +310,8 @@ setLoading("");
 
         <AppleAuthentication.AppleAuthenticationButton
           buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-          cornerRadius={8}
+          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+          cornerRadius={30}
           style={[styles.appleButton, (loading !== '' && loading !== 'apple') && styles.disabledButton]}
           onPress={handleAppleSignIn}
         />
@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
   heading: { fontSize: 24, fontWeight: '600', textAlign: 'center', marginBottom: 24 },
   primaryButton: { backgroundColor: '#106b23ff', paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  appleButton: { height: 50, marginBottom: 16 },
+  appleButton: { height: 52, marginBottom: 16 },
   disabledButton: { opacity: 0.6 },
   error: { color: 'red', textAlign: 'center', marginTop: 12 },
   modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.5)' },
@@ -376,17 +376,9 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 32,
     paddingHorizontal: 10,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.22,
-    shadowRadius: 2.22,
-    elevation: 0,
     marginBottom: 16,
     borderWidth:1,
-    borderColor: '#bbb'
+    borderColor: '#505050ff'
   },
   googleButtonText: {
     color: '#1F1F1F', // Standard Google text color
@@ -414,7 +406,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     marginBottom: 16,
     borderWidth:1,
-    borderColor: '#bbb'
+    borderColor: '#505050'
   },
   facebookButtonText: {
     color: '#1F1F1F',
