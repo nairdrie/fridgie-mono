@@ -1,11 +1,14 @@
 // lib/api.ts
 
+import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import {
   getIdToken,
   signInAnonymously,
   User
 } from "firebase/auth";
-import { Group, Item, Meal, MealPreferences, Recipe } from "../types/types";
+import { Platform } from 'react-native';
+import { Group, Item, MealPreferences, Recipe } from "../types/types";
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
@@ -33,7 +36,6 @@ async function authorizedFetch(
   input: RequestInfo,
   init: RequestInit = {}
 ): Promise<Response> {
-  // ✅ Wait for the initial auth check to complete
   await authStatePromise;
   let user = auth.currentUser
   if (!user) {
@@ -154,35 +156,68 @@ export async function createGroup(name: string, memberUids?: string[]): Promise<
   return res.json();
 }
 
+export async function registerForPushNotificationsAsync() {
+  let token;
 
-export async function createMeal(
-  groupId: string,
-  listId: string,
-  dayOfWeek: Meal['dayOfWeek']
-): Promise<Meal> {
-  // In a real app, this would hit your backend.
-  const newMeal: Meal = {
-    id: Math.random().toString(36).substring(2, 15),
-    listId: listId,
-    name: 'New Meal', // Default name
-    dayOfWeek: dayOfWeek,
-  };
-  // Here, you would typically wait for the backend response.
-  // We'll return the mock object directly.
-  return newMeal;
+  // You must use a real device for push notifications, not a simulator
+  if (!Constants.isDevice) {
+    alert("Must use physical device for Push Notifications");
+    return;
+  }
+
+  // Check for existing permissions
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
+
+  // If we don't have permission, ask for it
+  if (existingStatus !== 'granted') {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
+
+  // If the user still didn't grant permission, we can't get a token
+  if (finalStatus !== 'granted') {
+    alert('Failed to get push token for push notification!');
+    return;
+  }
+
+  // This is the magic function that gets the token
+  token = (await Notifications.getExpoPushTokenAsync()).data;
+  console.log('My Expo Push Token:', token);
+
+  // --- 👇 SEND TOKEN TO YOUR SERVER ---
+  // This is the crucial step where you link the device to the user
+  try {
+    // Use your existing authorizedFetch or API utility
+    await authorizedFetch(`${BASE_URL}/notifications/save-push-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+  } catch (error) {
+    console.error("Could not save push token to server", error);
+  }
+
+  // Recommended for Android
+  if (Platform.OS === 'android') {
+    Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+  }
+
+  return token;
 }
 
-export async function updateMeal(
-  groupId: string,
-  mealId: string,
-  data: Partial<Meal>
-) {
-  // This would hit your backend to save changes to a meal.
-  // Since our listener will provide the "updated" data, we don't need to return anything.
-}
-
-export async function deleteMeal(groupId: string, mealId: string) {
-  // This would hit your backend to delete a meal.
+export async function scheduleMealRating(mealId: string, listId: string, dayOfWeek: string) {
+  const res = await authorizedFetch(`${BASE_URL}/notifications/schedule-rating`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mealId, listId, dayOfWeek }),
+  });
+  return res.json();
 }
 
 /**

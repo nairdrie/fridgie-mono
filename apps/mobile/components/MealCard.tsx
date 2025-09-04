@@ -79,7 +79,6 @@ function MealCard({
     inputRefs.current[id] = ref;
   }, [inputRefs]);
 
-  // ✅ 2. Add a handler for selecting/deselecting a day
   const handleDaySelect = (day: Meal['dayOfWeek']) => {
     const newDay = meal.dayOfWeek === day ? undefined : day;
     onUpdateMeal(meal.id, { dayOfWeek: newDay });
@@ -215,29 +214,34 @@ function MealCard({
     <View style={styles.mealCard}>
         {/* The main content is now wrapped in a View to group the selector and header */}
       <View style={styles.mainContent}>
-        <View style={styles.dayPickerContainer}>
-          <TouchableOpacity onPress={toggleDaySelector} style={styles.dayPickerCollapsed}>
-            <Ionicons name="calendar-outline" size={18} color="#007AFF" />
-            {meal.dayOfWeek && !isDaySelectorVisible && (
-              <Text style={styles.selectedDayText}>{meal.dayOfWeek}</Text>
-            )}
-          </TouchableOpacity>
+        <View style={styles.mealCardUpper}>
+          <View style={styles.dayPickerContainer}>
+            <TouchableOpacity onPress={toggleDaySelector} style={styles.dayPickerCollapsed}>
+              <Ionicons name="calendar-outline" size={18} color="#007AFF" />
+              {meal.dayOfWeek && !isDaySelectorVisible && (
+                <Text style={styles.selectedDayText}>{meal.dayOfWeek}</Text>
+              )}
+              {!meal.dayOfWeek && !isDaySelectorVisible && (
+                <Text style={styles.selectedDayText}>Select Day</Text>
+              )}
+            </TouchableOpacity>
 
-          {isDaySelectorVisible && (
-            <Animated.View style={[styles.daySelectorContainer, daySelectorAnimatedStyle]}>
-              {DAYS.map((day) => (
-                <TouchableOpacity
-                  key={day}
-                  style={[styles.dayButton, meal.dayOfWeek === day && styles.dayButtonActive]}
-                  onPress={() => handleDaySelect(day)}
-                >
-                  <Text style={[styles.dayText, meal.dayOfWeek === day && styles.dayTextActive]}>
-                    {day?.charAt(0)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </Animated.View>
-          )}
+            {isDaySelectorVisible && (
+              <Animated.View style={[styles.daySelectorContainer, daySelectorAnimatedStyle]}>
+                {DAYS.map((day) => (
+                  <TouchableOpacity
+                    key={day}
+                    style={[styles.dayButton, meal.dayOfWeek === day && styles.dayButtonActive]}
+                    onPress={() => handleDaySelect(day)}
+                  >
+                    <Text style={[styles.dayText, meal.dayOfWeek === day && styles.dayTextActive]}>
+                      {day?.charAt(0)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </Animated.View>
+            )}
+          </View>
           <TouchableOpacity onPress={() => { onDeleteMeal(meal.id) }} style={styles.deleteButton}>
                 <Ionicons name="trash" size={18} color="#db6767ff" /> 
             </TouchableOpacity>
@@ -357,9 +361,17 @@ const styles = StyleSheet.create({
     clearText: { fontSize: 16, color: '#999' },
     addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
     addIngredientText: { color: '#007AFF', fontSize: 16 },
-    dayPickerContainer: {
+    mealCardUpper: {
       flexDirection: 'row',
       justifyContent: 'space-between',
+      margin: 0,
+      padding: 0,
+      alignItems: 'center',
+      height:30
+    },
+    dayPickerContainer: {
+      flexDirection: 'row',
+      justifyContent: 'flex-start',
       margin: 0,
       padding: 0,
       alignItems: 'center',

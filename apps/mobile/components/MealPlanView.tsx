@@ -17,7 +17,6 @@ interface MealPlanViewProps {
   onAddRecipe: (meal: Meal) => void;
   collapsedMeals: Record<string, boolean>;
   onToggleMealCollapse: (mealId: string) => void;
-  // ✅ Add the new props to the interface
   editingId: string;
   setEditingId: React.Dispatch<React.SetStateAction<string>>;
   inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
@@ -35,7 +34,6 @@ export default function MealPlanView({
   onAddMeal,
   onViewRecipe,
   onAddRecipe,
-  // ✅ Destructure the new props
   editingId,
   setEditingId,
   inputRefs,

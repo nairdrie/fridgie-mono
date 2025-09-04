@@ -2,7 +2,7 @@
 import React from 'react';
 import { Image, ImageResizeMode, ImageStyle, StyleProp } from 'react-native';
 
-type LogoVariant = 'tall' | 'wide' | 'small';
+type LogoVariant = 'tall' | 'wide' | 'small' | 'new';
 
 interface LogoProps {
   variant?: LogoVariant;
@@ -16,6 +16,7 @@ const logoSources = {
   tall: require('../assets/logo_tall.png'),
   wide: require('../assets/logo_wide.png'),
   small: require('../assets/logo_small.png'),
+  new: require('../assets/logo-new.png')
 };
 
 export default function Logo({
@@ -31,6 +32,7 @@ export default function Logo({
     tall: { width: 240, height: 160 },
     wide: { width: 280, height: 140 },
     small: { width: 200, height: 200 },
+    new: { width: 220, height: 140 },
   };
 
   const dimensions = {

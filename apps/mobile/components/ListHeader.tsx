@@ -162,7 +162,6 @@ export default function ListHeader() {
   );
 }
 
-// ✅ Complete style overhaul
 const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: '#fff', // Match your header background

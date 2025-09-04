@@ -1,6 +1,6 @@
 // context/AuthContext.tsx
 import { Group, UserProfile } from '@/types/types';
-import { getGroups, loginWithToken } from '@/utils/api';
+import { getGroups, loginWithToken, registerForPushNotificationsAsync } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, db } from '@/utils/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -58,6 +58,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(authUser);
 
       if (authUser) {
+        registerForPushNotificationsAsync();
         if(authUser.isAnonymous && !authUser.photoURL) {
           const randomPhotoURL = defaultAvatars[Math.floor(Math.random() * defaultAvatars.length)];
           await updateProfile(authUser, {
@@ -78,7 +79,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setGroups([]);
         }
       } else {
-        // --- ✅ No user is logged in, attempt to sign in anonymously ---
         try {
           await signInAnonymously(auth);
           // The onAuthStateChanged listener will fire again with the new anonymous user

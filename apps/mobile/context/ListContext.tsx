@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router'; // ✅ 1. Import the correct hook
+import { useRouter } from 'expo-router';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { List, ListView } from '../types/types';
 import { ApiError, getLists } from '../utils/api';
@@ -17,7 +17,6 @@ interface ListContextType {
 const ListContext = createContext<ListContextType | undefined>(undefined);
 
 export function ListProvider({ children }: { children: React.ReactNode }) {
-  // ✅ 2. Use the global params hook instead of the local one
   const router = useRouter();
   const { selectedGroup } = useAuth();
 

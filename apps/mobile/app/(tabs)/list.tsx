@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import { ApiError, categorizeList, getMealPreferences, getMealSuggestions, importRecipeFromUrl, listenToList, updateList } from '../../utils/api';
+import { ApiError, categorizeList, getMealPreferences, getMealSuggestions, importRecipeFromUrl, listenToList, scheduleMealRating, updateList } from '../../utils/api';
 
 
 export default function ListScreen() {
@@ -365,8 +365,6 @@ export default function ListScreen() {
   const handleAddMeal = () => {
     if (!selectedGroup || !selectedList) return;
     
-    // Note: In a real app, the `createMeal` API call would happen here
-    // For now, we'll create it client-side to demonstrate the UI.
     const newMeal: Meal = {
       id: uuid.v4() as string,
       listId: selectedList.id,
@@ -412,6 +410,11 @@ export default function ListScreen() {
   const handleUpdateMeal = (mealId: string, updates: Partial<Meal>) => {
     setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
     markDirty();
+
+    if (updates.dayOfWeek && selectedList) {
+      scheduleMealRating(mealId, selectedList.id, updates.dayOfWeek)
+        .catch(console.error);
+    }
   };
   
   const handleDeleteMeal = (mealId: string) => {
@@ -563,7 +566,6 @@ export default function ListScreen() {
 
           if (pendingAction === 'suggest-meals') {
             await AsyncStorage.removeItem('pendingAction');
-            // ✅ UPDATE this line
             handleOpenSuggestionFlow();
           }
         } catch (e) {

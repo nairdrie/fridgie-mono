@@ -2,7 +2,6 @@ import {
   ActivityIndicator,
   Image,
   Modal,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -12,12 +11,14 @@ import {
 
 // --- Native Sign-In Libraries ---
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Facebook from 'expo-auth-session/providers/facebook';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 
 // --- Firebase JS SDK Imports ---
 import {
   AuthCredential,
+  FacebookAuthProvider,
   GoogleAuthProvider,
   OAuthProvider,
   fetchSignInMethodsForEmail,
@@ -29,6 +30,7 @@ import {
 // --- Your Project's Imports ---
 import { auth } from '@/utils/firebase';
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import Logo from '../components/Logo';
@@ -41,8 +43,9 @@ WebBrowser.maybeCompleteAuthSession();
 const IOS_CLIENT_ID = "598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj.apps.googleusercontent.com";
 const ANDROID_CLIENT_ID = "598650352064-tdjm4ia5oemhgl0ml6hh020d4et251o5.apps.googleusercontent.com";
 const EXPO_CLIENT_ID = "598650352064-bjkgnsj14of6fs4f9ggkmi9tlqptuiat.apps.googleusercontent.com";
+const FACEBOOK_APP_ID = "776186408706339";
 
-type LoadingState = "google" | "apple" | "existing" | "email" | "password" | "";
+type LoadingState = "google" | "apple" | "facebook" | "existing" | "email" | "password" | "";
 type UIState = "initial" | "enterPassword";
 
 export default function LoginScreen() {
@@ -66,6 +69,10 @@ export default function LoginScreen() {
     webClientId: EXPO_CLIENT_ID
   });
 
+   const [facebookRequest, facebookResponse, promptFacebookAsync] = Facebook.useAuthRequest({
+    clientId: FACEBOOK_APP_ID,
+  });
+
   // Effect to handle the response from Google's native prompt
   useEffect(() => {
     const handleGoogleResponse = async () => {
@@ -80,6 +87,21 @@ export default function LoginScreen() {
     };
     handleGoogleResponse();
   }, [response]);
+
+  // Effect to handle the response from Facebook's native prompt - Added
+  useEffect(() => {
+    const handleFacebookResponse = async () => {
+      if (facebookResponse?.type === 'success') {
+          const { access_token } = facebookResponse.params;
+          const credential = FacebookAuthProvider.credential(access_token);
+          await linkOrSignIn(credential);
+      } else if (facebookResponse?.type === 'error' || facebookResponse?.type === 'cancel' || facebookResponse?.type === 'dismiss') {
+          setError(facebookResponse.type === 'error' ? 'Facebook Sign-In failed. Please try again.' : null);
+          setLoading('');
+      }
+    };
+    handleFacebookResponse();
+  }, [facebookResponse]);
 
   // --- Core Authentication Logic ---
   const linkOrSignIn = async (credential: AuthCredential) => {
@@ -211,10 +233,12 @@ setLoading("");
   };
   
   return (
+    
     <KeyboardAwareScrollView
       contentContainerStyle={styles.outerContainer}
       keyboardShouldPersistTaps="handled"
     >
+      <StatusBar style="light" />
       <Modal visible={showConflictModal} transparent={true} animationType="fade">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
@@ -238,7 +262,7 @@ setLoading("");
         </View>
       </Modal>
 
-      <Logo variant="small" style={{ alignSelf: 'center', marginBottom: 24 }} />
+      <Logo variant="new" style={{ alignSelf: 'center', marginTop: 150, marginBottom: 50 }} />
       <View style={styles.loginCard}>
         <Text style={styles.heading}>Login or create an account</Text>
         <TextInput
@@ -283,15 +307,35 @@ setLoading("");
           )}
         </TouchableOpacity>
 
-        {Platform.OS === 'ios' && (
-          <AppleAuthentication.AppleAuthenticationButton
-            buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-            cornerRadius={8}
-            style={[styles.appleButton, (loading !== '' && loading !== 'apple') && styles.disabledButton]}
-            onPress={handleAppleSignIn}
-          />
-        )}
+
+        <AppleAuthentication.AppleAuthenticationButton
+          buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+          buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+          cornerRadius={8}
+          style={[styles.appleButton, (loading !== '' && loading !== 'apple') && styles.disabledButton]}
+          onPress={handleAppleSignIn}
+        />
+
+        <TouchableOpacity
+          style={[styles.facebookButton, (loading !== '' && loading !== 'facebook') && styles.disabledButton]}
+          onPress={() => {
+            setLoading('facebook');
+            setError(null);
+            promptFacebookAsync();
+          }}
+          disabled={loading !== ''}
+        >
+          {loading === 'facebook' ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <>
+              {/* Make sure you have a facebook logo in your assets folder */}
+              <Image source={require('../assets/f-logo.png')} style={{ width: 24, height: 24, marginRight: 10 }} />
+              <Text style={styles.facebookButtonText}>Continue with Facebook</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
 
         {error && <Text style={styles.error}>{error}</Text>}
       </View>
@@ -301,12 +345,15 @@ setLoading("");
 
 // Your existing styles plus the modal styles
 const styles = StyleSheet.create({
-  outerContainer: { flexGrow: 1, backgroundColor: '#f1f3f6', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  outerContainer: { 
+    flexGrow: 1, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: '#0b2215'
+  },
   loginCard: { 
-    // backgroundColor: 'white', borderRadius: 12, padding: 24, width: '100%', maxWidth: 400, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 
+    backgroundColor: 'white', borderRadius: 12, padding: 24, width: '100%', maxWidth: 400, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5, flexGrow: 1
   },
   heading: { fontSize: 24, fontWeight: '600', textAlign: 'center', marginBottom: 24 },
-  primaryButton: { backgroundColor: '#4285F4', paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
+  primaryButton: { backgroundColor: '#106b23ff', paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   appleButton: { height: 50, marginBottom: 16 },
   disabledButton: { opacity: 0.6 },
@@ -336,8 +383,10 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.22,
     shadowRadius: 2.22,
-    elevation: 2,
+    elevation: 0,
     marginBottom: 16,
+    borderWidth:1,
+    borderColor: '#bbb'
   },
   googleButtonText: {
     color: '#1F1F1F', // Standard Google text color
@@ -353,7 +402,23 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     fontSize: 16,
   },
-  separatorContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 16 },
+  separatorContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 24 },
   separatorLine: { flex: 1, height: 1, backgroundColor: '#ddd' },
   separatorText: { marginHorizontal: 12, color: '#888' },
+  facebookButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 50,
+    borderRadius: 32,
+    paddingHorizontal: 10,
+    marginBottom: 16,
+    borderWidth:1,
+    borderColor: '#bbb'
+  },
+  facebookButtonText: {
+    color: '#1F1F1F',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });

@@ -2,9 +2,9 @@ export type Item = {
     id: string;
     text: string;
     checked: boolean;
-    listOrder: string; // ✅ Renamed from 'order'
-    mealOrder?: string; // ✅ New optional field for ordering within a meal
-    isSection: boolean; // Optional property to indicate if the item is a section
+    listOrder: string; 
+    mealOrder?: string; 
+    isSection: boolean; 
     mealId?: string;
   };
   
