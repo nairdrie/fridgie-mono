@@ -6,6 +6,7 @@ export type Item = {
     mealOrder?: string; 
     isSection: boolean; 
     mealId?: string;
+    quantity?: string;
   };
   
 export type List = {

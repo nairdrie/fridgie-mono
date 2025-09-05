@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-    ActivityIndicator
+  ActivityIndicator
 } from 'react-native';
 
 // --- MAIN SCREEN COMPONENT ---
-export default function MealPreferencesScreen() {
+export default function OauthRedirect() {
   return (
     <ActivityIndicator></ActivityIndicator>
   );

@@ -26,58 +26,72 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
   const [selectedView, setSelectedView] = useState<ListView>(ListView.GroceryList);
 
   useEffect(() => {
+    // This flag prevents state updates if the component unmounts or the dependency changes
+    // while a fetch is in progress. This is the key to preventing race conditions.
+    let ignore = false;
 
-    async function fetchAllLists(id: string) {
-
+    async function fetchAndSetLists(groupId: string) {
+      setIsLoading(true);
       try {
-        const fetchedLists = await getLists(id);
-        setAllLists(fetchedLists);
-        if (fetchedLists.length > 0) {
-          const fetchedListsWithContent = fetchedLists.filter((list: List) => {
-            return list.hasContent;
-          });
+        const fetchedLists = await getLists(groupId);
 
-          if(fetchedListsWithContent.length > 0) {
-            setSelectedList([...fetchedListsWithContent].sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime())[0]);
-          }
-          else {
-            setSelectedList([...fetchedLists].sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime())[0]);
-          }
+        // If the effect has been re-run, ignore the results of this old fetch.
+        if (ignore) return;
+
+        setAllLists(fetchedLists);
+
+        if (fetchedLists.length > 0) {
+          // Your existing logic to select the most recent list by default
+          const sortedLists = [...fetchedLists].sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime());
+          const listWithContent = sortedLists.find(list => list.hasContent);
+          setSelectedList(listWithContent || sortedLists[0]);
         } else {
           setSelectedList(null);
         }
+
       } catch (error) {
-        if (error instanceof ApiError) {
-          console.error("Failed to fetch lists:", error);
-          if(error.status == 403) {
-            router.navigate('/(tabs)/profile');
-          }
+        if (ignore) return; // Also ignore errors from stale fetches
+
+        console.error("Failed to fetch lists:", error);
+        if (error instanceof ApiError && error.status === 403) {
+          // This can happen in a race condition on login.
+          // Navigating to a safe page is a good fallback.
+          router.navigate('/(tabs)/profile');
         }
+        // Always clear lists on an error to avoid showing stale/incorrect data
+        setAllLists([]);
+        setSelectedList(null);
+
       } finally {
-        setIsLoading(false);
+        if (!ignore) {
+          setIsLoading(false);
+        }
       }
     }
 
-    setIsLoading(true);
-
-    if (!selectedGroup) {
+    if (selectedGroup?.id) {
+      fetchAndSetLists(selectedGroup.id);
+    } else {
+      // If there's no selected group, clear everything out.
       setAllLists([]);
       setSelectedList(null);
       setIsLoading(false);
-      return;
-    } 
-    else {
-      setSelectedList(null); 
-      setAllLists([]);  
-      fetchAllLists(selectedGroup.id);
     }
-  }, [selectedGroup]);
+
+    // This cleanup function runs when the component unmounts OR when the effect re-runs.
+    // It sets the ignore flag, so any in-flight fetch requests from the *previous*
+    // render will not be able to update the state.
+    return () => {
+      ignore = true;
+    };
+    // ✅ DEPEND ON THE STABLE ID, NOT THE OBJECT
+  }, [selectedGroup?.id]); // Now, this effect only re-runs when the actual group changes.
 
   const selectList = (list: List | null) => {
     setSelectedList(list);
   };
 
-   const selectView = (view: ListView) => {
+  const selectView = (view: ListView) => {
     setSelectedView(view);
   };
 

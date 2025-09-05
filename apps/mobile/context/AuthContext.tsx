@@ -66,6 +66,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             });
         }
         if(!authUser.isAnonymous && !authUser.displayName) {
+          console.log("COMPLETE PROFILE FROM AUTH")
           router.replace('/complete-profile');
         }
 

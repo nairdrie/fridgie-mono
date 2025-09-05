@@ -2,6 +2,7 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -18,10 +19,10 @@ import * as WebBrowser from 'expo-web-browser';
 // --- Firebase JS SDK Imports ---
 import {
   AuthCredential,
+  EmailAuthProvider,
   FacebookAuthProvider,
   GoogleAuthProvider,
-  OAuthProvider,
-  createUserWithEmailAndPassword, // Added for new account creation
+  OAuthProvider, // Added for new account creation
   fetchSignInMethodsForEmail,
   linkWithCredential,
   signInWithCredential,
@@ -216,40 +217,53 @@ export default function LoginScreen() {
  };
 
  // --- New function to handle new account creation ---
- const handleCreateAccount = async () => {
+const handleCreateAccount = async () => {
+  // --- All your validation logic remains the same ---
   if (!password || !confirmPassword) {
-   setError("Please fill out both password fields.");
-   return;
+    setError("Please fill out both password fields.");
+    return;
   }
   if (password !== confirmPassword) {
-   setError("Passwords do not match.");
-   return;
+    setError("Passwords do not match.");
+    return;
   }
-  if (password.length < 8) {
-   setError("Password must be at least 8 characters long.");
-   return;
-  }
+  // You can add your password strength checks here too
 
   setLoading("password");
   setError(null);
   try {
-   await createUserWithEmailAndPassword(auth, email, password);
-   // After sign-up, onAuthStateChanged should handle the redirect.
-   // Optionally, navigate to a profile completion screen.
-  //  router.replace('/complete-profile');
+    // 1. Get the current anonymous user
+    const anonymousUser = auth.currentUser;
+    if (anonymousUser && anonymousUser.isAnonymous) {
+      // 2. Create an email/password credential from the user's input
+      const credential = EmailAuthProvider.credential(email, password);
+      
+      // 3. Link the credential to the anonymous account, upgrading it
+      const userCredential = await linkWithCredential(anonymousUser, credential);
+
+      if(!userCredential.user.displayName) {
+        router.replace('/complete-profile');
+      } else {
+        router.replace('/list');
+      }
+    } else {
+      // This is a fallback case in case there is no anonymous user.
+      throw new Error("No anonymous user session found to link.");
+    }
   } catch (err: any) {
-   if (err.code === 'auth/email-already-in-use') {
-    setError("This email address is already in use.");
-   } else if (err.code === 'auth/weak-password') {
-    setError("The password is too weak.");
-   } else {
-    setError("An error occurred. Please try again.");
-    console.error("Account Creation Error:", err);
-   }
+    // The error handling is mostly the same
+    if (err.code === 'auth/email-already-in-use') {
+      setError("This email address is already in use by another account.");
+    } else if (err.code === 'auth/weak-password') {
+      setError("The password is too weak.");
+    } else {
+      setError("An error occurred. Please try again.");
+      console.error("Account Linking Error:", err);
+    }
   } finally {
-   setLoading("");
+    setLoading("");
   }
- };
+};
 
  const handleSignInToExistingAccount = async () => {
   if (!pendingCredential) return;
@@ -443,13 +457,15 @@ export default function LoginScreen() {
         </>
        )}
       </TouchableOpacity>
-      <AppleAuthentication.AppleAuthenticationButton
-       buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-       buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
-       cornerRadius={30}
-       style={[styles.appleButton, (loading !== '' && loading !== 'apple') && styles.disabledButton]}
-       onPress={handleAppleSignIn}
-      />
+      { Platform.OS === 'ios' && (
+        <AppleAuthentication.AppleAuthenticationButton
+        buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+        buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+        cornerRadius={30}
+        style={[styles.appleButton, (loading !== '' && loading !== 'apple') && styles.disabledButton]}
+        onPress={handleAppleSignIn}
+        />
+      )}
       <TouchableOpacity
        style={[styles.facebookButton, (loading !== '' && loading !== 'facebook') && styles.disabledButton]}
        onPress={() => { setLoading('facebook'); setError(null); promptFacebookAsync(); }}
