@@ -16,7 +16,8 @@ const logoSources = {
   tall: require('../assets/logo_tall.png'),
   wide: require('../assets/logo_wide.png'),
   small: require('../assets/logo_small.png'),
-  new: require('../assets/logo-new.png')
+  // new: require('../assets/logo-new.png')
+  new: require('../assets/fridgieLogo.png')
 };
 
 export default function Logo({
@@ -32,7 +33,8 @@ export default function Logo({
     tall: { width: 240, height: 160 },
     wide: { width: 280, height: 140 },
     small: { width: 200, height: 200 },
-    new: { width: 220, height: 140 },
+    // new: { width: 220, height: 140 },
+    new: { width: 300, height: 180 }
   };
 
   const dimensions = {

@@ -161,7 +161,7 @@ export async function registerForPushNotificationsAsync() {
 
   // You must use a real device for push notifications, not a simulator
   if (!Constants.isDevice) {
-    alert("Must use physical device for Push Notifications");
+    console.error("Must use physical device for Push Notifications");
     return;
   }
 

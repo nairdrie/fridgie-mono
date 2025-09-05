@@ -162,33 +162,38 @@ export default function LoginScreen() {
   }
  };
 
- // --- Updated to handle all three UI states ---
- const handleEmailContinue = async () => {
-  if (!email) {
-   setError("Please enter your email address.");
-   return;
-  }
-  setLoading("email");
-  setError(null);
-  try {
-   const methods = await fetchSignInMethodsForEmail(auth, email);
-   if (methods.length > 0) {
-    if (methods.includes('password')) {
-     setUiState("enterPassword");
-    } else {
-     setError(`This email is linked to a ${methods[0]} account. Please use that method to sign in.`);
+  const handleEmailContinue = async () => {
+    if (!email) {
+      setError("Please enter your email address.");
+      return;
     }
-   } else {
-    // New user, route to create account/password screen
-    setUiState("createPassword");
-   }
-  } catch (err: any) {
-   console.error("Email check failed:", err);
-   setError("Could not verify email. Please try again.");
-  } finally {
-   setLoading("");
-  }
- };
+    setLoading("email");
+    setError(null);
+    try {
+      const methods = await fetchSignInMethodsForEmail(auth, email);
+
+      if (methods.length > 0) {
+        // If 'password' is a valid sign-in method for this email...
+        if (methods.includes('password')) {
+          setUiState("enterPassword");
+        } else {
+          // ...otherwise, the email is linked to another provider (e.g., Google).
+          // We create a user-friendly name from the provider ID (e.g., 'google.com' -> 'Google')
+          const providerName = methods[0].split('.')[0];
+          const friendlyProviderName = providerName.charAt(0).toUpperCase() + providerName.slice(1);
+          setError(`This email is linked to a ${friendlyProviderName} account. Please use that method to sign in.`);
+        }
+      } else {
+        // This is a new user, so let them create a password.
+        setUiState("createPassword");
+      }
+    } catch (err: any) {
+      console.error("Email check failed:", err);
+      setError("Could not verify email. Please try again.");
+    } finally {
+      setLoading("");
+    }
+  };
 
  const handlePasswordSignIn = async () => {
   if (!password) {
@@ -231,7 +236,7 @@ export default function LoginScreen() {
    await createUserWithEmailAndPassword(auth, email, password);
    // After sign-up, onAuthStateChanged should handle the redirect.
    // Optionally, navigate to a profile completion screen.
-   router.replace('/complete-profile');
+  //  router.replace('/complete-profile');
   } catch (err: any) {
    if (err.code === 'auth/email-already-in-use') {
     setError("This email address is already in use.");
@@ -290,8 +295,11 @@ export default function LoginScreen() {
  
  return (
   <KeyboardAwareScrollView
-   contentContainerStyle={styles.outerContainer}
-   keyboardShouldPersistTaps="handled"
+    contentContainerStyle={styles.outerContainer}
+    keyboardShouldPersistTaps="handled"
+    // enableOnAndroid={true}  not working
+    // enableAutomaticScroll={(Platform.OS === 'ios')}
+    //  extraHeight={130} extraScrollHeight={130}
   >
    <StatusBar style="light" />
    <Modal visible={showConflictModal} transparent={true} animationType="fade">
@@ -317,7 +325,7 @@ export default function LoginScreen() {
     </View>
    </Modal>
 
-   <Logo variant="new" style={{ alignSelf: 'center', marginTop: 150, marginBottom: 50 }} />
+   <Logo variant="new" style={{ alignSelf: 'center', marginLeft:40,marginTop: 170, marginBottom: 30 }} />
    <View style={styles.loginCard}>
         <View style={styles.loginCardUpper}>
           {uiState !== 'initial' && (
@@ -469,7 +477,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
  outerContainer: { 
   flexGrow: 1, 
-    justifyContent: 'center', 
+    // justifyContent: 'center', 
     alignItems: 'center',
   backgroundColor: '#0b2215'
  },
@@ -520,6 +528,7 @@ const styles = StyleSheet.create({
   paddingHorizontal: 16,
   marginBottom: 16,
   fontSize: 16,
+  color: 'black'
  },
  separatorContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 24 },
  separatorLine: { flex: 1, height: 1, backgroundColor: '#ddd' },
