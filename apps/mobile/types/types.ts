@@ -29,7 +29,7 @@ export interface Meal {
   listId: string;
   dayOfWeek?: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
   name: string;
-  recipe?: Recipe;
+  recipeId?: string;
 }
 
 export enum ListView {

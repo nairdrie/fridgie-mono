@@ -28,7 +28,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import { ApiError, categorizeList, getMealPreferences, getMealSuggestions, importRecipeFromUrl, listenToList, scheduleMealRating, updateList } from '../../utils/api';
+import { ApiError, categorizeList, getMealPreferences, getMealSuggestions, getRecipe, importRecipeFromUrl, listenToList, saveRecipe, scheduleMealRating, updateList } from '../../utils/api';
 
 
 export default function ListScreen() {
@@ -73,6 +73,8 @@ export default function ListScreen() {
 
   const [suggestionModalStep, setSuggestionModalStep] = useState<'confirm' | 'loading' | 'results'>('confirm');
   const [mealPreferences, setMealPreferences] = useState<MealPreferences | null>(null);
+
+  const [isFetchingRecipe, setIsFetchingRecipe] = useState(false);
 
 
   const dirtyUntilRef = useRef<number>(0);
@@ -213,9 +215,27 @@ export default function ListScreen() {
   const toggleCheck = (id: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, checked: !item.checked } : item))); markDirty(); };
 
 
-  const handleViewRecipe = (recipe: Recipe) => {
-    setSelectedRecipe(recipe);
-    setRecipeModalVisible(true);
+  const handleViewRecipe = async (meal: Meal) => {
+    if (!meal.recipeId) {
+      Alert.alert("No Recipe", "A recipe has not been added for this meal yet.");
+      return;
+    }
+
+    setRecipeModalVisible(true); // Open the modal immediately
+    setIsFetchingRecipe(true);   // Show a loading indicator
+    setSelectedRecipe(null);     // Clear any previous recipe
+
+    try {
+      // Fetch the full recipe from Firestore using its ID
+      const fullRecipe = await getRecipe(meal.recipeId);
+      setSelectedRecipe(fullRecipe);
+    } catch (error) {
+      console.error("Failed to fetch recipe:", error);
+      Alert.alert("Error", "Could not load the recipe.");
+      setRecipeModalVisible(false); // Close modal on error
+    } finally {
+      setIsFetchingRecipe(false); // Hide loading indicator
+    }
   };
 
   const handleAddRecipe = (mealToEdit: Meal) => {
@@ -249,68 +269,73 @@ export default function ListScreen() {
     }
   };
 
-  const handleSaveRecipe = () => {
-  if (!editingRecipe || !mealForRecipeEdit) return;
+  const handleSaveRecipe = async () => {
+    if (!editingRecipe || !mealForRecipeEdit) return;
 
-  // Normalize & clean
-  const normIngredients = (editingRecipe.ingredients || []).map((i: any) =>
-    typeof i === 'string' ? { name: i, quantity: '' } : i
-  );
+    const { id, ...recipeToSave } = editingRecipe;
 
-  const cleanedRecipe: Recipe = {
-    ...editingRecipe,
-    ingredients: normIngredients.filter(i => (i.name ?? '').trim() !== ''),
-    instructions: (editingRecipe.instructions || []).filter(i => (i ?? '').trim() !== ''),
+
+  const cleanedRecipe: Omit<Recipe, 'id'> = {
+    ...recipeToSave,
+    ingredients: (recipeToSave.ingredients || []).filter(i => (i.name ?? '').trim() !== ''),
+    instructions: (recipeToSave.instructions || []).filter(i => (i ?? '').trim() !== ''),
   };
 
-  const mealId = mealForRecipeEdit.id;
+  try {
+    const savedRecipe = await saveRecipe(cleanedRecipe); // Save to Firestore
+    mealForRecipeEdit.recipeId = savedRecipe.id;
+    const mealId = mealForRecipeEdit.id;
 
-  // Update meal name/recipe
-  setMeals(prevMeals =>
-    prevMeals.map(meal =>
-      meal.id === mealId ? { ...meal, recipe: cleanedRecipe, name: cleanedRecipe.name } : meal
-    )
-  );
+    setMeals(prevMeals =>
+      prevMeals.map(meal =>
+        meal.id === mealId ? { ...meal, recipeId: savedRecipe.id, name: savedRecipe.name } : meal
+      )
+    );
 
-  // Build ingredient items using the *current* list inside the updater
-  setItems(currentItems => {
-    // 1) Remove any previous items tied to this meal
-    const base = currentItems.filter(item => item.mealId !== mealId);
+    // Build ingredient items using the *current* list inside the updater
+    setItems(currentItems => {
+      // 1) Remove any previous items tied to this meal
+      const base = currentItems.filter(item => item.mealId !== mealId);
 
-    // 2) Seed lastRank from base
-    let lastRank =
-      base.length > 0 && base[base.length - 1].text !== ''
-        ? LexoRank.parse(base[base.length - 1].listOrder)
-        : LexoRank.middle();
+      // 2) Seed lastRank from base
+      let lastRank =
+        base.length > 0 && base[base.length - 1].text !== ''
+          ? LexoRank.parse(base[base.length - 1].listOrder)
+          : LexoRank.middle();
 
-    // 3) Map ingredients -> items with proper ranking
-    const newItemsForRecipe: Item[] = cleanedRecipe.ingredients.map(ingredient => {
-      lastRank = lastRank.genNext();
-      return {
-        id: uuid.v4() as string,
-        text: ingredient.name.trim(),
-        checked: false,
-        listOrder: lastRank.toString(),
-        isSection: false,
-        mealId
-      };
+      // 3) Map ingredients -> items with proper ranking
+      const newItemsForRecipe: Item[] = cleanedRecipe.ingredients.map(ingredient => {
+        lastRank = lastRank.genNext();
+        return {
+          id: uuid.v4() as string,
+          text: ingredient.name.trim(),
+          checked: false,
+          listOrder: lastRank.toString(),
+          isSection: false,
+          mealId
+        };
+      });
+
+      // 4) Replace the single empty placeholder if present
+      const isSingleEmpty =
+        base.length === 1 && (base[0].text ?? '') === '' && !base[0].isSection;
+
+      return isSingleEmpty ? newItemsForRecipe : [...base, ...newItemsForRecipe];
     });
 
-    // 4) Replace the single empty placeholder if present
-    const isSingleEmpty =
-      base.length === 1 && (base[0].text ?? '') === '' && !base[0].isSection;
+    markDirty();
 
-    return isSingleEmpty ? newItemsForRecipe : [...base, ...newItemsForRecipe];
-  });
-
-  markDirty();
-
-  // Cleanup
-  setAddRecipeModalVisible(false);
-  setEditingRecipe(null);
-  setMealForRecipeEdit(null);
-  setImportUrl('');
-};
+    } catch (error) {
+      console.error("Failed to save recipe", error);
+      Alert.alert("Error", "Could not save the recipe. Please try again.");
+    } finally {
+      // Cleanup
+      setAddRecipeModalVisible(false);
+      setEditingRecipe(null);
+      setMealForRecipeEdit(null);
+      setImportUrl('');
+    }
+  };
 
   const handleRecipeFieldChange = (field: keyof Recipe, value: string) => {
     setEditingRecipe(prev => prev ? { ...prev, [field]: value } : null);
@@ -578,29 +603,44 @@ export default function ListScreen() {
     }, [])
   );
 
-  const handleAddSelectedMeals = () => {
+  const handleAddSelectedMeals = async () => { // Make the function async
     if (!selectedList) return;
 
-    const newMeals: Meal[] = [];
-    const newItems: Item[] = [];
+    const selectedRecipes = mealSuggestions.filter(
+      (recipe) => selectedSuggestions[recipe.id]
+    );
 
-    let lastRank =
-      items.length > 0 && items[items.length - 1].text !== ''
-        ? LexoRank.parse(items[items.length - 1].listOrder)
-        : LexoRank.middle();
+    if (selectedRecipes.length === 0) {
+      setSuggestionModalVisible(false);
+      return;
+    }
 
-    for (const recipe of mealSuggestions) {
-      if (selectedSuggestions[recipe.id]) {
-        // 1. Create a new Meal and ATTACH the full recipe object to it
+    try {
+      // 1. Save all selected recipes to Firestore in parallel
+      const savedRecipes = await Promise.all(
+        selectedRecipes.map(recipe => saveRecipe(recipe))
+      );
+
+      const newMeals: Meal[] = [];
+      const newItems: Item[] = [];
+
+      let lastRank =
+        items.length > 0 && items[items.length - 1].text !== ''
+          ? LexoRank.parse(items[items.length - 1].listOrder)
+          : LexoRank.middle();
+
+      // 2. Create new Meals and Items using the saved recipes
+      for (const recipe of savedRecipes) {
+        // Create a new Meal and link it via recipeId
         const newMeal: Meal = {
           id: uuid.v4() as string,
           listId: selectedList.id,
           name: recipe.name,
-          recipe: recipe, 
+          recipeId: recipe.id, // Use the new recipeId from Firestore
         };
         newMeals.push(newMeal);
 
-        // 2. Create new Items for its ingredients
+        // Create new Items for its ingredients
         for (const ingredient of recipe.ingredients) {
           lastRank = lastRank.genNext();
           const newItem: Item = {
@@ -614,9 +654,8 @@ export default function ListScreen() {
           newItems.push(newItem);
         }
       }
-    }
 
-    if (newMeals.length > 0) {
+      // 3. Update the local state
       setMeals((prev) => [...prev, ...newMeals]);
       setItems((prev) => {
         if (prev.length === 1 && prev[0].text === '') {
@@ -625,9 +664,13 @@ export default function ListScreen() {
         return [...prev, ...newItems];
       });
       markDirty();
+
+    } catch (error) {
+      console.error("Failed to add selected meals:", error);
+      Alert.alert("Error", "Could not add the selected meals. Please try again.");
+    } finally {
+      setSuggestionModalVisible(false);
     }
-    
-    setSuggestionModalVisible(false);
   };
 
   const onToggleMealCollapse = async (mealId: string) => {
@@ -920,6 +963,11 @@ export default function ListScreen() {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => setRecipeModalVisible(false)} />
         <View style={[styles.modalContent, {maxHeight: '85%'} ]}>
+          { isFetchingRecipe && (
+            <View>
+              <ActivityIndicator size="large" />
+            </View>
+          )}
           {selectedRecipe && (
             <FlatList
               ListHeaderComponent={

@@ -1,5 +1,5 @@
 // components/MealPlanView.tsx
-import { Item, Meal, Recipe } from "@/types/types";
+import { Item, Meal } from "@/types/types";
 import React, { useMemo } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import MealCard from "./MealCard"; // Import the new component
@@ -22,7 +22,7 @@ interface MealPlanViewProps {
   inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
   isKeyboardVisible: boolean;
   markDirty: () => void;
-  onViewRecipe: (recipe: Recipe) => void; 
+  onViewRecipe: (meal: Meal) => void; 
 }
 
 export default function MealPlanView({

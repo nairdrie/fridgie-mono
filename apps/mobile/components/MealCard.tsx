@@ -1,5 +1,5 @@
 // components/MealCard.tsx
-import { Item, Meal, Recipe } from "@/types/types";
+import { Item, Meal } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
@@ -25,7 +25,7 @@ interface MealCardProps {
 
   // Functions from parent screen
   markDirty: () => void;
-  onViewRecipe: (recipe: Recipe) => void;
+  onViewRecipe: (meal: Meal) => void;
   onAddRecipe: (meal: Meal) => void;  
   isCollapsed: boolean;
   onToggleCollapse: (mealId: string) => void;
@@ -47,7 +47,7 @@ function MealCard({
   isCollapsed,
   onToggleCollapse
 }: MealCardProps) {
-  const hasRecipe = !!meal.recipe;
+  const hasRecipe = !!meal.recipeId;
 
   const [isDaySelectorVisible, setIsDaySelectorVisible] = useState(false);
 
@@ -263,7 +263,7 @@ function MealCard({
           </View>
           {hasRecipe ? (
             <View style={styles.mealHeaderLower}>
-              <TouchableOpacity style={styles.recipeIndicator} onPress={() => onViewRecipe(meal.recipe!)}>
+              <TouchableOpacity style={styles.recipeIndicator} onPress={() => onViewRecipe(meal)}>
                 <Ionicons name="book-outline" size={16} color="#007AFF" />
                 <Text style={styles.recipeIndicatorText}>View Recipe</Text>
               </TouchableOpacity>

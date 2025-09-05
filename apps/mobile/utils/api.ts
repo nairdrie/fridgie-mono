@@ -211,6 +211,21 @@ export async function registerForPushNotificationsAsync() {
   return token;
 }
 
+export async function saveRecipe(recipe: Omit<Recipe, 'id'>): Promise<Recipe> {
+  const res = await authorizedFetch(`${BASE_URL}/recipe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(recipe),
+  });
+  return res.json();
+}
+
+export async function getRecipe(recipeId: string): Promise<Recipe> {
+  const res = await authorizedFetch(`${BASE_URL}/recipe/${recipeId}`);
+  return res.json();
+}
+
+
 export async function scheduleMealRating(mealId: string, listId: string, dayOfWeek: string) {
   const res = await authorizedFetch(`${BASE_URL}/notifications/schedule-rating`, {
     method: 'POST',
