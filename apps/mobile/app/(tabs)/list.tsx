@@ -1,9 +1,9 @@
-// TODO: Loading state while we get the group and lists
-
+import AddEditRecipeModal from '@/components/AddEditRecipeModal';
 import MealPlanView from '@/components/MealPlanView';
 import MealSuggestionsModal from '@/components/MealSuggestionsModal';
+import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useLists } from '@/context/ListContext';
-import { Ingredient, Item, List, ListView, Meal, Recipe } from '@/types/types';
+import { Item, List, ListView, Meal, Recipe } from '@/types/types';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
@@ -13,14 +13,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Keyboard,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
-  SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -29,7 +25,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import { categorizeList, getRecipe, importRecipeFromUrl, listenToList, saveRecipe, scheduleMealRating, updateList } from '../../utils/api';
+import { categorizeList, listenToList, scheduleMealRating, updateList } from '../../utils/api';
 
 
 export default function ListScreen() {
@@ -46,16 +42,10 @@ export default function ListScreen() {
   const [isSuggestionModalVisible, setSuggestionModalVisible] = useState(false);
 
 
-  const [isRecipeModalVisible, setRecipeModalVisible] = useState(false);
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-
-  const [isAddRecipeModalVisible, setAddRecipeModalVisible] = useState(false);
-  const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
-  const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
-  const [importUrl, setImportUrl] = useState('');
-  const [isImportingRecipe, setIsImportingRecipe] = useState(false);
   const [collapsedMeals, setCollapsedMeals] = useState<Record<string, boolean>>({});
-  const [isFetchingRecipe, setIsFetchingRecipe] = useState(false);
+
+  const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
+  const [recipeToEdit, setRecipeToEdit] = useState<Meal | null>(null);
 
 
   const dirtyUntilRef = useRef<number>(0);
@@ -164,171 +154,45 @@ export default function ListScreen() {
       loadCollapsedState();
    }, []);
 
+   const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
+    // Update the meal in the meals list
+    setMeals(prevMeals =>
+      prevMeals.map(meal => (meal.id === updatedMeal.id ? updatedMeal : meal))
+    );
 
-  const assignRef = useCallback((id: string) => (ref: TextInput | null) => { inputRefs.current[id] = ref; }, []);
-  const updateItemText = (id: string, text: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item))); markDirty(); };
-  const toggleCheck = (id: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, checked: !item.checked } : item))); markDirty(); };
+    // Remove old items for this meal and add the new ones, properly ranked
+    setItems(currentItems => {
+      const base = currentItems.filter(item => item.mealId !== updatedMeal.id);
 
+      let lastRank = base.length > 0 ? LexoRank.parse(base[base.length - 1].listOrder) : LexoRank.middle();
 
-  const handleViewRecipe = async (meal: Meal) => {
+      const rankedNewItems = newItems.map(item => {
+        lastRank = lastRank.genNext();
+        return { ...item, listOrder: lastRank.toString() };
+      });
+
+      const isSingleEmpty = base.length === 1 && (base[0].text ?? '') === '' && !base[0].isSection;
+      return isSingleEmpty ? rankedNewItems : [...base, ...rankedNewItems];
+    });
+
+    markDirty();
+  };
+
+  const handleViewRecipe = (meal: Meal) => {
     if (!meal.recipeId) {
       Alert.alert("No Recipe", "A recipe has not been added for this meal yet.");
       return;
     }
-
-    setRecipeModalVisible(true); // Open the modal immediately
-    setIsFetchingRecipe(true);   // Show a loading indicator
-    setSelectedRecipe(null);     // Clear any previous recipe
-
-    try {
-      // Fetch the full recipe from Firestore using its ID
-      const fullRecipe = await getRecipe(meal.recipeId);
-      setSelectedRecipe(fullRecipe);
-    } catch (error) {
-      console.error("Failed to fetch recipe:", error);
-      Alert.alert("Error", "Could not load the recipe.");
-      setRecipeModalVisible(false); // Close modal on error
-    } finally {
-      setIsFetchingRecipe(false); // Hide loading indicator
-    }
+    setRecipeToViewId(meal.recipeId);
   };
 
-  const handleAddRecipe = (mealToEdit: Meal) => {
-    setMealForRecipeEdit(mealToEdit);
-    // Create a blank recipe structure to populate the form, pre-filling the name
-    const blankRecipe: Recipe = {
-      id: uuid.v4() as string,
-      name: mealToEdit.name,
-      description: '',
-      ingredients: [{ name: '', quantity: '' }],
-      instructions: [''],
-    };
-    setEditingRecipe(blankRecipe);
-    setAddRecipeModalVisible(true);
-    setImportUrl(''); // Clear any previous URL
+  const handleAddRecipe = (meal: Meal) => {
+    setRecipeToEdit(meal);
   };
 
-  const handleImportRecipe = async () => {
-    if (!importUrl) return;
-    Keyboard.dismiss();
-    setIsImportingRecipe(true);
-    try {
-      const importedRecipe = await importRecipeFromUrl(importUrl);
-      // Update the editing recipe state with the imported data
-      setEditingRecipe(prev => ({ ...importedRecipe, id: prev!.id }));
-    } catch (error) {
-      console.error("Failed to import recipe", error);
-      Alert.alert("Import Failed", "We couldn't get the recipe from that URL. Please check the link or enter it manually.");
-    } finally {
-      setIsImportingRecipe(false);
-    }
-  };
-
-  const handleSaveRecipe = async () => {
-    if (!editingRecipe || !mealForRecipeEdit) return;
-
-    const { id, ...recipeToSave } = editingRecipe;
-
-
-  const cleanedRecipe: Omit<Recipe, 'id'> = {
-    ...recipeToSave,
-    ingredients: (recipeToSave.ingredients || []).filter(i => (i.name ?? '').trim() !== ''),
-    instructions: (recipeToSave.instructions || []).filter(i => (i ?? '').trim() !== ''),
-  };
-
-  try {
-    const savedRecipe = await saveRecipe(cleanedRecipe); // Save to Firestore
-    mealForRecipeEdit.recipeId = savedRecipe.id;
-    const mealId = mealForRecipeEdit.id;
-
-    setMeals(prevMeals =>
-      prevMeals.map(meal =>
-        meal.id === mealId ? { ...meal, recipeId: savedRecipe.id, name: savedRecipe.name } : meal
-      )
-    );
-
-    // Build ingredient items using the *current* list inside the updater
-    setItems(currentItems => {
-      // 1) Remove any previous items tied to this meal
-      const base = currentItems.filter(item => item.mealId !== mealId);
-
-      // 2) Seed lastRank from base
-      let lastRank =
-        base.length > 0 && base[base.length - 1].text !== ''
-          ? LexoRank.parse(base[base.length - 1].listOrder)
-          : LexoRank.middle();
-
-      // 3) Map ingredients -> items with proper ranking
-      const newItemsForRecipe: Item[] = cleanedRecipe.ingredients.map(ingredient => {
-        lastRank = lastRank.genNext();
-        return {
-          id: uuid.v4() as string,
-          text: ingredient.name.trim(),
-          checked: false,
-          listOrder: lastRank.toString(),
-          isSection: false,
-          mealId
-        };
-      });
-
-      // 4) Replace the single empty placeholder if present
-      const isSingleEmpty =
-        base.length === 1 && (base[0].text ?? '') === '' && !base[0].isSection;
-
-      return isSingleEmpty ? newItemsForRecipe : [...base, ...newItemsForRecipe];
-    });
-
-    markDirty();
-
-    } catch (error) {
-      console.error("Failed to save recipe", error);
-      Alert.alert("Error", "Could not save the recipe. Please try again.");
-    } finally {
-      // Cleanup
-      setAddRecipeModalVisible(false);
-      setEditingRecipe(null);
-      setMealForRecipeEdit(null);
-      setImportUrl('');
-    }
-  };
-
-  const handleRecipeFieldChange = (field: keyof Recipe, value: string) => {
-    setEditingRecipe(prev => prev ? { ...prev, [field]: value } : null);
-  };
-
-  const handleIngredientChange = (index: number, field: keyof Ingredient, value: string) => {
-    setEditingRecipe(prev => {
-      if (!prev) return null;
-      const newIngredients = [...prev.ingredients];
-      newIngredients[index] = { ...newIngredients[index], [field]: value };
-      return { ...prev, ingredients: newIngredients };
-    });
-  };
-
-  const addIngredientField = () => {
-    setEditingRecipe(prev => prev ? { ...prev, ingredients: [...prev.ingredients, { name: '', quantity: '' }] } : null);
-  };
-
-  const removeIngredientField = (index: number) => {
-    setEditingRecipe(prev => prev ? { ...prev, ingredients: prev.ingredients.filter((_, i) => i !== index) } : null);
-  };
-
-  const handleInstructionChange = (index: number, value: string) => {
-    setEditingRecipe(prev => {
-      if (!prev) return null;
-      const newInstructions = [...prev.instructions];
-      newInstructions[index] = value;
-      return { ...prev, instructions: newInstructions };
-    });
-  };
-
-  const addInstructionField = () => {
-    setEditingRecipe(prev => prev ? { ...prev, instructions: [...prev.instructions, ''] } : null);
-  };
-
-  const removeInstructionField = (index: number) => {
-    setEditingRecipe(prev => prev ? { ...prev, instructions: prev.instructions.filter((_, i) => i !== index) } : null);
-  };
+  const assignRef = useCallback((id: string) => (ref: TextInput | null) => { inputRefs.current[id] = ref; }, []);
+  const updateItemText = (id: string, text: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item))); markDirty(); };
+  const toggleCheck = (id: string) => { setItems(prev => prev.map(item => (item.id === id ? { ...item, checked: !item.checked } : item))); markDirty(); };
 
   const focusAtEnd = (id: string) => {
     const ref = inputRefs.current[id];
@@ -382,6 +246,14 @@ export default function ListScreen() {
     setMeals(prev => [...prev, newMeal]);
     setEditingId(newMeal.id);
     markDirty(); // Trigger debounced save
+  };
+
+  const handleEditRecipe = (recipe: Recipe) => {
+    const meal = meals.find(m => m.recipeId === recipe.id);
+    if (meal) {
+        setRecipeToViewId(null); // Close view modal
+        setRecipeToEdit(meal);   // Open edit modal
+    }
   };
 
    
@@ -670,243 +542,28 @@ export default function ListScreen() {
                   <Text style={[styles.buttonText, { marginLeft: 8 }]}>{isCategorizing ? 'Categorizing…' : 'Categorize'}</Text>
                 </TouchableOpacity>
             </>
-        )}
-      </View>
-    </View>
-    <View>
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={isRecipeModalVisible}
-        onRequestClose={() => setRecipeModalVisible(false)}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={() => setRecipeModalVisible(false)} />
-        <View style={[styles.modalContent, {maxHeight: '85%'} ]}>
-          { isFetchingRecipe && (
-            <View>
-              <ActivityIndicator size="large" />
-            </View>
-          )}
-          {selectedRecipe && (
-            <FlatList
-              ListHeaderComponent={
-                <>
-                  <Text style={styles.recipeTitle}>{selectedRecipe.name}</Text>
-                  <Text style={styles.recipeDescription}>{selectedRecipe.description}</Text>
-                  
-                  <Text style={styles.recipeSectionTitle}>Ingredients</Text>
-                  {selectedRecipe.ingredients.map((ing, index) => (
-                    <Text key={index} style={styles.recipeIngredient}>
-                      • {ing.quantity} {ing.name}
-                    </Text>
-                  ))}
-                  
-                  <Text style={styles.recipeSectionTitle}>Instructions</Text>
-                </>
-              }
-              data={selectedRecipe.instructions}
-              keyExtractor={(_, index) => `instr-${index}`}
-              renderItem={({ item, index }) => (
-                <Text style={styles.recipeInstruction}>
-                  {index + 1}. {item}
-                </Text>
-              )}
-              ListFooterComponent={
-                 <TouchableOpacity
-                    style={styles.modalButton}
-                    onPress={() => setRecipeModalVisible(false)}
-                  >
-                  <Text style={styles.modalButtonText}>Close</Text>
-                </TouchableOpacity>
-              }
-            />
           )}
         </View>
-      </Modal>
-      <Modal
-      animationType="slide"
-      visible={isAddRecipeModalVisible}
-      onRequestClose={() => setAddRecipeModalVisible(false)}
-    >
-      <SafeAreaView style={styles.modalContainer}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          {/* --- Header --- */}
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Add a Recipe</Text>
-            <TouchableOpacity onPress={() => setAddRecipeModalVisible(false)}>
-              <Ionicons name="close-circle" size={28} color="#aaa" />
-            </TouchableOpacity>
-          </View>
+      </View>
+      <ViewRecipeModal
+        isVisible={!!recipeToViewId}
+        onClose={() => setRecipeToViewId(null)}
+        recipeId={recipeToViewId}
+        onEdit={handleEditRecipe}
+      />
 
-          <ScrollView
-            style={styles.modalScrollView}
-            contentContainerStyle={styles.modalScrollViewContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* --- Import Section --- */}
-            <View style={styles.formSectionContainer}>
-              <Text style={styles.formSectionTitle}>Import from URL</Text>
-              <TextInput
-                style={styles.formInput}
-                placeholder="e.g., allrecipes.com/..."
-                placeholderTextColor="#999"
-                value={importUrl}
-                onChangeText={setImportUrl}
-                autoCapitalize="none"
-                keyboardType="url"
-              />
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  isImportingRecipe && styles.disabledButton,
-                ]}
-                onPress={handleImportRecipe}
-                disabled={isImportingRecipe}
-              >
-                {isImportingRecipe ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Import</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-
-            {/* --- Main Form --- */}
-            {editingRecipe && (
-              <>
-                {/* --- Name & Description --- */}
-                <View style={styles.formSectionContainer}>
-                  <TextInput
-                    style={styles.recipeNameInput}
-                    placeholder="Recipe Name"
-                    placeholderTextColor="#999"
-                    value={editingRecipe.name}
-                    onChangeText={(val) => handleRecipeFieldChange('name', val)}
-                  />
-                  <TextInput
-                    style={[styles.formInput, styles.descriptionInput]}
-                    placeholder="A short, tasty description..."
-                    placeholderTextColor="#999"
-                    value={editingRecipe.description}
-                    onChangeText={(val) =>
-                      handleRecipeFieldChange('description', val)
-                    }
-                    multiline
-                  />
-                </View>
-
-                {/* --- Ingredients --- */}
-                <View style={styles.formSectionContainer}>
-                  <Text style={styles.formSectionTitle}>Ingredients</Text>
-                  {editingRecipe.ingredients.map((ing, index) => (
-                    <View key={`ing-${index}`} style={styles.formRow}>
-                      <TextInput
-                        style={[styles.formInput, styles.quantityInput]}
-                        placeholder="1 cup"
-                        placeholderTextColor="#999"
-                        value={ing.quantity}
-                        onChangeText={(val) =>
-                          handleIngredientChange(index, 'quantity', val)
-                        }
-                      />
-                      <TextInput
-                        style={[styles.formInput, styles.nameInput]}
-                        placeholder="Flour"
-                        placeholderTextColor="#999"
-                        value={ing.name}
-                        onChangeText={(val) =>
-                          handleIngredientChange(index, 'name', val)
-                        }
-                      />
-                      <TouchableOpacity
-                        onPress={() => removeIngredientField(index)}
-                        style={styles.deleteRowButton}
-                      >
-                        <Ionicons
-                          name="remove-circle-outline"
-                          size={24}
-                          color="#EF4444"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                  <TouchableOpacity
-                    style={styles.addFieldButton}
-                    onPress={addIngredientField}
-                  >
-                    <Ionicons name="add" size={20} color="#007AFF" />
-                    <Text style={styles.addFieldButtonText}>Add Ingredient</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* --- Instructions --- */}
-                <View style={styles.formSectionContainer}>
-                  <Text style={styles.formSectionTitle}>Instructions</Text>
-                  {editingRecipe.instructions.map((inst, index) => (
-                    <View key={`inst-${index}`} style={styles.formRow}>
-                      <Text style={styles.stepNumber}>{index + 1}.</Text>
-                      <TextInput
-                        style={[styles.formInput, styles.nameInput]}
-                        placeholder="Mix the things..."
-                        placeholderTextColor="#999"
-                        value={inst}
-                        onChangeText={(val) =>
-                          handleInstructionChange(index, val)
-                        }
-                        multiline
-                      />
-                      <TouchableOpacity
-                        onPress={() => removeInstructionField(index)}
-                        style={styles.deleteRowButton}
-                      >
-                        <Ionicons
-                          name="remove-circle-outline"
-                          size={24}
-                          color="#EF4444"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                  <TouchableOpacity
-                    style={styles.addFieldButton}
-                    onPress={addInstructionField}
-                  >
-                    <Ionicons name="add" size={20} color="#007AFF" />
-                    <Text style={styles.addFieldButtonText}>Add Step</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </ScrollView>
-
-          {/* --- Footer --- */}
-          <View style={styles.modalFooter}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => setAddRecipeModalVisible(false)}
-            >
-              <Text style={styles.secondaryButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleSaveRecipe}
-            >
-              <Text style={styles.primaryButtonText}>Save Recipe</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </Modal>
-    </View>
+      <AddEditRecipeModal
+        isVisible={!!recipeToEdit}
+        onClose={() => setRecipeToEdit(null)}
+        mealForRecipe={recipeToEdit}
+        onRecipeSave={handleRecipeSaved}
+      />
       <MealSuggestionsModal
-          isVisible={isSuggestionModalVisible}
-          onClose={() => setSuggestionModalVisible(false)}
-          onAddSelectedMeals={handleAddMealsFromSuggestion}
-          listId={selectedList?.id ?? ''}
-        />
+        isVisible={isSuggestionModalVisible}
+        onClose={() => setSuggestionModalVisible(false)}
+        onAddSelectedMeals={handleAddMealsFromSuggestion}
+        listId={selectedList?.id ?? ''}
+      />
     </>
   );
 }
@@ -914,390 +571,17 @@ export default function ListScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', padding: 10 },
   itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
-  dragHandle: { width: 40, alignItems: 'center', justifyContent: 'center' },
-  dragIcon: { fontSize: 18 },
-  checkbox: { width: 24, height: 24, marginHorizontal: 10, borderWidth: 1, borderColor: '#999', alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
-  editInput: { fontSize: 16, flex: 1, paddingRight: 40, paddingVertical: 0, borderWidth: 0, borderColor: 'transparent' },
+  dragHandle: { paddingHorizontal: 15, paddingVertical: 5 },
+  dragIcon: { fontSize: 18, color: '#ccc' },
+  checkbox: { width: 24, height: 24, marginRight: 10, borderWidth: 1, borderColor: '#999', alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
+  editInput: { fontSize: 16, flex: 1, paddingVertical: 0 },
   checked: { textDecorationLine: 'line-through', color: '#999' },
   clearButton: { paddingHorizontal: 8, paddingVertical: 4 },
-  clearText: { fontSize: 16, color: '#999', width: 15 },
-  sectionText: { fontWeight: 'bold', fontSize: 16 },
-  buttonRow: { flexDirection: 'row', justifyContent: 'flex-start', gap: 8, padding: 16, borderTopWidth: 1, borderColor: '#eee', backgroundColor: '#fff' },
-  actionButton: { paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 4, flexDirection:'row', alignItems:'center', justifyContent:'center' },
-  buttonText: { fontSize: 16, color: '#444', marginLeft:5, fontWeight: 'bold'  },
   addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
   addIngredientText: { color: '#007AFF', fontSize: 16 },
-  mealName: {fontStyle: 'italic', color: 'grey', fontSize: 12, textAlign: 'right', paddingRight:20},
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  modalContent: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '75%',
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  suggestionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 15,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    marginBottom: 10,
-  },
-  suggestionItemSelected: {
-    borderColor: '#007AFF',
-    backgroundColor: '#f0f8ff',
-  },
-  suggestionCheckbox: {
-    width: 24,
-    height: 24,
-    borderWidth: 1,
-    borderColor: '#999',
-    borderRadius: 4,
-    marginRight: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  suggestionName: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  suggestionDescription: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-  },
-  modalButton: {
-    backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 10,
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  rerollButtonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  rerollButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 30,
-    width: 'auto',
-    alignItems: 'center',
-    // marginTop: 10,
-    flexDirection: 'row',
-    justifyContent: 'center',
-  },
-  rerollButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft:5
-  },
-  modalButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  suggestionLoadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 40,
-  },
-  suggestionLoadingText: {
-    marginTop: 15,
-    fontSize: 16,
-    color: '#666',
-    fontStyle: 'italic',
-  },
-  recipeTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    // textAlign: 'center',
-    marginBottom: 10,
-  },
-  recipeDescription: {
-    fontSize: 16,
-    color: '#555',
-    // textAlign: 'center',
-    marginBottom: 20,
-    fontStyle: 'italic',
-  },
-  recipeSectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginTop: 15,
-    marginBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    paddingBottom: 5,
-  },
-  recipeIngredient: {
-    fontSize: 16,
-    lineHeight: 24,
-    marginLeft: 10,
-  },
-  recipeInstruction: {
-    fontSize: 16,
-    lineHeight: 26,
-    marginBottom: 10,
-  },
-
-    addRecipeContainer: {
-        flex: 1,
-    },
-
-    addRecipeScrollViewContent: {
-        padding: 20,
-        paddingBottom: 60, // Extra space at the bottom for buttons
-    },
-
-  importSection: {
-    marginBottom: 20,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10
-  },
-  urlInput: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 10,
-    color: 'black',
-    borderRadius: 8,
-    fontSize: 16,
-    marginBottom: 10,
-  },
-  recipeTitleInput: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 10,
-    borderBottomWidth: 1,
-    borderColor: '#eee',
-    paddingBottom: 5,
-  },
-  recipeDescriptionInput: {
-    fontSize: 16,
-    fontStyle: 'italic',
-    color: '#555',
-    marginBottom: 20,
-    minHeight: 60,
-  },
-  formRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  quantityInput: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 10,
-    borderRadius: 8,
-    width: '30%',
-    marginRight: 10,
-  },
-  nameInput: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    padding: 10,
-    borderRadius: 8,
-    flex: 1,
-    marginRight: 10,
-  },
-  addButton: {
-    alignSelf: 'flex-start',
-    marginVertical: 10,
-  },
-  addButtonText: {
-    color: '#007AFF',
-    fontSize: 16,
-  },
-  addRecipeFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 20,
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#F7F7F7', // A slightly off-white background
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EFEFEF',
-  },
-  addRecipemodalTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  modalScrollView: {
-    flex: 1,
-  },
-  modalScrollViewContent: {
-    padding: 16,
-    paddingBottom: 100, // Extra space for footer
-  },
-  formSectionContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  formSectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  formInput: {
-    color: '#222222',
-    borderWidth: 1,
-    borderColor: '#EFEFEF',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 12,
-  },
-  recipeNameInput: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderColor: '#EFEFEF',
-    paddingBottom: 8,
-  },
-  descriptionInput: {
-    minHeight: 80,
-    textAlignVertical: 'top', // For Android
-  },
-  addRecipeformRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  addRecipequantityInput: {
-    flex: 0.3,
-    marginRight: 8,
-  },
-  addRecipenameInput: {
-    flex: 1,
-  },
-  stepNumber: {
-    marginRight: 8,
-    fontSize: 16,
-    color: '#888',
-  },
-  deleteRowButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  addFieldButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-  },
-  addFieldButtonText: {
-    color: '#007AFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#EFEFEF',
-    backgroundColor: '#FFFFFF',
-  },
-  primaryButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  secondaryButton: {
-    backgroundColor: '#EFEFEF',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 10,
-  },
-  secondaryButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  prefsSummaryContainer: {
-  backgroundColor: '#f7f7f7',
-  borderRadius: 12,
-  padding: 16,
-  marginBottom: 16,
-},
-prefsSummaryTitle: {
-  fontSize: 14,
-  fontWeight: '600',
-  color: '#888',
-  textTransform: 'uppercase',
-  marginBottom: 4,
-},
-prefsSummaryText: {
-  fontSize: 16,
-  color: '#333',
-  marginBottom: 12,
-  fontStyle: 'italic',
-},
-editPrefsButton: {
-  padding: 15,
-  borderRadius: 10,
-  alignItems: 'center',
-  marginTop: 10,
-  backgroundColor: '#eef2f5',
-},
-editPrefsButtonText: {
-  color: '#007AFF',
-  fontSize: 16,
-  fontWeight: 'bold',
-},
+  clearText: { fontSize: 16, color: '#999' },
+  sectionText: { fontWeight: 'bold', fontSize: 18 },
+  buttonRow: { flexDirection: 'row', justifyContent: 'space-around', gap: 8, padding: 16, borderTopWidth: 1, borderColor: '#eee', backgroundColor: '#fff' },
+  actionButton: { paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: '#ccc', borderRadius: 20, flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor: '#f9f9f9' },
+  buttonText: { fontSize: 16, color: '#444', marginLeft: 5 },
 });
