@@ -1,19 +1,14 @@
-// screens/UserProfile.tsx
-
 import { useAuth } from '@/context/AuthContext';
-import { Group } from '@/types/types';
-import { createGroup, searchUsers } from '@/utils/api'; // Import searchUsers
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, storage } from '@/utils/firebase';
-import { toReadablePhone } from '@/utils/utils';
+import { toReadablePhone } from '@/utils/utils'; // Assuming this utility is still needed for the settings modal
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { updateEmail, updateProfile, User } from 'firebase/auth';
+import { updateEmail, updateProfile } from 'firebase/auth';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { debounce } from 'lodash'; // A helpful utility for search
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -31,11 +26,12 @@ import {
     View
 } from 'react-native';
 
-// (EditableInfoRow component remains the same)
+// Reusable component for editable text fields, now only used in SettingsModal
 const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bold = false, editable = true, placeholder = "" }: { placeholder?: string, editable?: boolean, label: string; value: string; showLabel?: boolean; onSave: (newValue: string) => Promise<void>, size?: number, bold?: boolean }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [text, setText] = useState(value);
     const [loading, setLoading] = useState(false);
+
     const handleSave = async () => {
         setLoading(true);
         try {
@@ -47,6 +43,7 @@ const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bo
             setLoading(false);
         }
     };
+
     return (
         <View style={styles.infoRow}>
             {showLabel && <Text style={styles.infoLabel}>{label}</Text>}
@@ -80,22 +77,93 @@ const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bo
     );
 };
 
-export default function UserProfile() {
+// New Settings Modal Component
+const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: () => void }) => {
     const router = useRouter();
-    const { user, groups, selectGroup, refreshAuthUser } = useAuth();
+    const { user, refreshAuthUser } = useAuth();
+
+    const handleEmailSave = async (newEmail: string) => {
+        const userToUpdate = auth.currentUser;
+        if (!userToUpdate) throw new Error("User not found");
+        try {
+            await updateEmail(userToUpdate, newEmail);
+            refreshAuthUser();
+        } catch (error) {
+            throw new Error("Failed to update email. You may need to sign out and sign back in.");
+        }
+    };
+
+    const handlePhoneSave = async (newPhone: string) => {
+        Alert.alert("Feature Coming Soon", "Updating your phone number requires re-verification.");
+    };
+
+    return (
+        <Modal visible={isVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+            <SafeAreaView style={styles.modalViewContainer}>
+                <View style={styles.modalHeader}>
+                    <Text style={styles.modalHeaderTitle}>Settings</Text>
+                    <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                        <Ionicons name="close-circle-outline" size={30} color="#007AFF" />
+                    </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.modalScrollView}>
+                    <Text style={styles.sectionTitle}>Profile Information</Text>
+                    <EditableInfoRow
+                        label="Name"
+                        value={user?.displayName || 'Set Your Name'}
+                        onSave={async (name) => {
+                            const userToUpdate = auth.currentUser;
+                            if (!userToUpdate) throw new Error("User not found");
+                            await updateProfile(userToUpdate, { displayName: name });
+                            refreshAuthUser();
+                        }}
+                    />
+                    {user?.phoneNumber &&
+                        <EditableInfoRow
+                            label="Phone Number"
+                            value={toReadablePhone(user?.phoneNumber) || 'Not set'}
+                            onSave={handlePhoneSave}
+                            editable={false} // Phone number editable is currently disabled
+                        />
+                    }
+                    {user?.email &&
+                        <EditableInfoRow
+                            label="Email"
+                            value={user?.email || 'Not set'}
+                            onSave={handleEmailSave}
+                        />
+                    }
+
+                    <Text style={styles.sectionTitle}>Preferences</Text>
+                    <TouchableOpacity style={styles.editMealPreferences} onPress={() => router.push('/meal-preferences')}>
+                        <Ionicons name="open-outline" size={16} color="#007AFF"></Ionicons>
+                        <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
+                    </TouchableOpacity>
+
+                    {/* Add other settings here */}
+
+                    <TouchableOpacity style={[styles.primaryButton, { marginTop: 30, width: '100%' }]} onPress={() => {
+                        auth.signOut();
+                        onClose(); // Close modal after sign out
+                    }}>
+                        <Text style={styles.primaryButtonText}>Sign Out</Text>
+                    </TouchableOpacity>
+
+                </ScrollView>
+            </SafeAreaView>
+        </Modal>
+    );
+};
+
+
+export default function UserProfile() {
+    const { user, refreshAuthUser } = useAuth();
     const [loading, setLoading] = useState(false);
-    const [editModalVisible, setEditModalVisible] = useState<'photo' | null>(null);
+    const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
+    const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [newPhotoUri, setNewPhotoUri] = useState(user?.photoURL || null);
 
-    // --- Create Group Modal State ---
-    const [isGroupModalVisible, setGroupModalVisible] = useState(false);
-    const [newGroupName, setNewGroupName] = useState('');
-    const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState<User[]>([]);
-    const [invitedMembers, setInvitedMembers] = useState<User[]>([]);
-    const [isSearching, setIsSearching] = useState(false);
-
-    // --- Carousel State and Logic (remains the same) ---
+    // --- Carousel State and Logic ---
     const flatListRef = useRef<FlatList | null>(null);
     const [isAtStart, setIsAtStart] = useState(true);
     const [isAtEnd, setIsAtEnd] = useState(false);
@@ -111,90 +179,6 @@ export default function UserProfile() {
         flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
     };
 
-    // --- Debounced Search Handler ---
-    const debouncedSearch = useCallback(
-        debounce(async (query:any) => {
-            if (query.length < 2) {
-                setSearchResults([]);
-                setIsSearching(false);
-                return;
-            }
-            try {
-                const results = await searchUsers(query);
-                // Filter out the current user and already invited members from results
-                const currentUserUid = auth.currentUser?.uid;
-                const invitedMemberUids = new Set(invitedMembers.map(m => m.uid));
-                const filteredResults = results.filter(
-                    u => u.uid !== currentUserUid && !invitedMemberUids.has(u.uid)
-                );
-                setSearchResults(filteredResults);
-            } catch (error) {
-                console.error("Search failed:", error);
-                setSearchResults([]);
-            } finally {
-                setIsSearching(false);
-            }
-        }, 300), // 300ms delay
-        [invitedMembers] // Recreate debounce function if invitedMembers changes
-    );
-
-    const handleSearchChange = (text: string) => {
-        setSearchQuery(text);
-        setIsSearching(true);
-        debouncedSearch(text);
-    };
-    
-    // --- Group Creation Logic ---
-    const openCreateGroupModal = () => {
-        if (!auth.currentUser || auth.currentUser.isAnonymous) {
-            router.push('/login');
-            return;
-        }
-        // Reset state when opening
-        setNewGroupName('');
-        setSearchQuery('');
-        setSearchResults([]);
-        setInvitedMembers([]);
-        setGroupModalVisible(true);
-    };
-
-    const handleInviteUser = (userToInvite: User) => {
-        setInvitedMembers(prev => [...prev, userToInvite]);
-        setSearchResults(prev => prev.filter(u => u.uid !== userToInvite.uid));
-    };
-
-    const handleRemoveUser = (userToRemove: User) => {
-        setInvitedMembers(prev => prev.filter(u => u.uid !== userToRemove.uid));
-    };
-
-    const submitCreateGroup = async () => {
-        if (!newGroupName.trim()) {
-            Alert.alert("Validation Error", "Please enter a name for your group.");
-            return;
-        }
-        setLoading(true);
-        try {
-            const memberUids = invitedMembers.map(m => m.uid);
-            if(auth.currentUser?.uid) {
-                memberUids.push(auth.currentUser.uid);
-            }
-            await createGroup(newGroupName, memberUids);
-            refreshAuthUser(); // This will refetch groups in your AuthContext
-            setGroupModalVisible(false);
-        } catch (err) {
-            console.error('Failed to create group', err);
-            Alert.alert("Error", "Could not create the group. Please try again.");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-
-    // --- Other functions (navigateToList, handlePhotoSave, etc. remain the same) ---
-    const navigateToList = (group: Group) => {
-        selectGroup(group);
-        router.push('/list');
-    };
     const handlePhotoSave = async () => {
         if (!newPhotoUri) return;
         setLoading(true);
@@ -215,9 +199,10 @@ export default function UserProfile() {
             Alert.alert("Error", "Could not update profile picture.");
         } finally {
             setLoading(false);
-            setEditModalVisible(null);
+            setEditPhotoModalVisible(false);
         }
     };
+
     const handlePickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
@@ -234,197 +219,65 @@ export default function UserProfile() {
             setNewPhotoUri(result.assets[0].uri);
         }
     };
-    const handleEmailSave = async (newEmail: string) => {
-        const userToUpdate = auth.currentUser;
-        if (!userToUpdate) throw new Error("User not found");
-        try {
-            await updateEmail(userToUpdate, newEmail);
-            refreshAuthUser();
-        } catch (error) {
-            throw new Error("Failed to update email. You may need to sign out and sign back in.");
-        }
-    };
-    const handlePhoneSave = async (newPhone: string) => {
-        Alert.alert("Feature Coming Soon", "Updating your phone number requires re-verification.");
-    };
+
     const openPhotoModal = () => {
         setNewPhotoUri(user?.photoURL || null);
-        setEditModalVisible('photo');
+        setEditPhotoModalVisible(true);
     };
 
     return (
         <SafeAreaView style={styles.container}>
+            <View style={styles.header}>
+                <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
+                    <Ionicons name="settings-outline" size={28} color="#000" />
+                </TouchableOpacity>
+            </View>
+
             <ScrollView>
                 {/* Profile Section */}
-                <View style={styles.groupsContainer}>
-                    <Text style={styles.sectionTitle}>My Profile</Text>
-                    <View style={styles.profileInner}>
-                        <View style={styles.profileHeader}>
-                            <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
-                                {user?.photoURL && (
-                                    <Image source={{ uri: user.photoURL }} style={styles.profileImage} />
-                                )}
-                                <View style={styles.editIconContainer}>
-                                    <Ionicons name="pencil" size={16} color="#fff" />
-                                </View>
-                            </TouchableOpacity>
-                            <View style={styles.profileInfo}>
-                                <EditableInfoRow
-                                    size={24}
-                                    bold={true}
-                                    showLabel={false}
-                                    label="Name"
-                                    value={user?.displayName || 'Set Your Name'}
-                                    onSave={async (name) => {
-                                        const userToUpdate = auth.currentUser;
-                                        if (!userToUpdate) throw new Error("User not found");
-                                        await updateProfile(userToUpdate, { displayName: name });
-                                        refreshAuthUser();
-                                    }}
-                                />
-                            </View>
+                <View style={styles.profileContainer}>
+                    <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
+                        {user?.photoURL && (
+                            <Image source={{ uri: user.photoURL }} style={styles.profileImage} />
+                        )}
+                        <View style={styles.editIconContainer}>
+                            <Ionicons name="pencil" size={16} color="#fff" />
                         </View>
-                        {user?.phoneNumber &&
-                            <EditableInfoRow
-                                label="Phone Number"
-                                value={toReadablePhone(user?.phoneNumber) || 'Not set'}
-                                onSave={handlePhoneSave}
-                                editable={false}
-                            />
-                        }
-                        {user?.email &&
-                            <EditableInfoRow
-                                label="Email"
-                                value={user?.email || 'Not set'}
-                                onSave={handleEmailSave}
-                                editable={true}
-                            />
-                        }
-                        <TouchableOpacity style={styles.editMealPreferences} onPress={() => router.push('/meal-preferences')}>
-                            <Ionicons name="pencil" size={16} color="#007AFF"></Ionicons>
-                            <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
-                        </TouchableOpacity>
+                    </TouchableOpacity>
+
+                    <Text style={styles.displayName}>{user?.displayName || 'Set Your Name'}</Text>
+                    {user?.email && <Text style={styles.usernameText}>@{user.email.split('@')[0]}</Text>} {/* Placeholder for username */}
+                </View>
+
+                {/* Stats Section */}
+                <View style={styles.statsContainer}>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statNumber}>0</Text>
+                        <Text style={styles.statLabel}>Following</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statNumber}>0</Text>
+                        <Text style={styles.statLabel}>Followers</Text>
+                    </View>
+                    <View style={styles.statItem}>
+                        <Text style={styles.statNumber}>0</Text>
+                        <Text style={styles.statLabel}>Recipes</Text>
                     </View>
                 </View>
 
-                {/* Groups Section */}
-                <View style={styles.groupsContainer}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>My Groups</Text>
-                        <TouchableOpacity style={styles.addButton} onPress={openCreateGroupModal}>
-                            <Ionicons name="add" size={24} color="#fff" />
-                        </TouchableOpacity>
+                {/* Recipe Feed Section */}
+                <View style={styles.feedContainer}>
+                    <Text style={styles.sectionTitle}>My Recipes</Text>
+                    <View style={styles.feedPlaceholder}>
+                        <Ionicons name="receipt-outline" size={48} color="#ccc" />
+                        <Text style={styles.feedPlaceholderText}>Your saved recipes will appear here.</Text>
                     </View>
-                    {groups.length === 0 ? (
-                        <View style={styles.emptyContainer}>
-                            <Ionicons name="people-outline" size={40} color="#ccc" style={styles.emptyIcon} />
-                            <Text style={styles.emptySubtitle}>Create or join a group to start sharing lists.</Text>
-                        </View>
-                    ) : (
-                        <FlatList
-                            data={groups}
-                            keyExtractor={(g) => g.id}
-                            scrollEnabled={false}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity style={styles.groupItem} onPress={() => navigateToList(item)}>
-                                    <Text style={styles.groupName}>{item.name}</Text>
-                                    <Ionicons name="chevron-forward" size={20} color="#ccc" />
-                                </TouchableOpacity>
-                            )}
-                        />
-                    )}
                 </View>
+
             </ScrollView>
 
-            {/* --- Create Group Modal --- */}
-            <Modal visible={isGroupModalVisible} animationType="slide">
-                <SafeAreaView style={styles.modalViewContainer}>
-                    {/* FIX: Replaced ScrollView with a single FlatList.
-                      The searchResults are the main data for this list.
-                    */}
-                    <FlatList
-                        contentContainerStyle={styles.modalScrollView}
-                        // Use searchResults as the primary data source
-                        data={searchResults}
-                        keyExtractor={(item) => item.uid}
-                        // Header contains all content BEFORE the search results list
-                        ListHeaderComponent={
-                            <>
-                                <Text style={styles.modalTitle}>Create New Group</Text>
-
-                                <Text style={styles.inputLabel}>Group Name</Text>
-                                <TextInput
-                                    style={styles.textInput}
-                                    placeholder="Family, Roommates, etc."
-                                    value={newGroupName}
-                                    onChangeText={setNewGroupName}
-                                />
-
-                                <Text style={styles.inputLabel}>Invite Members</Text>
-                                <TextInput
-                                    style={styles.textInput}
-                                    placeholder="Search by name, email, or phone"
-                                    value={searchQuery}
-                                    onChangeText={handleSearchChange}
-                                />
-
-                                {isSearching && <ActivityIndicator style={{ marginVertical: 10 }} />}
-                            </>
-                        }
-                        // renderItem handles the main list data (the search results)
-                        renderItem={({ item }) => (
-                            <View style={styles.userItem}>
-                                <Image source={{ uri: item.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
-                                <View style={styles.userInfo}>
-                                    <Text style={styles.userName}>{item.displayName}</Text>
-                                    <Text style={styles.userContact}>{item.phoneNumber ? toReadablePhone(item.phoneNumber) : item.email}</Text>
-                                </View>
-                                <TouchableOpacity style={styles.inlineButton} onPress={() => handleInviteUser(item)}>
-                                    <Text style={styles.inlineButtonText}>Invite</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                        // Footer contains all content AFTER the search results list
-                        ListFooterComponent={
-                            <>
-                                {invitedMembers.length > 0 && (
-                                    <>
-                                        <Text style={styles.inputLabel}>Invited</Text>
-                                        {/* FIX: Use a simple map for the short list of invited members
-                                          to avoid nesting a VirtualizedList.
-                                        */}
-                                        {invitedMembers.map((item) => (
-                                            <View key={item.uid} style={styles.userItem}>
-                                                <Image source={{ uri: item.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
-                                                <View style={styles.userInfo}>
-                                                  <Text style={styles.userName}>{item.displayName}</Text>
-                                                </View>
-                                                <TouchableOpacity onPress={() => handleRemoveUser(item)}>
-                                                    <Ionicons name="close-circle" size={24} color="#ff3b30" />
-                                                </TouchableOpacity>
-                                            </View>
-                                        ))}
-                                    </>
-                                )}
-                            </>
-                        }
-                    />
-
-                    {/* The action buttons remain outside the list to stay at the bottom */}
-                    <View style={styles.modalFooter}>
-                        <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => setGroupModalVisible(false)}>
-                            <Text style={styles.secondaryButtonText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.modalButton, styles.primaryButton]} onPress={submitCreateGroup} disabled={loading}>
-                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Create Group</Text>}
-                        </TouchableOpacity>
-                    </View>
-                </SafeAreaView>
-            </Modal>
-
-
-            {/* Photo Edit Modal (remains the same) */}
-            <Modal visible={editModalVisible === 'photo'} animationType="slide" transparent={true}>
+            {/* Photo Edit Modal */}
+            <Modal visible={editPhotoModalVisible} animationType="slide" transparent={true}>
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Update Profile Photo</Text>
@@ -464,7 +317,7 @@ export default function UserProfile() {
                         </View>
 
                         <View style={styles.modalButtons}>
-                            <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => setEditModalVisible(null)}>
+                            <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => setEditPhotoModalVisible(false)}>
                                 <Text style={styles.secondaryButtonText}>Cancel</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={[styles.modalButton, styles.primaryButton]} onPress={handlePhotoSave} disabled={loading}>
@@ -474,6 +327,10 @@ export default function UserProfile() {
                     </View>
                 </View>
             </Modal>
+
+            {/* Settings Modal */}
+            <SettingsModal isVisible={settingsModalVisible} onClose={() => setSettingsModalVisible(false)} />
+
         </SafeAreaView>
     );
 }
@@ -484,38 +341,129 @@ const styles = StyleSheet.create({
         backgroundColor: '#f8f9fa',
         paddingTop: Constants.statusBarHeight,
     },
-    profileInner: {
-        backgroundColor: '#fff',
-        padding: 16,
-        borderRadius: 8,
-        borderColor: '#eee',
-        borderWidth: 1,
-    },
-    profileHeader: {
+    header: {
         flexDirection: 'row',
+        justifyContent: 'flex-end', // Center title
+        paddingTop:20,
+        paddingRight:20
+    },
+    headerTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        flex: 2, // Allow title to take more space
+        textAlign: 'center',
+    },
+    settingsButton: {
+        flex: 1, // Take up remaining space
+        alignItems: 'flex-end',
+    },
+    profileContainer: {
         alignItems: 'center',
-        paddingBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
-        marginBottom: 16
+        paddingVertical: 24,
     },
     profileImageContainer: {
-        marginRight: 16
+        marginBottom: 16,
     },
-    profileImage: { width: 90, height: 90, borderRadius: 45, borderWidth: 2, borderColor: '#ecececff' },
+    profileImage: { 
+        width: 120, 
+        height: 120, 
+        borderRadius: 60, 
+        borderWidth: 3, 
+        borderColor: '#fff',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+        elevation: 5,
+    },
     editIconContainer: {
         position: 'absolute',
-        bottom: -2,
-        right: -2,
+        bottom: 0,
+        right: 0,
         backgroundColor: '#007AFF',
-        borderRadius: 12,
-        padding: 4,
+        borderRadius: 15,
+        padding: 6,
         borderWidth: 2,
         borderColor: '#fff',
     },
-    profileInfo: { flex: 1 },
+    displayName: {
+        fontSize: 24,
+        fontWeight: '800',
+        color: '#333',
+        marginBottom: 4,
+    },
+    usernameText: {
+        fontSize: 16,
+        color: '#6c757d',
+        marginBottom: 16, // Space before stats
+    },
+    statsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        paddingVertical: 16,
+        marginHorizontal: 16,
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    statItem: {
+        alignItems: 'center',
+    },
+    statNumber: {
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+    statLabel: {
+        fontSize: 14,
+        color: '#6c757d',
+        marginTop: 4,
+    },
+    feedContainer: {
+        paddingHorizontal: 16,
+    },
+    sectionTitle: { 
+        fontSize: 22, 
+        fontWeight: 'bold', 
+        marginVertical: 16,
+        color: '#333',
+    },
+    feedPlaceholder: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 40,
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#e9ecef',
+    },
+    feedPlaceholderText: {
+        marginTop: 16,
+        fontSize: 16,
+        color: '#6c757d',
+        textAlign: 'center'
+    },
+    primaryButton: {
+        backgroundColor: '#007AFF',
+        paddingVertical: 12,
+        paddingHorizontal: 30,
+        borderRadius: 25,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+    secondaryButton: {
+        backgroundColor: '#e9ecef',
+    },
+    secondaryButtonText: {
+        color: '#495057',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    // Styles for EditableInfoRow within SettingsModal
     infoRow: {
-        paddingVertical: 6,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
     },
     infoLabel: {
         fontSize: 14,
@@ -527,14 +475,6 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
     },
-    infoValue: {
-        fontSize: 16,
-        fontWeight: '500',
-    },
-    editContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
     infoInput: {
         flex: 1,
         fontSize: 16,
@@ -544,75 +484,9 @@ const styles = StyleSheet.create({
         padding: 8,
         marginRight: 8,
     },
-    editPencilButton: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: '#007AFF',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: '#fff'
-    },
-    groupsContainer: {
-        paddingHorizontal: 16,
-        marginBottom: 16,
-    },
-    sectionHeader: {
+    editContainer: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-    },
-    sectionTitle: { fontSize: 22, fontWeight: 'bold', marginVertical: 10 },
-    addButton: {
-        backgroundColor: '#007AFF',
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    groupItem: {
-        backgroundColor: '#fff',
-        padding: 16,
-        borderRadius: 8,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 10,
-        borderColor: '#eee',
-        borderWidth: 1,
-    },
-    groupName: { fontSize: 16 },
-    emptyContainer: {
-        alignItems: 'center',
-        paddingVertical: 40,
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        borderColor: '#eee',
-        borderWidth: 1,
-    },
-    emptyIcon: { marginBottom: 16 },
-    emptySubtitle: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20, paddingHorizontal: 20 },
-
-    primaryButton: {
-        backgroundColor: '#007AFF',
-        paddingVertical: 12,
-        paddingHorizontal: 30,
-        borderRadius: 25,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-    secondaryButton: {
-        backgroundColor: 'transparent',
-        borderColor: '#007AFF',
-        borderWidth: 1,
-    },
-    secondaryButtonText: {
-        color: '#007AFF',
-        fontSize: 16,
-        fontWeight: '600',
     },
     inlineButton: {
         paddingHorizontal: 12,
@@ -634,7 +508,7 @@ const styles = StyleSheet.create({
         fontWeight: '500'
     },
 
-    // --- Modal & Carousel Styles ---
+    // --- Photo Edit Modal & Carousel Styles (mostly unchanged) ---
     modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
     modalContent: { backgroundColor: 'white', padding: 20, borderRadius: 10, width: '90%', alignItems: 'center' },
     modalTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, alignSelf: 'center' },
@@ -664,72 +538,54 @@ const styles = StyleSheet.create({
     gridAvatar: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#eee' },
     selectedAvatar: { borderWidth: 3, borderColor: '#007AFF' },
     uploadButton: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
-    
-    // --- New Styles for Create Group Modal ---
+
+    // --- Settings Modal specific styles ---
     modalViewContainer: {
         flex: 1,
         backgroundColor: '#f8f9fa',
     },
-    modalScrollView: {
-        padding: 16,
-    },
-    inputLabel: {
-        fontSize: 16,
-        fontWeight: '500',
-        color: '#333',
-        marginBottom: 8,
-        marginTop: 16,
-    },
-    textInput: {
-        backgroundColor: '#fff',
-        borderWidth: 1,
-        borderColor: '#ccc',
-        borderRadius: 8,
-        padding: 12,
-        fontSize: 16,
-    },
-    userItem: {
+    modalHeader: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#eee',
         backgroundColor: '#fff',
-        padding: 10,
-        borderRadius: 8,
-        marginBottom: 8,
     },
-    userAvatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        marginRight: 12,
+    modalHeaderTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#333',
     },
-    userInfo: {
-        flex: 1,
+    closeButton: {
+        padding: 5,
     },
-    userName: {
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    userContact: {
-        fontSize: 14,
-        color: '#666',
-    },
-    modalFooter: {
-        flexDirection: 'row',
-        padding: 16,
-        borderTopWidth: 1,
-        borderTopColor: '#eee',
-        backgroundColor: '#fff',
+    modalScrollView: {
+        paddingHorizontal: 16,
     },
     editMealPreferences: {
-        marginTop: 16,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'flex-start',
+        borderRadius: 8,
     },
     editMealPreferencesText: {
         color: '#007AFF',
         fontSize: 16,
         fontWeight: '500',
-        marginLeft: 5
-    }
+        marginLeft: 8,
+    },
+     infoValue: {
+        marginRight: 8,
+    },
+    editPencilButton: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: '#007AFF',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
 });

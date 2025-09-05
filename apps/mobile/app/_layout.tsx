@@ -47,6 +47,13 @@ export default function RootLayout() {
                 }}
               />
               <Stack.Screen
+                name="groups"
+                options={{ 
+                  title: 'Groups',
+                  headerShown: false
+                }}
+              />
+              <Stack.Screen
                 name="complete-profile"
                 options={{ 
                   title: 'Complete Profile',

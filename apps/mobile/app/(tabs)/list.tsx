@@ -6,6 +6,7 @@ import { Ingredient, Item, List, ListView, Meal, MealPreferences, Recipe } from 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { LexoRank } from 'lexorank';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -725,6 +726,7 @@ export default function ListScreen() {
 
   return (
     <>
+    <StatusBar style="dark" />
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
       {/* MAIN BODY */}
       <KeyboardAvoidingView

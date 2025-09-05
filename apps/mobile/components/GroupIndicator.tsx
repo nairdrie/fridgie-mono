@@ -15,7 +15,7 @@ export default function GroupIndicator() {
 
     const handleSwitchGroup = () => {
         setModalVisible(false);
-        router.push('/profile');
+        router.push('/groups');
     };
 
     if (!selectedGroup) {
