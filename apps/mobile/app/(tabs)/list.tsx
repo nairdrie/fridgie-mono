@@ -38,7 +38,7 @@ export default function ListScreen() {
 
   const [editingId, setEditingId] = useState<string>('');
   const [isCategorizing, setIsCategorizing] = useState(false);
-  const [dirtyUntil, setDirtyUntil] = useState<number>(2);
+  const [dirtyUntil, setDirtyUntil] = useState<number>(0);
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const inputRefs = useRef<Record<string, TextInput | null>>({});
 
