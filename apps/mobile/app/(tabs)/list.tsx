@@ -1,11 +1,12 @@
 // TODO: Loading state while we get the group and lists
 
 import MealPlanView from '@/components/MealPlanView';
+import MealSuggestionsModal from '@/components/MealSuggestionsModal';
 import { useLists } from '@/context/ListContext';
-import { Ingredient, Item, List, ListView, Meal, MealPreferences, Recipe } from '@/types/types';
+import { Ingredient, Item, List, ListView, Meal, Recipe } from '@/types/types';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { LexoRank } from 'lexorank';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -28,7 +29,7 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import { ApiError, categorizeList, getMealPreferences, getMealSuggestions, getRecipe, importRecipeFromUrl, listenToList, saveRecipe, scheduleMealRating, updateList } from '../../utils/api';
+import { categorizeList, getRecipe, importRecipeFromUrl, listenToList, saveRecipe, scheduleMealRating, updateList } from '../../utils/api';
 
 
 export default function ListScreen() {
@@ -39,24 +40,11 @@ export default function ListScreen() {
 
   const [editingId, setEditingId] = useState<string>('');
   const [isCategorizing, setIsCategorizing] = useState(false);
-  const [dirtyUntil, setDirtyUntil] = useState<number>(0);
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
   const inputRefs = useRef<Record<string, TextInput | null>>({});
 
   const [isSuggestionModalVisible, setSuggestionModalVisible] = useState(false);
-  const [mealSuggestions, setMealSuggestions] = useState<Recipe[]>([]);
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Record<string, boolean>>({});
-  const [isSuggesting, setIsSuggesting] = useState(false);
-  const goofyLoadingMessages = [
-    'Consulting our chefs...',
-    'Rummaging through the pantry...',
-    'Asking grandma for her secret recipe...',
-    'Warming up the oven...',
-  ];
-  const [loadingMessage, setLoadingMessage] = useState(goofyLoadingMessages[0]);
-  const loadingMessageIndexRef = useRef(0);
 
-  const router = useRouter();
 
   const [isRecipeModalVisible, setRecipeModalVisible] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
@@ -66,14 +54,7 @@ export default function ListScreen() {
   const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
   const [importUrl, setImportUrl] = useState('');
   const [isImportingRecipe, setIsImportingRecipe] = useState(false);
-
   const [collapsedMeals, setCollapsedMeals] = useState<Record<string, boolean>>({});
-
-  const [vetoedMeals, setVetoedMeals] = useState<string[]>([]);
-
-  const [suggestionModalStep, setSuggestionModalStep] = useState<'confirm' | 'loading' | 'results'>('confirm');
-  const [mealPreferences, setMealPreferences] = useState<MealPreferences | null>(null);
-
   const [isFetchingRecipe, setIsFetchingRecipe] = useState(false);
 
 
@@ -81,7 +62,6 @@ export default function ListScreen() {
   const markDirty = () => {
     const until = Date.now() + 1200; // tweak if you want a longer freeze
     dirtyUntilRef.current = until;
-    setDirtyUntil(until); // keep your state if you read it elsewhere (optional)
   };
 
   // EFFECT 1: Handles ALL incoming data (Initial Fetch + Real-time Updates)
@@ -169,31 +149,6 @@ export default function ListScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isSuggesting) {
-      return; // Do nothing if not loading
-    }
-  
-    // Reset to the first message every time loading starts
-    loadingMessageIndexRef.current = 0;
-    setLoadingMessage(goofyLoadingMessages[0]);
-  
-    // Set up an interval to cycle through messages
-    const intervalId = setInterval(() => {
-      // increment the indexref until the end then stop.
-      if (loadingMessageIndexRef.current >= goofyLoadingMessages.length) {
-        clearInterval(intervalId);
-        return;
-      }
-  
-      loadingMessageIndexRef.current = (loadingMessageIndexRef.current + 1) % goofyLoadingMessages.length;
-      
-      setLoadingMessage(goofyLoadingMessages[loadingMessageIndexRef.current]);
-    }, 4000); // Change message every 2.5 seconds
-  
-    // Cleanup function to clear the interval when loading stops or the component unmounts
-    return () => clearInterval(intervalId);
-  }, [isSuggesting]); // This effect specifically runs when `isSuggesting` changes
 
   useEffect(() => {
       const loadCollapsedState = async () => {
@@ -388,6 +343,32 @@ export default function ListScreen() {
     }, 0);
   };
 
+  const handleAddMealsFromSuggestion = (newMeals: Meal[], newItemsFromModal: Item[]) => {
+    setMeals(prev => [...prev, ...newMeals]);
+
+    setItems(currentItems => {
+      let lastRank =
+        currentItems.length > 0 && currentItems[currentItems.length - 1].text !== ''
+          ? LexoRank.parse(currentItems[currentItems.length - 1].listOrder)
+          : LexoRank.middle();
+
+      const rankedNewItems = newItemsFromModal.map(item => {
+        lastRank = lastRank.genNext();
+        return { ...item, listOrder: lastRank.toString() };
+      });
+
+      // Handle case where list is just a single empty placeholder
+      const isSingleEmpty = currentItems.length === 1 && (currentItems[0].text ?? '') === '' && !currentItems[0].isSection;
+      if (isSingleEmpty) {
+        return rankedNewItems;
+      }
+      
+      return [...currentItems, ...rankedNewItems];
+    });
+
+    markDirty();
+  };
+
   const handleAddMeal = () => {
     if (!selectedGroup || !selectedList) return;
     
@@ -403,35 +384,7 @@ export default function ListScreen() {
     markDirty(); // Trigger debounced save
   };
 
-   const handleRerollSuggestions = async () => {
-    if (isSuggesting) return;
-
-    // Add the current suggestions to the list of vetoed meals for this session
-    const currentTitles = mealSuggestions.map(s => s.name);
-    const newVetoedList = [...vetoedMeals, ...currentTitles];
-    setVetoedMeals(newVetoedList);
-    
-    // Set loading state and clear selections
-    setIsSuggesting(true);
-    setSelectedSuggestions({});
-    setMealSuggestions([]);
-
-    try {
-      // Call the API, passing the cumulative list of vetoed titles
-      const suggestionsFromApi = await getMealSuggestions(newVetoedList);
-      const suggestionsWithId = suggestionsFromApi.map(suggestion => ({
-        ...suggestion,
-        id: uuid.v4() as string,
-      }));
-      setMealSuggestions(suggestionsWithId);
-    } catch (error) {
-      console.error('An unexpected error occurred during reroll:', error);
-      // Optionally close the modal or show an error message within it
-      setSuggestionModalVisible(false);
-    } finally {
-      setIsSuggesting(false);
-    }
-  };
+   
 
   const handleUpdateMeal = (mealId: string, updates: Partial<Meal>) => {
     setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
@@ -521,69 +474,6 @@ export default function ListScreen() {
     }
   };
 
-  const handleOpenSuggestionFlow = async () => {
-    setSuggestionModalVisible(true);
-    setSuggestionModalStep('loading'); // Show loading spinner while fetching prefs
-    setMealPreferences(null);
-    setIsSuggesting(false);
-
-    try {
-      const prefs = await getMealPreferences();
-      setMealPreferences(prefs);
-      setSuggestionModalStep('confirm'); // Move to the confirmation step
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        setSuggestionModalVisible(false);
-        await AsyncStorage.setItem('pendingAction', 'suggest-meals');
-        router.navigate('/meal-preferences');
-      } else {
-        console.error('An unexpected error occurred while fetching preferences:', error);
-        setSuggestionModalVisible(false);
-        Alert.alert("Error", "Could not load your meal preferences. Please try again.");
-      }
-    }
-  };
-
-  // This function runs when the user confirms their preferences.
-  const handleConfirmAndSuggest = async () => {
-    console.log("HANDLE CONFIRM AND SUGGEST")
-    setSuggestionModalStep('loading');
-    setIsSuggesting(true); // This controls the goofy messages
-    setMealSuggestions([]);
-    setSelectedSuggestions({});
-
-    try {
-      const suggestionsFromApi = await getMealSuggestions();
-      const suggestionsWithId = suggestionsFromApi.map(suggestion => ({
-        ...suggestion,
-        id: uuid.v4() as string,
-      }));
-      setMealSuggestions(suggestionsWithId);
-      setSuggestionModalStep('results');
-    } catch (error) {
-      console.error('An unexpected error occurred during suggestion:', error);
-      setSuggestionModalVisible(false);
-      Alert.alert("Error", "Could not get meal suggestions. Please try again.");
-    } finally {
-      setIsSuggesting(false);
-    }
-  };
-
-  // New handler for the "Edit Preferences" button
-  const handleEditPreferences = async () => {
-    setSuggestionModalVisible(false);
-    await AsyncStorage.setItem('pendingAction', 'suggest-meals');
-    router.navigate('/meal-preferences');
-  };
-
-
-  const toggleSuggestionSelection = (recipeId: string) => {
-    setSelectedSuggestions((prev) => ({
-      ...prev,
-      [recipeId]: !prev[recipeId],
-    }));
-  };
-
   useFocusEffect(
     useCallback(() => {
       const checkForPendingAction = async () => {
@@ -592,7 +482,7 @@ export default function ListScreen() {
 
           if (pendingAction === 'suggest-meals') {
             await AsyncStorage.removeItem('pendingAction');
-            handleOpenSuggestionFlow();
+            setSuggestionModalVisible(true); 
           }
         } catch (e) {
           console.error("Failed to check for pending action:", e);
@@ -602,76 +492,6 @@ export default function ListScreen() {
       checkForPendingAction();
     }, [])
   );
-
-  const handleAddSelectedMeals = async () => { // Make the function async
-    if (!selectedList) return;
-
-    const selectedRecipes = mealSuggestions.filter(
-      (recipe) => selectedSuggestions[recipe.id]
-    );
-
-    if (selectedRecipes.length === 0) {
-      setSuggestionModalVisible(false);
-      return;
-    }
-
-    try {
-      // 1. Save all selected recipes to Firestore in parallel
-      const savedRecipes = await Promise.all(
-        selectedRecipes.map(recipe => saveRecipe(recipe))
-      );
-
-      const newMeals: Meal[] = [];
-      const newItems: Item[] = [];
-
-      let lastRank =
-        items.length > 0 && items[items.length - 1].text !== ''
-          ? LexoRank.parse(items[items.length - 1].listOrder)
-          : LexoRank.middle();
-
-      // 2. Create new Meals and Items using the saved recipes
-      for (const recipe of savedRecipes) {
-        // Create a new Meal and link it via recipeId
-        const newMeal: Meal = {
-          id: uuid.v4() as string,
-          listId: selectedList.id,
-          name: recipe.name,
-          recipeId: recipe.id, // Use the new recipeId from Firestore
-        };
-        newMeals.push(newMeal);
-
-        // Create new Items for its ingredients
-        for (const ingredient of recipe.ingredients) {
-          lastRank = lastRank.genNext();
-          const newItem: Item = {
-            id: uuid.v4() as string,
-            text: ingredient.name,
-            checked: false,
-            listOrder: lastRank.toString(),
-            isSection: false,
-            mealId: newMeal.id,
-          };
-          newItems.push(newItem);
-        }
-      }
-
-      // 3. Update the local state
-      setMeals((prev) => [...prev, ...newMeals]);
-      setItems((prev) => {
-        if (prev.length === 1 && prev[0].text === '') {
-          return newItems;
-        }
-        return [...prev, ...newItems];
-      });
-      markDirty();
-
-    } catch (error) {
-      console.error("Failed to add selected meals:", error);
-      Alert.alert("Error", "Could not add the selected meals. Please try again.");
-    } finally {
-      setSuggestionModalVisible(false);
-    }
-  };
 
   const onToggleMealCollapse = async (mealId: string) => {
     const updatedStates = {
@@ -765,8 +585,6 @@ export default function ListScreen() {
     return <View style={styles.container}><ActivityIndicator /></View>;
   }
 
-  const selectedCount = Object.values(selectedSuggestions).filter(Boolean).length;
-
   return (
     <>
     <StatusBar style="dark" />
@@ -824,7 +642,7 @@ export default function ListScreen() {
       <View style={styles.buttonRow}>
         {selectedView === ListView.MealPlan ? (
           <>
-            <TouchableOpacity style={styles.actionButton} onPress={handleOpenSuggestionFlow}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => setSuggestionModalVisible(true)}>
               <Ionicons name="sparkles" size={18} color="#666" />
               <Text style={styles.buttonText}>Suggest Meals</Text>
             </TouchableOpacity>
@@ -856,105 +674,6 @@ export default function ListScreen() {
       </View>
     </View>
     <View>
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={isSuggestionModalVisible}
-        onRequestClose={() => setSuggestionModalVisible(false)}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={() => setSuggestionModalVisible(false)} />
-        <View style={styles.modalContent}>
-          {suggestionModalStep === 'loading' && (
-            <View style={styles.suggestionLoadingContainer}>
-              <ActivityIndicator size="large" />
-              <Text style={styles.suggestionLoadingText}>
-                {isSuggesting ? loadingMessage : 'Fetching your preferences...'}
-              </Text>
-            </View>
-          )}
-
-          {suggestionModalStep === 'confirm' && mealPreferences && (
-            <>
-              <Text style={styles.modalTitle}>Your Meal Profile</Text>
-              <ScrollView>
-                <View style={styles.prefsSummaryContainer}>
-                  <Text style={styles.prefsSummaryTitle}>Dietary Needs</Text>
-                  <Text style={styles.prefsSummaryText}>
-                    {mealPreferences.dietaryNeeds?.join(', ') || 'None specified'}
-                  </Text>
-
-                  <Text style={styles.prefsSummaryTitle}>Cooking Styles</Text>
-                  <Text style={styles.prefsSummaryText}>
-                    {mealPreferences.cookingStyles?.join(', ') || 'None specified'}
-                  </Text>
-
-                  <Text style={styles.prefsSummaryTitle}>Cuisine Type</Text>
-                  <Text style={styles.prefsSummaryText}>
-                    {mealPreferences.cuisines?.join(', ') || 'None specified'}
-                  </Text>
-
-                    <Text style={styles.prefsSummaryTitle}>Disliked Ingredients</Text>
-                  <Text style={styles.prefsSummaryText}>
-                    {mealPreferences.dislikedIngredients || 'None specified'}
-                  </Text>
-                </View>
-              </ScrollView>
-              <TouchableOpacity style={styles.editPrefsButton} onPress={handleEditPreferences}>
-                <Text style={styles.editPrefsButtonText}>Edit Preferences</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButton} onPress={handleConfirmAndSuggest}>
-                <Ionicons name="sparkles" size={18} color="#fff" style={{marginRight: 8}}/>
-                <Text style={styles.modalButtonText}>Suggest Meals</Text>
-              </TouchableOpacity>
-            </>
-          )}
-
-          {suggestionModalStep === 'results' && (
-            <>
-              <Text style={styles.modalTitle}>Meal Suggestions</Text>
-              <View style={styles.rerollButtonContainer}>
-                <TouchableOpacity
-                  style={styles.rerollButton}
-                  onPress={handleRerollSuggestions}
-                  disabled={isSuggesting}
-                >
-                  <Ionicons name="dice" size={18} color="white" />
-                  <Text style={styles.rerollButtonText}>Re-roll</Text>
-                </TouchableOpacity>
-              </View>
-            
-              <FlatList
-                data={mealSuggestions}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => {
-                  const isSelected = !!selectedSuggestions[item.id];
-                  return (
-                    <TouchableOpacity
-                      style={[styles.suggestionItem, isSelected && styles.suggestionItemSelected]}
-                      onPress={() => toggleSuggestionSelection(item.id)}
-                    >
-                      <View style={styles.suggestionCheckbox}>{isSelected && <Text>✓</Text>}</View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.suggestionName}>{item.name}</Text>
-                        <Text style={styles.suggestionDescription}>{item.description}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-              <TouchableOpacity
-                style={[styles.modalButton, selectedCount === 0 && styles.modalButtonDisabled]}
-                onPress={handleAddSelectedMeals}
-                disabled={selectedCount === 0}
-              >
-                <Text style={styles.modalButtonText}>
-                  {selectedCount > 0 ? `Add ${selectedCount} Selected Meal(s)` : 'Select a Meal'}
-                </Text>
-              </TouchableOpacity>
-            </> 
-          )}
-        </View>
-      </Modal>
       <Modal
         animationType="slide"
         transparent={true}
@@ -1182,6 +901,12 @@ export default function ListScreen() {
       </SafeAreaView>
     </Modal>
     </View>
+      <MealSuggestionsModal
+          isVisible={isSuggestionModalVisible}
+          onClose={() => setSuggestionModalVisible(false)}
+          onAddSelectedMeals={handleAddMealsFromSuggestion}
+          listId={selectedList?.id ?? ''}
+        />
     </>
   );
 }
