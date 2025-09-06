@@ -391,25 +391,6 @@ export default function ListScreen() {
     setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
   };
 
-  const handleAddIngredientToMeal = (meal: Meal, ingredientText: string) => {
-    if (!ingredientText) return;
-
-    // 1. Create a new Item object, linking it to the meal
-    const newItem: Item = {
-      id: uuid.v4() as string,
-      text: ingredientText,
-      checked: false,
-      listOrder: LexoRank.middle().toString(), // You'll want better ranking logic
-      isSection: false,
-      mealId: meal.id,
-    };
-
-    // 2. Add the new item to the single source of truth
-    setItems(prevItems => [...prevItems, newItem]);
-
-    markDirty(); // To trigger the debounced save
-  };
-
   const renderItem = useCallback(({ item, drag }: RenderItemParams<Item>) => {
     const isEditing = item.id === editingId;
     return (

@@ -123,7 +123,7 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
                             label="Phone Number"
                             value={toReadablePhone(user?.phoneNumber) || 'Not set'}
                             onSave={handlePhoneSave}
-                            editable={false} // Phone number editable is currently disabled
+                            editable={false}
                         />
                     }
                     {user?.email &&
@@ -140,11 +140,12 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
                         <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
                     </TouchableOpacity>
 
-                    {/* Add other settings here */}
+
 
                     <TouchableOpacity style={[styles.primaryButton, { marginTop: 30, width: '100%' }]} onPress={() => {
                         auth.signOut();
-                        onClose(); // Close modal after sign out
+                        router.navigate('/list');
+                        onClose();
                     }}>
                         <Text style={styles.primaryButtonText}>Sign Out</Text>
                     </TouchableOpacity>

@@ -311,9 +311,6 @@ const handleCreateAccount = async () => {
   <KeyboardAwareScrollView
     contentContainerStyle={styles.outerContainer}
     keyboardShouldPersistTaps="handled"
-    // enableOnAndroid={true}  not working
-    // enableAutomaticScroll={(Platform.OS === 'ios')}
-    //  extraHeight={130} extraScrollHeight={130}
   >
    <StatusBar style="light" />
    <Modal visible={showConflictModal} transparent={true} animationType="fade">
@@ -339,7 +336,7 @@ const handleCreateAccount = async () => {
     </View>
    </Modal>
 
-   <Logo variant="new" style={{ alignSelf: 'center', marginLeft:40,marginTop: 170, marginBottom: 30 }} />
+   <Logo variant="wide" style={styles.logo}/>
    <View style={styles.loginCard}>
         <View style={styles.loginCardUpper}>
           {uiState !== 'initial' && (
@@ -492,8 +489,7 @@ const handleCreateAccount = async () => {
 // --- Add the new styles to your existing StyleSheet ---
 const styles = StyleSheet.create({
  outerContainer: { 
-  flexGrow: 1, 
-    // justifyContent: 'center', 
+  flexGrow: 1,
     alignItems: 'center',
   backgroundColor: '#0b2215'
  },
@@ -517,7 +513,7 @@ const styles = StyleSheet.create({
  modalButton: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, minWidth: 100, alignItems: 'center' },
  modalConfirmButton: { backgroundColor: '#4285F4' },
  modalConfirmButtonText: { color: 'white', fontWeight: 'bold' },
- logo: { padding: 20 },
+ logo: { padding: 20, marginTop:100, marginBottom: 80 },
  logoText: { fontSize: 32, fontWeight: 'bold' },
  googleButton: {
   backgroundColor: '#FFFFFF',
