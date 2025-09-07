@@ -233,10 +233,8 @@ export default function UserProfile() {
                     <Ionicons name="settings-outline" size={28} color="#000" />
                 </TouchableOpacity>
             </View>
-
             <ScrollView>
-                {/* Profile Section */}
-                <View style={styles.profileContainer}>
+                 <View style={styles.profileContainer}>
                     <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
                         {user?.photoURL && (
                             <Image source={{ uri: user.photoURL }} style={styles.profileImage} />
@@ -247,10 +245,8 @@ export default function UserProfile() {
                     </TouchableOpacity>
 
                     <Text style={styles.displayName}>{user?.displayName || 'Set Your Name'}</Text>
-                    {user?.email && <Text style={styles.usernameText}>@{user.email.split('@')[0]}</Text>} {/* Placeholder for username */}
+                    {user?.email && <Text style={styles.usernameText}>@{user.email.split('@')[0]}</Text>}
                 </View>
-
-                {/* Stats Section */}
                 <View style={styles.statsContainer}>
                     <View style={styles.statItem}>
                         <Text style={styles.statNumber}>0</Text>
@@ -265,8 +261,6 @@ export default function UserProfile() {
                         <Text style={styles.statLabel}>Recipes</Text>
                     </View>
                 </View>
-
-                {/* Recipe Feed Section */}
                 <View style={styles.feedContainer}>
                     <Text style={styles.sectionTitle}>My Recipes</Text>
                     <View style={styles.feedPlaceholder}>
@@ -274,16 +268,12 @@ export default function UserProfile() {
                         <Text style={styles.feedPlaceholderText}>Your saved recipes will appear here.</Text>
                     </View>
                 </View>
-
             </ScrollView>
-
-            {/* Photo Edit Modal */}
             <Modal visible={editPhotoModalVisible} animationType="slide" transparent={true}>
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
                         <Text style={styles.modalTitle}>Update Profile Photo</Text>
                         {newPhotoUri && <Image source={{ uri: newPhotoUri }} style={styles.modalMainAvatar} />}
-
                         <View style={styles.carouselContainer}>
                             <TouchableOpacity style={[styles.arrowButton, isAtStart && styles.transparentButton]} onPress={() => scrollTo('left')}>
                                 <Ionicons name="chevron-back" size={24} color="#666" />
@@ -316,7 +306,6 @@ export default function UserProfile() {
                                 <Ionicons name="chevron-forward" size={24} color="#666" />
                             </TouchableOpacity>
                         </View>
-
                         <View style={styles.modalButtons}>
                             <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => setEditPhotoModalVisible(false)}>
                                 <Text style={styles.secondaryButtonText}>Cancel</Text>
@@ -328,10 +317,8 @@ export default function UserProfile() {
                     </View>
                 </View>
             </Modal>
-
             {/* Settings Modal */}
             <SettingsModal isVisible={settingsModalVisible} onClose={() => setSettingsModalVisible(false)} />
-
         </SafeAreaView>
     );
 }
@@ -365,11 +352,11 @@ const styles = StyleSheet.create({
     profileImageContainer: {
         marginBottom: 16,
     },
-    profileImage: { 
-        width: 120, 
-        height: 120, 
-        borderRadius: 60, 
-        borderWidth: 3, 
+    profileImage: {
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        borderWidth: 3,
         borderColor: '#fff',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
@@ -422,9 +409,9 @@ const styles = StyleSheet.create({
     feedContainer: {
         paddingHorizontal: 16,
     },
-    sectionTitle: { 
-        fontSize: 22, 
-        fontWeight: 'bold', 
+    sectionTitle: {
+        fontSize: 22,
+        fontWeight: 'bold',
         marginVertical: 16,
         color: '#333',
     },

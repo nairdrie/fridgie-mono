@@ -68,6 +68,13 @@ export default function RootLayout() {
                 }}
               />
               <Stack.Screen
+                name="rate-meal"
+                options={{ 
+                  title: 'Rate Meal',
+                  headerShown: false
+                }}
+              />
+              <Stack.Screen
                 name="oauthredirect"
                 options={{ 
                   headerShown: false
