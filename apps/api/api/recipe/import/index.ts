@@ -15,7 +15,7 @@ Pay attention to HTML tags like <h1>, <h2> for the name, <ul> and <li> for ingre
 You MUST return a single raw JSON object matching this exact structure. Do not include any other text, markdown, or code fences.
 {
   "name": "Recipe Name",
-  "description": "A short, engaging description of the dish.",
+  "description": "A short, engaging description of the dish. Do not steal the description from the webpage. Paraphrase or make up your own to avoid copyright infringement.",
   "ingredients": [
     { "name": "Ingredient Name", "quantity": "e.g., 1 cup or 200g" }
   ],
@@ -24,6 +24,10 @@ You MUST return a single raw JSON object matching this exact structure. Do not i
     "Step 2..."
   ]
 }
+
+DO NOT include markdown, code fences, or any text outside of the JSON object.
+
+Separate preparation methods from ingredient names. For example, if you find "1 cup butter, melted", the ingredient name should be just "butter", and you must create a new first step in the instructions array, eg: "Melt the butter."
 `;
 
 route.use('*', auth);
