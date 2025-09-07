@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, FlatList, Modal, Pressable, ScrollView, Style
 import uuid from 'react-native-uuid';
 
 import { Item, Meal, MealPreferences, Recipe } from '@/types/types';
+import { primary } from '@/utils/styles';
 import { ApiError, getMealPreferences, getMealSuggestions, saveRecipe } from '../utils/api'; // Adjust path if needed
 
 // Define the component's props
@@ -342,7 +343,7 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     suggestionItemSelected: {
-        borderColor: '#007AFF',
+        borderColor: primary,
         backgroundColor: '#f0f8ff',
     },
     suggestionCheckbox: {
@@ -365,7 +366,7 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     modalButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         padding: 15,
         borderRadius: 10,
         alignItems: 'center',
@@ -379,7 +380,7 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     rerollButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         paddingHorizontal: 20,
         paddingVertical: 8,
         borderRadius: 30,
@@ -440,7 +441,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#eef2f5',
     },
     editPrefsButtonText: {
-        color: '#007AFF',
+        color: primary,
         fontSize: 16,
         fontWeight: 'bold',
     },

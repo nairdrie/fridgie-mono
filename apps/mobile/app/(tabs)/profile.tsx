@@ -1,6 +1,7 @@
 import { useAuth } from '@/context/AuthContext';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, storage } from '@/utils/firebase';
+import { primary } from '@/utils/styles';
 import { toReadablePhone } from '@/utils/utils'; // Assuming this utility is still needed for the settings modal
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
@@ -103,7 +104,7 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
                 <View style={styles.modalHeader}>
                     <Text style={styles.modalHeaderTitle}>Settings</Text>
                     <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                        <Ionicons name="close-circle-outline" size={30} color="#007AFF" />
+                        <Ionicons name="close-circle-outline" size={30} color={primary} />
                     </TouchableOpacity>
                 </View>
                 <ScrollView style={styles.modalScrollView}>
@@ -136,7 +137,7 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
 
                     <Text style={styles.sectionTitle}>Preferences</Text>
                     <TouchableOpacity style={styles.editMealPreferences} onPress={() => router.push('/meal-preferences')}>
-                        <Ionicons name="open-outline" size={16} color="#007AFF"></Ionicons>
+                        <Ionicons name="open-outline" size={16} color={primary}></Ionicons>
                         <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
                     </TouchableOpacity>
 
@@ -368,7 +369,7 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: 0,
         right: 0,
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         borderRadius: 15,
         padding: 6,
         borderWidth: 2,
@@ -431,7 +432,7 @@ const styles = StyleSheet.create({
         textAlign: 'center'
     },
     primaryButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         paddingVertical: 12,
         paddingHorizontal: 30,
         borderRadius: 25,
@@ -479,7 +480,7 @@ const styles = StyleSheet.create({
     inlineButton: {
         paddingHorizontal: 12,
         paddingVertical: 6,
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         borderRadius: 15,
         marginLeft: 8,
     },
@@ -524,7 +525,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
     },
     gridAvatar: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#eee' },
-    selectedAvatar: { borderWidth: 3, borderColor: '#007AFF' },
+    selectedAvatar: { borderWidth: 3, borderColor: primary },
     uploadButton: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
 
     // --- Settings Modal specific styles ---
@@ -560,7 +561,7 @@ const styles = StyleSheet.create({
         borderRadius: 8,
     },
     editMealPreferencesText: {
-        color: '#007AFF',
+        color: primary,
         fontSize: 16,
         fontWeight: '500',
         marginLeft: 8,
@@ -572,7 +573,7 @@ const styles = StyleSheet.create({
         width: 28,
         height: 28,
         borderRadius: 14,
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         justifyContent: 'center',
         alignItems: 'center',
     },

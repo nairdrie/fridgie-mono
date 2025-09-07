@@ -1,5 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import { defaultAvatars } from '@/utils/defaultAvatars';
+import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -95,7 +96,7 @@ export default function GroupIndicator() {
 
                     <View style={styles.modalFooter}>
                          <TouchableOpacity style={styles.secondaryButton} onPress={handleSwitchGroup}>
-                            <Ionicons name="people-outline" size={20} color="#007AFF" />
+                            <Ionicons name="people-outline" size={20} color={primary} />
                             <Text style={styles.secondaryButtonText}>Switch or Manage Groups</Text>
                         </TouchableOpacity>
                     </View>
@@ -188,7 +189,7 @@ const styles = StyleSheet.create({
         marginRight: 6,
     },
     onlineDot: {
-        backgroundColor: '#34c759', // Green
+        backgroundColor: primary, // Green
     },
     offlineDot: {
         backgroundColor: '#8e8e93', // Gray
@@ -197,7 +198,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
     },
     onlineText: {
-        color: '#34c759',
+        color: primary,
     },
     offlineText: {
         color: '#8e8e93',
@@ -212,13 +213,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'transparent',
-        borderColor: '#007AFF',
+        borderColor: primary,
         borderWidth: 1,
         paddingVertical: 12,
         borderRadius: 25,
     },
     secondaryButtonText: {
-        color: '#007AFF',
+        color: primary,
         fontSize: 16,
         fontWeight: '600',
         marginLeft: 8,

@@ -1,4 +1,5 @@
 import { Recipe } from '@/types/types';
+import { primary } from '@/utils/styles';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { getRecipe } from '../utils/api'; // Adjust path if needed
@@ -112,7 +113,7 @@ const styles = StyleSheet.create({
         marginTop: 20,
     },
     primaryButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',

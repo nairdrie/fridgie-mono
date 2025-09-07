@@ -4,6 +4,7 @@ import MealSuggestionsModal from '@/components/MealSuggestionsModal';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useLists } from '@/context/ListContext';
 import { Item, List, ListView, Meal, Recipe } from '@/types/types';
+import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -680,7 +681,7 @@ const styles = StyleSheet.create({
         width: 80,
         height: 80,
         borderRadius: 40,
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         justifyContent: 'center',
         alignItems: 'center',
         elevation: 8,

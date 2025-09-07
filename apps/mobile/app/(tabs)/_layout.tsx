@@ -1,5 +1,6 @@
 import ListHeader from '@/components/ListHeader';
 import { useAuth } from '@/context/AuthContext';
+import { primary } from '@/utils/styles';
 import IonIcons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
 import { Image, StyleSheet } from 'react-native';
@@ -10,7 +11,7 @@ export default function TabLayout() {
     const { loading, user } = useAuth();
   return (
     <Tabs screenOptions={{ 
-        tabBarActiveTintColor: '#007AFF',
+        tabBarActiveTintColor: primary,
         tabBarStyle: {
           height: 80, // Adjust this value to your desired height
           display: 'flex',

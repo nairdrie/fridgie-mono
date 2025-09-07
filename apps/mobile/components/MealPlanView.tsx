@@ -1,5 +1,6 @@
 // components/MealPlanView.tsx
 import { Item, Meal } from "@/types/types";
+import { primary } from "@/utils/styles";
 import React, { useMemo } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import MealCard from "./MealCard"; // Import the new component
@@ -120,5 +121,5 @@ const styles = StyleSheet.create({
 
   },
   addMealButton: { paddingVertical: 5 },
-  addMealText: { color: '#007AFF', fontSize: 16, textAlign: 'center'  }
+  addMealText: { color: primary, fontSize: 16, textAlign: 'center'  }
 });

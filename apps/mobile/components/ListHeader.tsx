@@ -1,5 +1,7 @@
 import { useLists } from '@/context/ListContext';
 import { List, ListView } from '@/types/types';
+import { primary } from '@/utils/styles';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -70,12 +72,6 @@ export default function ListHeader() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
           <View style={styles.headerLeft}>
-            {/* {router.canGoBack() && (
-              <TouchableOpacity onPress={() => router.back()} style={styles.backNav}>
-                <Ionicons name="chevron-back" size={28} color="#007AFF" />
-                <Text style={styles.backNavText}>Groups</Text>
-              </TouchableOpacity>
-            )} */}
             {/* WEEK SELECTOR */}
             <View style={styles.weekSelector}>
               <Pressable onPress={() => setModalVisible(true)} style={styles.weekSelectorInner}>
@@ -140,15 +136,22 @@ export default function ListHeader() {
                 contentContainerStyle={{ paddingBottom: 16 }}
                 renderItem={({ item }) => (
                   <TouchableOpacity onPress={() => handleSelectList(item)} style={styles.weekItem}>
-                    <View>
-                      <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
-                      <Text style={styles.weekRange}>
-                        {new Date(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
-                        {new Date(new Date(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
-                          undefined,
-                          { month: 'short', day: 'numeric' }
-                        )}
-                      </Text>
+                    <View style={styles.weekSelectRow}>
+                      <View>
+                        <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
+                        <Text style={styles.weekRange}>
+                          {new Date(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
+                          {new Date(new Date(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
+                            undefined,
+                            { month: 'short', day: 'numeric' }
+                          )}
+                        </Text>
+                      </View>
+                      { item.id === selectedList?.id ? (
+                        <Ionicons name="checkmark-circle" size={20} color={primary} />
+                      ) : (
+                        <Ionicons name="ellipse-outline" size={20} color={primary} />
+                      )}
                     </View>
                   </TouchableOpacity>
                 )}
@@ -177,10 +180,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    color: '#007AFF'
+    color: primary
   },
   backNavText: {
-    color: '#007AFF',
+    color: primary,
     fontSize: 16
   },
   headerLeft: {
@@ -208,6 +211,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 16,
   },
+  weekSelectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+  },
   title: {
     fontSize: 22, // Bigger title
     fontWeight: 'bold',
@@ -215,7 +224,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 14,
-    color: '#007AFF', // Subtler color
+    color: primary, // Subtler color
   },
   segment: {
     flex: 1,

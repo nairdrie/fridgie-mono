@@ -1,4 +1,5 @@
 import { Ingredient, Item, Meal, Recipe } from '@/types/types';
+import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -150,14 +151,14 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                         {editingRecipe.ingredients.map((ing, index) => (
                         <View key={`ing-${index}`} style={styles.formRow}><TextInput style={[styles.formInput, styles.quantityInput]} placeholder="1 cup" placeholderTextColor="#999" value={ing.quantity} onChangeText={(val) => handleIngredientChange(index, 'quantity', val)} /><TextInput style={[styles.formInput, styles.nameInput]} placeholder="Flour" placeholderTextColor="#999" value={ing.name} onChangeText={(val) => handleIngredientChange(index, 'name', val)} /><TouchableOpacity onPress={() => removeIngredientField(index)} style={styles.deleteRowButton}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity></View>
                         ))}
-                        <TouchableOpacity style={styles.addFieldButton} onPress={addIngredientField}><Ionicons name="add" size={20} color="#007AFF" /><Text style={styles.addFieldButtonText}>Add Ingredient</Text></TouchableOpacity>
+                        <TouchableOpacity style={styles.addFieldButton} onPress={addIngredientField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Ingredient</Text></TouchableOpacity>
                     </View>
                     <View style={styles.formSectionContainer}>
                         <Text style={styles.formSectionTitle}>Instructions</Text>
                         {editingRecipe.instructions.map((inst, index) => (
                         <View key={`inst-${index}`} style={styles.formRow}><Text style={styles.stepNumber}>{index + 1}.</Text><TextInput style={[styles.formInput, styles.nameInput]} placeholder="Mix the things..." placeholderTextColor="#999" value={inst} onChangeText={(val) => handleInstructionChange(index, val)} multiline /><TouchableOpacity onPress={() => removeInstructionField(index)} style={styles.deleteRowButton}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity></View>
                         ))}
-                        <TouchableOpacity style={styles.addFieldButton} onPress={addInstructionField}><Ionicons name="add" size={20} color="#007AFF" /><Text style={styles.addFieldButtonText}>Add Step</Text></TouchableOpacity>
+                        <TouchableOpacity style={styles.addFieldButton} onPress={addInstructionField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Step</Text></TouchableOpacity>
                     </View>
                 </>
                 )}
@@ -191,9 +192,9 @@ const styles = StyleSheet.create({
     stepNumber: { marginRight: 8, fontSize: 16, color: '#888' },
     deleteRowButton: { padding: 4, marginLeft: 8 },
     addFieldButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 8 },
-    addFieldButtonText: { color: '#007AFF', fontSize: 16, fontWeight: '600', marginLeft: 4 },
+    addFieldButtonText: { color: primary, fontSize: 16, fontWeight: '600', marginLeft: 4 },
     modalFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderTopWidth: 1, borderTopColor: '#EFEFEF', backgroundColor: '#FFFFFF' },
-    primaryButton: { backgroundColor: '#007AFF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 50 },
+    primaryButton: { backgroundColor: primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 50 },
     primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
     secondaryButton: { backgroundColor: '#EFEFEF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, marginRight: 10 },
     secondaryButtonText: { color: '#333', fontSize: 16, fontWeight: 'bold' },

@@ -1,6 +1,7 @@
 // screens/MealPreferencesScreen.tsx
 
 import { getMealPreferences, saveMealPreferences } from '@/utils/api';
+import { primary } from '@/utils/styles';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
@@ -238,8 +239,8 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
   },
   tileSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: primary,
+    borderColor: primary,
   },
   tileText: {
     fontSize: 16,
@@ -299,7 +300,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   primaryButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: primary,
   },
   primaryButtonText: {
     color: '#fff',

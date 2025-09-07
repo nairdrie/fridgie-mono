@@ -5,6 +5,7 @@ import { Group } from '@/types/types';
 import { createGroup, searchUsers } from '@/utils/api'; // Import searchUsers
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
+import { primary } from '@/utils/styles';
 import { toReadablePhone } from '@/utils/utils';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
@@ -149,7 +150,7 @@ export default function GroupsScreen() {
                                     <Text style={styles.groupName}>{item.name}</Text>
                                     { selectedGroup?.id === item.id ? (
                                         <View style={styles.viewContainer}>
-                                            <Ionicons name="checkmark-circle" size={24} color="#007AFF" />
+                                            <Ionicons name="checkmark-circle" size={24} color={primary} />
                                         </View>
                                     ) : (
                                         <View style={styles.viewContainer}>
@@ -291,7 +292,7 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: -2,
         right: -2,
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         borderRadius: 12,
         padding: 4,
         borderWidth: 2,
@@ -336,7 +337,7 @@ const styles = StyleSheet.create({
         width: 28,
         height: 28,
         borderRadius: 14,
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 2,
@@ -354,7 +355,7 @@ const styles = StyleSheet.create({
     },
     sectionTitle: { fontSize: 22, fontWeight: 'bold', marginVertical: 10 },
     addButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         width: 36,
         height: 36,
         borderRadius: 18,
@@ -381,7 +382,7 @@ const styles = StyleSheet.create({
     emptySubtitle: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20, paddingHorizontal: 20 },
 
     primaryButton: {
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         paddingVertical: 12,
         paddingHorizontal: 30,
         borderRadius: 25,
@@ -391,18 +392,18 @@ const styles = StyleSheet.create({
     primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
     secondaryButton: {
         backgroundColor: 'transparent',
-        borderColor: '#007AFF',
+        borderColor: primary,
         borderWidth: 1,
     },
     secondaryButtonText: {
-        color: '#007AFF',
+        color: primary,
         fontSize: 16,
         fontWeight: '600',
     },
     inlineButton: {
         paddingHorizontal: 12,
         paddingVertical: 6,
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
         borderRadius: 15,
         marginLeft: 8,
     },
@@ -450,7 +451,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
     },
     gridAvatar: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#eee' },
-    selectedAvatar: { borderWidth: 3, borderColor: '#007AFF' },
+    selectedAvatar: { borderWidth: 3, borderColor: primary },
     uploadButton: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
     
     // --- New Styles for Create Group Modal ---
@@ -515,7 +516,7 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-start',
     },
     editMealPreferencesText: {
-        color: '#007AFF',
+        color: primary,
         fontSize: 16,
         fontWeight: '500',
         marginLeft: 5

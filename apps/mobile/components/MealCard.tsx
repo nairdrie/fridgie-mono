@@ -1,5 +1,6 @@
 import { Item, Meal } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
+import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -230,7 +231,7 @@ function MealCard({
                 <View style={styles.mealCardUpper}>
                     <View style={styles.dayPickerContainer}>
                         <TouchableOpacity onPress={toggleDaySelector} style={styles.dayPickerCollapsed}>
-                            <Ionicons name="calendar-outline" size={18} color="#007AFF" />
+                            <Ionicons name="calendar-outline" size={18} color={primary} />
                             {meal.dayOfWeek && !isDaySelectorVisible && (
                                 <Text style={styles.selectedDayText}>{meal.dayOfWeek}</Text>
                             )}
@@ -290,14 +291,14 @@ function MealCard({
                     {hasRecipe ? (
                         <View style={styles.mealHeaderLower}>
                             <TouchableOpacity style={styles.recipeIndicator} onPress={() => onViewRecipe(meal)}>
-                                <Ionicons name="book-outline" size={16} color="#007AFF" />
+                                <Ionicons name="book-outline" size={16} color={primary} />
                                 <Text style={styles.recipeIndicatorText}>View Recipe</Text>
                             </TouchableOpacity>
                         </View>
                     ) : (
                         <View style={styles.mealHeaderLower}>
                             <TouchableOpacity style={styles.recipeIndicator} onPress={() => onAddRecipe(meal)}>
-                                <Ionicons name="add" size={16} color="#007AFF" />
+                                <Ionicons name="add" size={16} color={primary} />
                                 <Text style={styles.recipeIndicatorText}>Add Recipe</Text>
                             </TouchableOpacity>
                         </View>
@@ -369,7 +370,7 @@ const styles = StyleSheet.create({
         marginHorizontal: 2
     },
     dayButtonActive: {
-        backgroundColor: '#007AFF',
+        backgroundColor: primary,
     },
     dayText: {
         fontWeight: '600',
@@ -388,7 +389,7 @@ const styles = StyleSheet.create({
     clearButton: { paddingHorizontal: 8 },
     clearText: { fontSize: 16, color: '#999' },
     addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
-    addIngredientText: { color: '#007AFF', fontSize: 16 },
+    addIngredientText: { color: primary, fontSize: 16 },
     mealCardUpper: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -412,7 +413,7 @@ const styles = StyleSheet.create({
     selectedDayText: {
         marginLeft: 8,
         fontSize: 16,
-        color: '#007AFF',
+        color: primary,
     },
     recipeIndicator: {
         width: 'auto',
@@ -420,12 +421,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 4,
         paddingHorizontal: 8,
-        backgroundColor: '#eef5ff',
+        backgroundColor: '#eefff2ff',
         borderRadius: 12,
     },
     recipeIndicatorText: {
         marginLeft: 5,
-        color: '#007AFF',
+        color: primary,
         fontWeight: '500',
         fontSize: 12,
     },

@@ -500,7 +500,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems:'center', marginBottom: 24,
   },
  heading: { fontSize: 24, fontWeight: '600', textAlign: 'center', flex: 1, },
- primaryButton: { backgroundColor: '#106b23ff', paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
+ primaryButton: { backgroundColor: '#106b23', paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
  appleButton: { height: 52, marginBottom: 16 },
  disabledButton: { opacity: 0.6 },
