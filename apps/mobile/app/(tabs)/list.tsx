@@ -24,14 +24,15 @@ import {
   View
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
 import { categorizeList, listenToList, scheduleMealRating, updateList } from '../../utils/api';
 
 
 export default function ListScreen() {
-  const router = useRouter();
+    const router = useRouter();
     const { selectedList, isLoading, selectedGroup, selectedView } = useLists();
-
+    
     const [meals, setMeals] = useState<Meal[]>([]);
     const [items, setItems] = useState<Item[]>([]);
 
@@ -48,12 +49,44 @@ export default function ListScreen() {
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     const [recipeToEdit, setRecipeToEdit] = useState<Meal | null>(null);
 
+    const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
+    const fabAnimation = useSharedValue(0);
+
 
     const dirtyUntilRef = useRef<number>(0);
     const markDirty = () => {
         const until = Date.now() + 1200; // tweak if you want a longer freeze
         dirtyUntilRef.current = until;
     };
+
+    // Animate FAB menu
+    useEffect(() => {
+        fabAnimation.value = withTiming(isFabMenuOpen ? 1 : 0, { duration: 250 });
+    }, [isFabMenuOpen]);
+
+
+    const fabRotation = useAnimatedStyle(() => ({
+        transform: [{ rotate: `${fabAnimation.value * 45}deg` }],
+    }));
+
+    const backdropStyle = useAnimatedStyle(() => ({
+        opacity: fabAnimation.value,
+    }));
+
+    // Define all animated styles unconditionally at the top level
+    const secondaryFabStyle = (index: number) => useAnimatedStyle(() => {
+        // Animate upwards. 70 is base offset, 65 for each subsequent button.
+        const translateY = fabAnimation.value * -(80 + (index * 65));
+        return {
+            transform: [{ translateY }],
+            opacity: fabAnimation.value,
+        };
+    });
+
+    const fabStyle0 = secondaryFabStyle(0);
+    const fabStyle1 = secondaryFabStyle(1);
+    const fabStyle2 = secondaryFabStyle(2);
+
 
     // EFFECT 1: Handles ALL incoming data (Initial Fetch + Real-time Updates)
     useEffect(() => {
@@ -68,7 +101,7 @@ export default function ListScreen() {
                 console.warn(`Received null data for list ${selectedList.id}, ignoring update.`);
                 return;
             }
-
+            
             // ignore server echoes while the user is actively typing
             if (Date.now() < dirtyUntilRef.current) return;
 
@@ -227,7 +260,7 @@ export default function ListScreen() {
             if (isSingleEmpty) {
                 return rankedNewItems;
             }
-
+            
             return [...currentItems, ...rankedNewItems];
         });
 
@@ -236,28 +269,27 @@ export default function ListScreen() {
 
     const handleAddMeal = () => {
         if (!selectedGroup || !selectedList) return;
-
+        
         const newMeal: Meal = {
             id: uuid.v4() as string,
             listId: selectedList.id,
             name: '', // Default name
-            // dayOfWeek is optional and thus omitted
         };
 
         setMeals(prev => [...prev, newMeal]);
         setEditingId(newMeal.id);
-        markDirty(); // Trigger debounced save
+        markDirty();
     };
 
     const handleEditRecipe = (recipe: Recipe) => {
         const meal = meals.find(m => m.recipeId === recipe.id);
         if (meal) {
-            setRecipeToViewId(null); // Close view modal
-            setRecipeToEdit(meal);   // Open edit modal
+            setRecipeToViewId(null);
+            setRecipeToEdit(meal);
         }
     };
 
-
+    
     const handleUpdateMeal = (mealId: string, updates: Partial<Meal>) => {
         setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
         markDirty();
@@ -267,23 +299,22 @@ export default function ListScreen() {
                 .catch(console.error);
         }
     };
-
+    
     const handleDeleteMeal = (mealId: string) => {
         setMeals(prev => prev.filter(meal => meal.id !== mealId));
-        setItems(prev => prev.filter(item => item.mealId !== mealId)); // Also remove ingredients
+        setItems(prev => prev.filter(item => item.mealId !== mealId));
         markDirty();
     };
 
     const addItemAfter = (id: string) => {
-        // This function now only runs if there is already a selected list.
         if (!selectedList) return;
-
+        
         const index = items.findIndex(i => i.id === id);
         if (index === -1) return;
         const current = LexoRank.parse(items[index].listOrder);
         const next = items[index + 1] ? LexoRank.parse(items[index + 1].listOrder) : current.genNext();
         const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: current.between(next).toString(), isSection: false };
-
+        
         const updated = [...items];
         updated.splice(index + 1, 0, newItem);
         setItems(updated);
@@ -291,7 +322,7 @@ export default function ListScreen() {
         markDirty();
         setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
     };
-
+    
     const reRankItems = (data: Item[]) => {
         let rank = LexoRank.middle();
         return data.map(item => { rank = rank.genNext(); return { ...item, order: rank.toString() }; });
@@ -301,7 +332,6 @@ export default function ListScreen() {
         const index = items.findIndex(i => i.id === id);
         if (index === -1) return;
 
-        // This part remains the same
         if (items.length === 1) {
             const placeholderItem = {
                 id: uuid.v4() as string,
@@ -354,7 +384,7 @@ export default function ListScreen() {
 
                     if (pendingAction === 'suggest-meals') {
                         await AsyncStorage.removeItem('pendingAction');
-                        setSuggestionModalVisible(true);
+                        setSuggestionModalVisible(true); 
                     }
                 } catch (e) {
                     console.error("Failed to check for pending action:", e);
@@ -369,44 +399,41 @@ export default function ListScreen() {
         useCallback(() => {
           const checkForPastUnratedMeals = async () => {
             if (!meals.length || !selectedList) {
-              return; // No meals or list to check
+              return;
             }
-
+    
             try {
               const ratedMealsRaw = await AsyncStorage.getItem('ratedMeals');
               const ratedMealIds = ratedMealsRaw ? JSON.parse(ratedMealsRaw) : {};
-
+    
               const today = new Date();
-              today.setHours(0, 0, 0, 0); // Set to midnight for accurate date comparison
-
+              today.setHours(0, 0, 0, 0);
+    
               const unratedPastMeals = meals.filter(meal => {
                 if (!meal.dayOfWeek || !meal.recipeId || ratedMealIds[meal.id]) {
                   return false;
                 }
-
+    
                 const weekStartDate = new Date(selectedList.weekStart);
                 const dayIndex = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(meal.dayOfWeek);
-
-                // Create a new date object to avoid mutating the original
+                
                 const mealDate = new Date(weekStartDate.getTime());
                 mealDate.setDate(weekStartDate.getDate() + dayIndex);
-
+                
                 return mealDate < today;
               });
-
+    
               if (unratedPastMeals.length > 0) {
-                // Find the most recent past meal to rate
                 const mealToRate = unratedPastMeals.sort((a, b) => {
                     const dateA = new Date(selectedList.weekStart);
                     dateA.setDate(dateA.getDate() + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(a.dayOfWeek!));
-
+                    
                     const dateB = new Date(selectedList.weekStart);
                     dateB.setDate(dateB.getDate() + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(b.dayOfWeek!));
-
+    
                     return dateB.getTime() - dateA.getTime();
                 })[0];
-
-                // Navigate to the rating screen, passing both IDs
+    
                 router.push({
                   pathname: '/rate-meal',
                   params: { recipeId: mealToRate.recipeId, mealId: mealToRate.id },
@@ -416,10 +443,9 @@ export default function ListScreen() {
               console.error("Failed to check for unrated meals:", error);
             }
           };
-
-          // Delay the check slightly to not hijack the UI immediately
+    
           const timer = setTimeout(checkForPastUnratedMeals, 1000);
-
+    
           return () => clearTimeout(timer);
         }, [meals, selectedList, router])
       );
@@ -438,7 +464,6 @@ export default function ListScreen() {
     };
 
     const handleAddItem = (isSection=false) => {
-        // This function now only runs if there is already a selected list.
         if (!selectedList) return;
 
         const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].listOrder) : LexoRank.middle();
@@ -477,9 +502,6 @@ export default function ListScreen() {
                     blurOnSubmit={false}
                     returnKeyType="done"
                 />
-                {/* { item.mealId && (
-                    <Text style={ styles.mealName }>{meals.find(m => m.id === item.mealId)?.name || ''}</Text>
-                )} */}
                 {isEditing ? (
                     <TouchableOpacity onPress={() => deleteItem(item.id)} style={styles.clearButton}>
                         <Text style={styles.clearText}>✕</Text>
@@ -492,7 +514,7 @@ export default function ListScreen() {
             </View>
         );
     }, [editingId, items]);
-
+    
     if (isLoading) {
         return <View style={styles.container}><ActivityIndicator /></View>;
     }
@@ -501,34 +523,29 @@ export default function ListScreen() {
         <>
         <StatusBar style="dark" />
         <View style={{ flex: 1, backgroundColor: '#fff' }}>
-            {/* MAIN BODY */}
             <KeyboardAvoidingView
                 style={styles.container}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={100}
             >
                 { selectedView == ListView.GroceryList ? (
-                    <>
-                        {items.length === 0 && (
-                            <TouchableOpacity
-                                style={styles.addFirstIngredientButton}
-                                onPress={() => handleAddItem()}>
-                                <Text style={styles.addIngredientText}>+ Add Item</Text>
-                            </TouchableOpacity>
+                    <DraggableFlatList
+                        data={items}
+                        onDragEnd={({ data }) => { setItems(reRankItems(data)); markDirty(); }}
+                        keyExtractor={item => item.id}
+                        renderItem={renderItem}
+                        keyboardDismissMode="interactive"
+                        keyboardShouldPersistTaps="handled"
+                        initialNumToRender={15}
+                        maxToRenderPerBatch={10}
+                        windowSize={10}
+                        ListEmptyComponent={(
+                            <View style={styles.emptyListComponent}>
+                                <Text style={styles.emptyListText}>Your list is empty.</Text>
+                                <Text style={styles.emptyListSubText}>Tap the '+' to add an item.</Text>
+                            </View>
                         )}
-                        <DraggableFlatList
-                            data={items}
-                            onDragEnd={({ data }) => { setItems(reRankItems(data)); markDirty(); }}
-                            keyExtractor={item => item.id}
-                            renderItem={renderItem}
-                            keyboardDismissMode="interactive"
-                            keyboardShouldPersistTaps="handled"
-                            initialNumToRender={15}
-                            maxToRenderPerBatch={10}
-                            windowSize={10}
-                        />
-                    </>
-
+                    />
                 ) : (
                     <MealPlanView
                         meals={meals}
@@ -550,48 +567,61 @@ export default function ListScreen() {
                 )}
             </KeyboardAvoidingView>
 
-            {/* BUTTON ROW */}
-            <View style={styles.buttonRow}>
+            {isFabMenuOpen && (
+                <Pressable style={styles.backdrop} onPress={() => setIsFabMenuOpen(false)} />
+            )}
+
+            <View style={styles.fabContainer}>
                 {selectedView === ListView.MealPlan ? (
                     <>
-                        <TouchableOpacity style={styles.actionButton} onPress={handleAddMeal}>
-                            <Ionicons name="add-circle" size={18} color="#666" />
-                            <Text style={styles.buttonText}>Add Meal</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionButton} onPress={() => setSuggestionModalVisible(true)}>
-                            <Ionicons name="sparkles" size={18} color="#666" />
-                            <Text style={styles.buttonText}>Suggest Meals</Text>
-                        </TouchableOpacity>
+                        <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                            <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
+                                <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                <Text style={styles.secondaryButtonText}>Suggest</Text>
+                            </TouchableOpacity>
+                        </Animated.View>
+                        <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                             <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
+                                 <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                 <Text style={styles.secondaryButtonText}>Meal</Text>
+                             </TouchableOpacity>
+                        </Animated.View>
                     </>
                 ) : (
-                        <>
-                            <TouchableOpacity style={styles.actionButton} onPress={() => handleAddItem()}>
-                                <Ionicons name="add-circle" size={18} color="#666" />
-                                <Text style={styles.buttonText}>Item</Text>
+                    <>
+                         <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
+                            <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAutoCategorize(); setIsFabMenuOpen(false); }} disabled={isCategorizing}>
+                                <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                <Text style={styles.secondaryButtonText}>Categorize</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.actionButton} onPress={() => handleAddItem(true)}>
-                                <Ionicons name="add-circle" size={18} color="#666" />
-                                <Text style={styles.buttonText}>Section</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                    style={[styles.actionButton, isCategorizing && { opacity: 0.5 }]}
-                                    onPress={handleAutoCategorize}
-                                    disabled={isCategorizing || !selectedList}
-                            >
-                                <Ionicons name="sparkles" size={18} color="#666" />
-                                <Text style={[styles.buttonText, { marginLeft: 8 }]}>{isCategorizing ? 'Categorizing…' : 'Categorize'}</Text>
-                            </TouchableOpacity>
-                        </>
-                    )}
-                </View>
+                         </Animated.View>
+                         <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                             <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
+                                <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                <Text style={styles.secondaryButtonText}>Category</Text>
+                             </TouchableOpacity>
+                         </Animated.View>
+                         <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                             <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
+                                <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                <Text style={styles.secondaryButtonText}>Item</Text>
+                             </TouchableOpacity>
+                         </Animated.View>
+                    </>
+                )}
+                 <TouchableOpacity style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)}>
+                     <Animated.View style={fabRotation}>
+                         <Ionicons name="add" size={32} color="white" />
+                     </Animated.View>
+                 </TouchableOpacity>
             </View>
+
             <ViewRecipeModal
                 isVisible={!!recipeToViewId}
                 onClose={() => setRecipeToViewId(null)}
                 recipeId={recipeToViewId}
                 onEdit={handleEditRecipe}
             />
-
             <AddEditRecipeModal
                 isVisible={!!recipeToEdit}
                 onClose={() => setRecipeToEdit(null)}
@@ -604,12 +634,13 @@ export default function ListScreen() {
                 onAddSelectedMeals={handleAddMealsFromSuggestion}
                 listId={selectedList?.id ?? ''}
             />
+        </View>
         </>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#fff', padding: 10 },
+    container: { flex: 1, backgroundColor: '#fff' },
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
     dragHandle: { paddingHorizontal: 15, paddingVertical: 5 },
     dragIcon: { fontSize: 18, color: '#ccc' },
@@ -617,11 +648,73 @@ const styles = StyleSheet.create({
     editInput: { fontSize: 16, flex: 1, paddingVertical: 0 },
     checked: { textDecorationLine: 'line-through', color: '#999' },
     clearButton: { paddingHorizontal: 8, paddingVertical: 4 },
-    addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
-    addIngredientText: { color: '#007AFF', fontSize: 16 },
     clearText: { fontSize: 16, color: '#999' },
     sectionText: { fontWeight: 'bold', fontSize: 18 },
-    buttonRow: { flexDirection: 'row', justifyContent: 'space-around', gap: 8, padding: 16, borderTopWidth: 1, borderColor: '#eee', backgroundColor: '#fff' },
-    actionButton: { paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: '#ccc', borderRadius: 20, flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor: '#f9f9f9' },
-    buttonText: { fontSize: 16, color: '#444', marginLeft: 5 },
+    emptyListComponent: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginTop: 100,
+    },
+    emptyListText: {
+        fontSize: 18,
+        color: '#888',
+        fontWeight: '600'
+    },
+    emptyListSubText: {
+        fontSize: 14,
+        color: '#aaa',
+        marginTop: 8,
+    },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.2)',
+    },
+    fabContainer: {
+        position: 'absolute',
+        bottom: 30,
+        right: 20,
+        alignItems: 'flex-end',
+    },
+    fab: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#007AFF',
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+    },
+    secondaryFabContainer: {
+        position: 'absolute',
+        alignItems: 'center',
+        right: 6, // Align with the center of the main FAB
+    },
+    secondaryButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 25,
+        paddingVertical: 10,
+        paddingHorizontal: 15,
+        marginBottom: 10,
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3,
+    },
+    secondaryButtonIcon: {
+        marginRight: 8,
+    },
+    secondaryButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333'
+    },
 });
+

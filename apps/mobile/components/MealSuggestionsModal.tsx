@@ -229,7 +229,7 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
 
                 {suggestionModalStep === 'confirm' && mealPreferences && (
                     <>
-                        <Text style={styles.modalTitle}>Your Meal Profile</Text>
+                        <Text style={styles.modalTitle}>Suggest Meals</Text>
                         <ScrollView>
                             <View style={styles.prefsSummaryContainer}>
                                 <Text style={styles.prefsSummaryTitle}>Dietary Needs</Text>
