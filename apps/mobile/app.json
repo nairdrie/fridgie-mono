@@ -23,7 +23,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0F2317"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.nairdrie.fridgie",

@@ -1,9 +1,10 @@
 // components/MealPlanView.tsx
 import { Item, Meal } from "@/types/types";
 import { primary } from "@/utils/styles";
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import MealCard from "./MealCard"; // Import the new component
+import QuantityEditorModal from "./QuantityEditorModal";
 
 const DAYS_OF_WEEK: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const dayOrder = new Map(DAYS_OF_WEEK.map((day, i) => [day, i]));
@@ -45,6 +46,38 @@ export default function MealPlanView({
   onToggleMealCollapse,
   onToggleCookbook
 }: MealPlanViewProps) {
+
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+
+    const openQuantityEditor = (item: Item) => {
+        setSelectedItem(item);
+        setIsModalVisible(true);
+    };
+
+    const closeQuantityEditor = () => {
+        setIsModalVisible(false);
+        setSelectedItem(null);
+    };
+
+    const handleSaveQuantity = (newQuantity: string) => {
+        if (!selectedItem) return;
+        if(selectedItem.quantity === newQuantity) {
+            closeQuantityEditor();
+            return;
+        }
+
+        setAllItems(prev =>
+            prev.map(i =>
+                i.id === selectedItem.id
+                    // If the input is empty, set quantity to null, otherwise save the trimmed value
+                    ? { ...i, quantity: newQuantity.trim() || undefined }
+                    : i
+            )
+        );
+        markDirty();
+        closeQuantityEditor();
+    };
 
   const sortedMeals = useMemo(() => {
     return [...meals].sort((a, b) => {
@@ -96,12 +129,19 @@ export default function MealPlanView({
             isCollapsed={!!collapsedMeals[meal.id]}
             onToggleCollapse={onToggleMealCollapse}
             onToggleCookbook={onToggleCookbook}
+            onOpenQuantityEditor={openQuantityEditor}
           />
         )}
         initialNumToRender={15}
         maxToRenderPerBatch={10}
         windowSize={10}
         contentContainerStyle={styles.container}
+      />
+      <QuantityEditorModal
+          isVisible={isModalVisible}
+          item={selectedItem}
+          onSave={handleSaveQuantity}
+          onClose={closeQuantityEditor}
       />
     </>
   );

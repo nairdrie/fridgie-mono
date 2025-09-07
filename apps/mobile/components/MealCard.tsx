@@ -8,6 +8,7 @@ import { LayoutAnimation, Pressable, StyleSheet, Text, TextInput, TouchableOpaci
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import uuid from 'react-native-uuid';
+import { parseQuantityAndText } from "./QuantityEditorModal";
 
 const DAYS: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -24,9 +25,10 @@ interface MealCardProps {
     isKeyboardVisible: boolean;
     markDirty: () => void;
     onViewRecipe: (meal: Meal) => void;
-    onAddRecipe: (meal: Meal) => void;  
+    onAddRecipe: (meal: Meal) => void;
     isCollapsed: boolean;
     onToggleCollapse: (mealId: string) => void;
+    onOpenQuantityEditor: (item: Item) => void;
 }
 
 function MealCard({
@@ -44,7 +46,8 @@ function MealCard({
     onAddRecipe,
     isCollapsed,
     onToggleCollapse,
-    onToggleCookbook
+    onToggleCookbook,
+    onOpenQuantityEditor
 }: MealCardProps) {
     const hasRecipe = !!meal.recipeId;
 
@@ -83,21 +86,35 @@ function MealCard({
         return `${meal.name.substring(0, 32)}...`;
     }, [meal.name]);
 
-    // Memoize ingredients for this specific meal to avoid re-renders
     const ingredients = useMemo(
         () => allItems.filter(i => i.mealId === meal.id).sort((a, b) => (a.mealOrder && b.mealOrder) ? a.mealOrder.localeCompare(b.mealOrder) : 0),
         [allItems, meal.id]
     );
 
-    // Assigns a ref to the inputRefs object from the parent
     const assignRef = useCallback((id: string) => (ref: TextInput | null) => {
         inputRefs.current[id] = ref;
     }, [inputRefs]);
 
+    const handleItemBlur = (item: Item) => {
+        const { quantity, text: newText } = parseQuantityAndText(item.text);
+        
+        if (quantity || newText !== item.text) {
+            setAllItems(prev =>
+                prev.map(i =>
+                    i.id === item.id
+                        ? { ...i, text: newText, quantity: quantity || i.quantity }
+                        : i
+                )
+            );
+            markDirty();
+        }
+        
+        setEditingId('');
+    };
+
     const handleDaySelect = (day: Meal['dayOfWeek']) => {
         const newDay = meal.dayOfWeek === day ? undefined : day;
         onUpdateMeal(meal.id, { dayOfWeek: newDay });
-        // Trigger animation and hide the selector
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setIsDaySelectorVisible(false);
         markDirty();
@@ -108,7 +125,6 @@ function MealCard({
         setIsDaySelectorVisible(prev => !prev);
     };
 
-    // Handlers adapted from ListScreen to work within the context of a meal
     const handleUpdateIngredientText = (id: string, text: string) => {
         setAllItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item)));
         markDirty();
@@ -122,15 +138,11 @@ function MealCard({
     const handleDeleteIngredient = (id: string) => {
         const index = ingredients.findIndex(i => i.id === id);
         if (index === -1) return;
-
-        // Remove the ref
         delete inputRefs.current[id];
         
-        // Update the global items list
         setAllItems(prev => prev.filter(item => item.id !== id));
         markDirty();
 
-        // Smart focus shift after deleting
         if (isKeyboardVisible) {
             const nextFocusId = ingredients[Math.max(0, index - 1)]?.id;
             if (nextFocusId) {
@@ -142,20 +154,16 @@ function MealCard({
     };
 
     const handleAddIngredient = (afterIndex: number | undefined) => {
-        if(afterIndex === undefined) afterIndex = ingredients.length;
-        // 1. Calculate the new mealOrder
+        if(afterIndex === undefined) afterIndex = ingredients.length -1;
         let mealRank: LexoRank;
         if (afterIndex < 0 || ingredients.length === 0) {
-            // Case 1: Adding the very first ingredient
             mealRank = LexoRank.middle();
         } else {
-            // Case 2: Adding after an existing ingredient
             const current = LexoRank.parse(ingredients[afterIndex].mealOrder!);
             const next = ingredients[afterIndex + 1] ? LexoRank.parse(ingredients[afterIndex + 1].mealOrder!) : current.genNext();
             mealRank = current.between(next);
         }
         
-        // 2. Calculate the new listOrder (always at the end of the main list)
         const lastItem = allItems[allItems.length - 1];
         const listRank = lastItem ? LexoRank.parse(lastItem.listOrder).genNext() : LexoRank.middle();
 
@@ -163,13 +171,12 @@ function MealCard({
             id: uuid.v4() as string,
             text: '',
             checked: false,
-            mealOrder: mealRank.toString(), // Assign mealOrder
-            listOrder: listRank.toString(), // Assign listOrder
+            mealOrder: mealRank.toString(),
+            listOrder: listRank.toString(),
             isSection: false,
             mealId: meal.id,
         };
 
-        // 3. Insert into the global list
         setAllItems(prev => [...prev, newItem]);
         setEditingId(newItem.id);
         markDirty();
@@ -178,7 +185,7 @@ function MealCard({
         let rank = LexoRank.middle();
         const reRankedIngredients = data.map(item => {
             rank = rank.genNext();
-            return { ...item, mealOrder: rank.toString() }; // Update mealOrder
+            return { ...item, mealOrder: rank.toString() };
         });
 
         setAllItems(prevAllItems => {
@@ -191,17 +198,24 @@ function MealCard({
     const renderIngredient = useCallback(({ item, drag, isActive, getIndex }: RenderItemParams<Item>) => {
         const isEditing = item.id === editingId;
         return (
-        <View style={styles.itemRow}>
-            <Pressable onPressIn={drag} style={styles.dragHandle} hitSlop={20} disabled={isActive}>
-            <Text style={styles.dragIcon}>≡</Text>
-            </Pressable>
-            <TouchableOpacity style={styles.checkbox} onPress={() => handleToggleCheck(item.id)}>
-            {item.checked && <Text>✓</Text>}
-            </TouchableOpacity>
-            <TextInput
-            ref={assignRef(item.id)}
-            value={item.text}
-            style={[styles.editInput, item.checked && styles.checked]}
+            <View style={styles.itemRow}>
+                <Pressable onPressIn={drag} style={styles.dragHandle} hitSlop={20} disabled={isActive}>
+                    <Text style={styles.dragIcon}>≡</Text>
+                </Pressable>
+                <TouchableOpacity style={styles.checkbox} onPress={() => handleToggleCheck(item.id)}>
+                    {item.checked && <Text>✓</Text>}
+                </TouchableOpacity>
+                { item.quantity && (
+                    <TouchableOpacity onPress={() => onOpenQuantityEditor(item)}>
+                        <View style={styles.quantityLabel}>
+                            <Text>{item.quantity}</Text>
+                        </View>
+                    </TouchableOpacity>
+                )}
+                <TextInput
+                    ref={assignRef(item.id)}
+                    value={item.text}
+                    style={[styles.editInput, item.checked && styles.checked]}
                     onChangeText={text => handleUpdateIngredientText(item.id, text)}
                     onFocus={() => setEditingId(item.id)}
                     onKeyPress={({ nativeEvent }) => {
@@ -210,17 +224,18 @@ function MealCard({
                         }
                     }}
                     onSubmitEditing={() => handleAddIngredient(getIndex())}
+                    onBlur={() => handleItemBlur(item)}
                     blurOnSubmit={false}
                     returnKeyType="next"
-            />
-            {isEditing && (
-            <TouchableOpacity onPress={() => handleDeleteIngredient(item.id)} style={styles.clearButton}>
-                <Text style={styles.clearText}>✕</Text>
-            </TouchableOpacity>
-            )}
-        </View>
+                />
+                {isEditing && (
+                    <TouchableOpacity onPress={() => handleDeleteIngredient(item.id)} style={styles.clearButton}>
+                        <Text style={styles.clearText}>✕</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
         );
-    }, [editingId, handleAddIngredient, handleDeleteIngredient, handleToggleCheck, handleUpdateIngredientText]);
+    }, [editingId, ingredients]);
 
 
     const handleDeletePress = () => {
@@ -234,7 +249,6 @@ function MealCard({
     };
 
     const handleConfirmDelete = () => {
-        // No animation needed here as the component will be removed
         onDeleteMeal(meal.id);
     };
 
@@ -256,7 +270,6 @@ function MealCard({
 
     return (
         <View style={styles.mealCard}>
-            {/* The main content is now wrapped in a View to group the selector and header */}
             <View style={styles.mainContent}>
                 <View style={styles.mealCardUpper}>
                     <View style={styles.dayPickerContainer}>
@@ -354,7 +367,6 @@ function MealCard({
                         onDragEnd={handleDragEnd}
                         keyExtractor={(item) => item.id}
                         renderItem={renderIngredient}
-                        // To prevent the parent FlatList from scrolling while dragging
                         containerStyle={{ flex: 1 }}
                         simultaneousHandlers={[]} 
                         initialNumToRender={15}
@@ -394,13 +406,12 @@ const styles = StyleSheet.create({
     settingsIcon: { fontSize: 20 },
     ingredientListContainer: { paddingTop: 10, borderTopWidth: 1, borderTopColor: '#eee', marginTop: 10 },
     mainContent: {
-        // This new view helps group the day selector and the header
     },
     daySelectorContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
         alignItems: 'center',
-        paddingHorizontal: 20, // Give some space on the sides
+        paddingHorizontal: 20,
     },
     dayButton: {
         width: 28,
@@ -458,7 +469,6 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontWeight: '600',
     },
-    // Styles ported from ListScreen for consistency
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
     dragHandle: { width: 30, alignItems: 'center', justifyContent: 'center' },
     dragIcon: { fontSize: 18, color: '#aaa' },
@@ -502,13 +512,21 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         backgroundColor: '#eefff2ff',
         borderRadius: 12,
+        marginRight: 8,
     },
     recipeIndicatorText: {
         marginLeft: 5,
         color: primary,
         fontWeight: '500',
         fontSize: 12,
-    }
+    },
+    quantityLabel: {
+        backgroundColor: '#ebebebff',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+        marginHorizontal: 3
+    },
 });
 
 export default React.memo(MealCard);
