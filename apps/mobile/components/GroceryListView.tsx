@@ -184,8 +184,8 @@ export default function GroceryListView({
         )}
         { item.quantity && (
           <TouchableOpacity onPress={() => openQuantityEditor(item)}>
-            <View style={styles.quantityLabel}>
-              <Text>{item.quantity}</Text>
+            <View style={[styles.quantityLabel, item.checked && styles.quantityChecked]}>
+              <Text style={[item.checked && styles.quantityTextChecked]}>{item.quantity}</Text>
             </View>
           </TouchableOpacity>
         )}
@@ -279,5 +279,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
     marginHorizontal: 3
-  }
+  },
+  quantityChecked: { backgroundColor: '#eeeeee' },
+  quantityTextChecked: { textDecorationLine: 'line-through', color: '#999' },
 });

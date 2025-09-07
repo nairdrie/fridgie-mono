@@ -207,8 +207,8 @@ function MealCard({
                 </TouchableOpacity>
                 { item.quantity && (
                     <TouchableOpacity onPress={() => onOpenQuantityEditor(item)}>
-                        <View style={styles.quantityLabel}>
-                            <Text>{item.quantity}</Text>
+                        <View style={[styles.quantityLabel, item.checked && styles.quantityChecked]}>
+                            <Text style={[item.checked && styles.quantityTextChecked]}>{item.quantity}</Text>
                         </View>
                     </TouchableOpacity>
                 )}
@@ -475,6 +475,8 @@ const styles = StyleSheet.create({
     checkbox: { width: 24, height: 24, marginHorizontal: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
     editInput: { fontSize: 16, flex: 1, paddingVertical: 2 },
     checked: { textDecorationLine: 'line-through', color: '#999' },
+    quantityChecked: { backgroundColor: '#eeeeee' },
+    quantityTextChecked: { textDecorationLine: 'line-through', color: '#999' },
     clearButton: { paddingHorizontal: 8 },
     clearText: { fontSize: 16, color: '#999' },
     addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },

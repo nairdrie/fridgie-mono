@@ -1,4 +1,5 @@
 import { Item } from "@/types/types";
+import { primary } from "@/utils/styles";
 import { useEffect, useState } from "react";
 import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
@@ -158,7 +159,7 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
     fontWeight: '600',
   },
   saveButton: {
-    backgroundColor: '#00715a', // Using your primary color
+    backgroundColor: primary, // Using your primary color
   },
   saveButtonText: {
     color: '#fff',
