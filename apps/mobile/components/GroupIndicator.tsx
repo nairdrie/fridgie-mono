@@ -23,17 +23,8 @@ export default function GroupIndicator() {
         return <View style={styles.container} />; // Return empty container to maintain layout
     }
 
-    const members = selectedGroup.members.map(member=> {
-      const estimatedServerTime = Date.now() + serverTimeOffset;
-      const isOnline = member.lastOnline ? estimatedServerTime - new Date(member.lastOnline).getTime() < ONLINE_THRESHOLD_MS : false;
-      return {
-        ...member,
-        isOnline,
-      };
-    })
-
     // Sort members to show the current user first, then alphabetically
-    const sortedMembers = members.sort((a, b) => {
+    const sortedMembers = selectedGroup.members.sort((a, b) => {
         if (a.uid === user?.uid) return -1;
         if (b.uid === user?.uid) return 1;
         return (a.displayName || '').localeCompare(b.displayName || '');
@@ -42,11 +33,11 @@ export default function GroupIndicator() {
     return (
         <>
             <TouchableOpacity style={styles.container} onPress={() => setModalVisible(true)}>
-                {members.slice(0, 5).map((member, index) => (
+                {sortedMembers.slice(0, 5).map((member, index) => (
                     <Image
                         key={member.uid}
                         source={{ uri: member.photoURL || defaultAvatars[0] }}
-                        style={[styles.photo, member.isOnline ? styles.onlinePhoto: styles.offlinePhoto, { marginLeft: index > 0 ? -16 : 0, zIndex: 100 - index }]}
+                        style={[styles.photo, member.online ? styles.onlinePhoto: styles.offlinePhoto, { marginLeft: index > 0 ? -16 : 0, zIndex: 100 - index }]}
                     />
                 ))}
             </TouchableOpacity>
@@ -72,20 +63,15 @@ export default function GroupIndicator() {
                         keyExtractor={(item) => item.uid}
                         contentContainerStyle={styles.listContentContainer}
                         renderItem={({ item: member }) => {
-                            const estimatedServerTime = Date.now() + serverTimeOffset;
-                            const isOnline = member.lastOnline
-                                ? estimatedServerTime - new Date(member.lastOnline).getTime() < ONLINE_THRESHOLD_MS
-                                : false;
-
                             return (
                                 <View style={styles.memberItem}>
                                     <Image source={{ uri: member.photoURL || defaultAvatars[0] }} style={styles.memberAvatar} />
                                     <View style={styles.memberInfo}>
                                         <Text style={styles.memberName}>{member.displayName} {member.uid === user?.uid && '(You)'}</Text>
                                         <View style={styles.statusContainer}>
-                                            <View style={[styles.statusDot, isOnline ? styles.onlineDot : styles.offlineDot]} />
-                                            <Text style={[styles.statusText, isOnline ? styles.onlineText : styles.offlineText]}>
-                                                {isOnline ? 'Online' : 'Offline'}
+                                            <View style={[styles.statusDot, member.online ? styles.onlineDot : styles.offlineDot]} />
+                                            <Text style={[styles.statusText, member.online ? styles.onlineText : styles.offlineText]}>
+                                                {member.online ? 'Online' : 'Offline'}
                                             </Text>
                                         </View>
                                     </View>

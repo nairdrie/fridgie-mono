@@ -10,6 +10,7 @@ import { onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/datab
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 interface UserProfileWithPresence extends UserProfile {
+  online?: boolean;
   lastOnline?: number;
 }
 
@@ -114,28 +115,46 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    if (!user) return; // Only run if a user is logged in
+    if (!user) return;
 
-    // References to the user's status node and the special .info/connected node
     const userStatusRef = ref(db, `/status/${user.uid}`);
     const connectedRef = ref(db, '.info/connected');
 
     const unsubscribe = onValue(connectedRef, (snapshot) => {
-      // This callback fires when connection state changes
-      if (snapshot.val() === true) {
-        // We're connected.
-        // 1. Set the onDisconnect handler to mark the user as offline when they disconnect.
-        //    This is re-established every time the client reconnects.
-        onDisconnect(userStatusRef).set(serverTimestamp());
-
-        // 2. Set the user's status to online.
-        set(userStatusRef, serverTimestamp());
+      if (snapshot.val() === false) {
+        // User is not connected to the database.
+        // This can be useful for local state updates if needed, but
+        // the onDisconnect handler below manages the database state.
+        return;
       }
+
+      // When the client's connection is established...
+      // 1. Set up the onDisconnect handler. This is the crucial part.
+      //    It's a promise that resolves when the write is committed to the server.
+      onDisconnect(userStatusRef).set({
+        online: false,
+        lastOnline: serverTimestamp(),
+      }).then(() => {
+        // 2. Once the onDisconnect is established, set the user's status to online.
+        //    This is the client's "I am here" signal.
+        set(userStatusRef, {
+          online: true,
+        });
+      });
     });
 
-    // Clean up the listener when the user logs out or the component unmounts
-    return () => unsubscribe();
-  }, [user]); // Re-run this entire logic when the user object changes (login/logout)
+    return () => {
+      // On cleanup, if the user is logging out cleanly,
+      // we can immediately set their status to offline.
+      if (user) {
+          set(userStatusRef, {
+              online: false,
+              lastOnline: serverTimestamp()
+          });
+      }
+      unsubscribe();
+    };
+  }, [user]);
 
   // Effect to fetch groups and listen for member presence
   useEffect(() => {
@@ -157,15 +176,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           group.members.forEach(member => {
             const memberStatusRef = ref(db, `/status/${member.uid}`);
             const unsubscribe = onValue(memberStatusRef, (snapshot) => {
-              const lastOnlineTimestamp = snapshot.val();
-              
+              const statusUpdate = snapshot.val(); // e.g., { online: true } or { online: false, lastOnline: ... }
+
               setGroups(currentGroups =>
                 currentGroups.map(g =>
                   g.id === group.id
                     ? {
                         ...g,
                         members: g.members.map(m =>
-                          m.uid === member.uid ? { ...m, lastOnline: lastOnlineTimestamp } : m
+                          m.uid === member.uid 
+                            // Spread the new status object onto the member
+                            ? { ...m, ...statusUpdate } 
+                            : m
                         ),
                       }
                     : g
