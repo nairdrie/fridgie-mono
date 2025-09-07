@@ -29,7 +29,7 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
-import { categorizeList, listenToList, scheduleMealRating, updateList } from '../../utils/api';
+import { addUserCookbookRecipe, categorizeList, getUserCookbook, listenToList, removeUserCookbookRecipe, scheduleMealRating, updateList } from '../../utils/api';
 
 
 export default function HomeScreen() {
@@ -55,6 +55,11 @@ export default function HomeScreen() {
     const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
     const fabAnimation = useSharedValue(0);
 
+    const [cookbookRecipeIds, setCookbookRecipeIds] = useState<Set<string>>(new Set());
+
+    useEffect(() => {
+        setIsFabMenuOpen(false);
+    }, [selectedView]);
 
     const dirtyUntilRef = useRef<number>(0);
     const markDirty = () => {
@@ -170,6 +175,21 @@ export default function HomeScreen() {
         };
     }, []);
 
+    useFocusEffect(
+        useCallback(() => {
+            const fetchCookbook = async () => {
+                try {
+                    const cookbookRecipes = await getUserCookbook();
+                    const recipeIds = new Set(cookbookRecipes.map(r => r.id));
+                    setCookbookRecipeIds(recipeIds);
+                } catch (error) {
+                    console.error("Failed to fetch user cookbook:", error);
+                }
+            };
+            fetchCookbook();
+        }, [])
+    );
+
     useEffect(() => {
         const loadCollapsedState = async () => {
             try {
@@ -271,6 +291,37 @@ export default function HomeScreen() {
             setIsCategorizing(false);
         }
     };
+
+    const handleToggleCookbook = async (meal: Meal) => {
+        if (!meal.recipeId) return;
+
+        const isInCookbook = cookbookRecipeIds.has(meal.recipeId);
+        const originalCookbookIds = new Set(cookbookRecipeIds); // For rollback on error
+
+        // Optimistic UI update
+        setCookbookRecipeIds(prev => {
+            const newSet = new Set(prev);
+            if (isInCookbook) {
+                newSet.delete(meal.recipeId!);
+            } else {
+                newSet.add(meal.recipeId!);
+            }
+            return newSet;
+        });
+
+        try {
+            if (isInCookbook) {
+                await removeUserCookbookRecipe(meal.recipeId);
+            } else {
+                await addUserCookbookRecipe(meal.recipeId);
+            }
+        } catch (error) {
+            console.error(`Failed to ${isInCookbook ? 'remove from' : 'add to'} cookbook:`, error);
+            Alert.alert("Error", `Could not update your cookbook. Please try again.`);
+            // Rollback on error
+            setCookbookRecipeIds(originalCookbookIds);
+        }
+    };
     
     const handleAddItem = (isSection = false) => {
         if (!selectedList) return;
@@ -343,6 +394,13 @@ export default function HomeScreen() {
         } catch (e) { console.error("Failed to save collapsed meal state.", e); }
     };
 
+    const mealsWithCookbookStatus = React.useMemo(() => {
+        return meals.map(meal => ({
+            ...meal,
+            addedToCookbook: meal.recipeId ? cookbookRecipeIds.has(meal.recipeId) : false,
+        }));
+    }, [meals, cookbookRecipeIds]);
+
     if (isLoading) {
         return <View style={styles.container}><ActivityIndicator /></View>;
     }
@@ -368,7 +426,7 @@ export default function HomeScreen() {
                     />
                 ) : (
                     <MealPlanView
-                        meals={meals}
+                        meals={mealsWithCookbookStatus}
                         items={items}
                         setAllItems={setItems}
                         onUpdateMeal={handleUpdateMeal}
@@ -383,6 +441,7 @@ export default function HomeScreen() {
                         inputRefs={inputRefs}
                         isKeyboardVisible={isKeyboardVisible}
                         markDirty={markDirty}
+                        onToggleCookbook={handleToggleCookbook}
                     />
                 )}
             </KeyboardAvoidingView>

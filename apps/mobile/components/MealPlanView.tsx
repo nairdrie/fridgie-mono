@@ -23,7 +23,8 @@ interface MealPlanViewProps {
   inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
   isKeyboardVisible: boolean;
   markDirty: () => void;
-  onViewRecipe: (meal: Meal) => void; 
+  onViewRecipe: (meal: Meal) => void;
+  onToggleCookbook: (meal: Meal) => void;
 }
 
 export default function MealPlanView({
@@ -41,7 +42,8 @@ export default function MealPlanView({
   isKeyboardVisible,
   markDirty,
   collapsedMeals,
-  onToggleMealCollapse
+  onToggleMealCollapse,
+  onToggleCookbook
 }: MealPlanViewProps) {
 
   const sortedMeals = useMemo(() => {
@@ -93,6 +95,7 @@ export default function MealPlanView({
             onAddRecipe={onAddRecipe}
             isCollapsed={!!collapsedMeals[meal.id]}
             onToggleCollapse={onToggleMealCollapse}
+            onToggleCookbook={onToggleCookbook}
           />
         )}
         initialNumToRender={15}

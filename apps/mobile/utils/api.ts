@@ -323,3 +323,47 @@ export async function importRecipeFromUrl(url: string): Promise<Recipe> {
 }
 
 
+/**
+ * Submits feedback (like/dislike) for a specific recipe.
+ * @param recipeId The ID of the recipe.
+ * @param rating 'liked' or 'disliked'.
+ * @param feedback Optional feedback text, primarily for dislikes.
+ */
+export async function submitRecipeFeedback(recipeId: string, rating: 'liked' | 'disliked', feedback?: string) {
+  const res = await authorizedFetch(`${BASE_URL}/recipe/feedback/${recipeId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating, feedback }),
+  });
+  return res.json();
+}
+
+/**
+ * Adds a recipe to the current user's personal cookbook.
+ * @param recipeId The ID of the recipe to add.
+ */
+export async function addUserCookbookRecipe(recipeId: string): Promise<void> {
+  await authorizedFetch(`${BASE_URL}/cookbook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipeId }),
+  });
+}
+
+/**
+ * Removes a recipe from the current user's personal cookbook.
+ * @param recipeId The ID of the recipe to remove.
+ */
+export async function removeUserCookbookRecipe(recipeId: string): Promise<void> {
+  await authorizedFetch(`${BASE_URL}/cookbook/${recipeId}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Retrieves the current user's personal cookbook (a list of recipes).
+ */
+export async function getUserCookbook(): Promise<Recipe[]> {
+  const res = await authorizedFetch(`${BASE_URL}/cookbook`);
+  return res.json();
+}

@@ -1,3 +1,4 @@
+// TODO: is this being used?
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebase';
 

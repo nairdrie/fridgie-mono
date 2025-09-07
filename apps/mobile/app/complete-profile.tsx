@@ -134,7 +134,7 @@ export default function CompleteProfileScreen() {
       refreshAuthUser();
 
       // await refetchProfile(); // Refresh the profile in the context
-      router.replace('/list'); // Use replace to prevent going back
+      router.replace('/profile'); // Use replace to prevent going back
     } catch (error) {
       console.error('Failed to save profile:', error);
       Alert.alert('Error', 'Could not save your profile. Please try again.');

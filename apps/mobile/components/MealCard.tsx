@@ -17,13 +17,11 @@ interface MealCardProps {
     setAllItems: (callback: (prevItems: Item[]) => Item[]) => void;
     onUpdateMeal: (id: string, update: Partial<Meal>) => void;
     onDeleteMeal: (id: string) => void;
-    // State and refs from parent screen
+    onToggleCookbook: (meal: Meal) => void;
     editingId: string;
     setEditingId: React.Dispatch<React.SetStateAction<string>>;
     inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
     isKeyboardVisible: boolean;
-
-    // Functions from parent screen
     markDirty: () => void;
     onViewRecipe: (meal: Meal) => void;
     onAddRecipe: (meal: Meal) => void;  
@@ -45,13 +43,16 @@ function MealCard({
     onViewRecipe,
     onAddRecipe,
     isCollapsed,
-    onToggleCollapse
+    onToggleCollapse,
+    onToggleCookbook
 }: MealCardProps) {
     const hasRecipe = !!meal.recipeId;
 
     const [isDaySelectorVisible, setIsDaySelectorVisible] = useState(false);
     const [isMealNameEditing, setIsMealNameEditing] = useState(false);
     const mealNameInputRef = useRef<TextInput | null>(null);
+
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
     const daySelectorProgress = useSharedValue(0);
     
@@ -224,6 +225,37 @@ function MealCard({
     }, [editingId, handleAddIngredient, handleDeleteIngredient, handleToggleCheck, handleUpdateIngredientText]);
 
 
+    const handleDeletePress = () => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setIsConfirmingDelete(true);
+    };
+
+    const handleCancelDelete = () => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setIsConfirmingDelete(false);
+    };
+
+    const handleConfirmDelete = () => {
+        // No animation needed here as the component will be removed
+        onDeleteMeal(meal.id);
+    };
+
+    if (isConfirmingDelete) {
+        return (
+            <View style={[styles.mealCard, styles.confirmationContainer]}>
+                <Text style={styles.confirmationTitle}>Delete {meal.name ? `"${meal.name}"` : 'meal'}?</Text>
+                <View style={styles.confirmationButtons}>
+                    <TouchableOpacity style={[styles.confirmationButton, styles.cancelButton]} onPress={handleCancelDelete}>
+                        <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.confirmationButton, styles.confirmButton]} onPress={handleConfirmDelete}>
+                        <Text style={styles.confirmButtonText}>Confirm</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        );
+    }
+
     return (
         <View style={styles.mealCard}>
             {/* The main content is now wrapped in a View to group the selector and header */}
@@ -256,7 +288,7 @@ function MealCard({
                             </Animated.View>
                         )}
                     </View>
-                    <TouchableOpacity onPress={() => { onDeleteMeal(meal.id) }} style={styles.deleteButton}>
+                    <TouchableOpacity onPress={handleDeletePress} style={styles.deleteButton}>
                         <Ionicons name="trash" size={18} color="#db6767ff" /> 
                     </TouchableOpacity>
                 </View>
@@ -294,6 +326,18 @@ function MealCard({
                                 <Ionicons name="book-outline" size={16} color={primary} />
                                 <Text style={styles.recipeIndicatorText}>View Recipe</Text>
                             </TouchableOpacity>
+                            { meal.addedToCookbook ? (
+                                <TouchableOpacity style={styles.recipeIndicator} onPress={() => onToggleCookbook(meal)}>
+                                    <Ionicons name="bookmark" size={16} color={primary} />
+                                    <Text style={styles.recipeIndicatorText}>Added to Cookbook</Text>
+                                </TouchableOpacity>
+                            ) : (
+                                <TouchableOpacity style={styles.recipeIndicator} onPress={() => onToggleCookbook(meal)}>
+                                    <Ionicons name="bookmark-outline" size={16} color={primary} />
+                                    <Text style={styles.recipeIndicatorText}>Add to Cookbook</Text>
+                                </TouchableOpacity>
+                            )
+                            }
                         </View>
                     ) : (
                         <View style={styles.mealHeaderLower}>
@@ -378,6 +422,43 @@ const styles = StyleSheet.create({
     },
     dayTextActive: {
         color: '#fff',
+    },
+    confirmationContainer: {
+        alignItems: 'center',
+        paddingVertical: 20,
+    },
+    confirmationTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        marginBottom: 16,
+        textAlign: 'center',
+    },
+    confirmationButtons: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        width: '100%',
+    },
+    confirmationButton: {
+        paddingVertical: 10,
+        paddingHorizontal: 24,
+        borderRadius: 20,
+        borderWidth: 1,
+    },
+    cancelButton: {
+        borderColor: '#6c757d',
+        backgroundColor: '#f8f9fa',
+    },
+    cancelButtonText: {
+        color: '#6c757d',
+        fontWeight: '600',
+    },
+    confirmButton: {
+        borderColor: '#dc3545',
+        backgroundColor: '#dc3545',
+    },
+    confirmButtonText: {
+        color: '#fff',
+        fontWeight: '600',
     },
     // Styles ported from ListScreen for consistency
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },

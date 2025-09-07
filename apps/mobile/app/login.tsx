@@ -145,7 +145,7 @@ export default function LoginScreen() {
     if(!userCredential.user.displayName) {
      router.replace('/complete-profile');
     } else {
-     router.replace('/list');
+     router.replace('/profile');
     }
    } else {
     await signInWithCredential(auth, credential);
@@ -244,7 +244,7 @@ const handleCreateAccount = async () => {
       if(!userCredential.user.displayName) {
         router.replace('/complete-profile');
       } else {
-        router.replace('/list');
+        router.replace('/profile');
       }
     } else {
       // This is a fallback case in case there is no anonymous user.
@@ -270,7 +270,12 @@ const handleCreateAccount = async () => {
   setLoading('existing');
   setShowConflictModal(false);
   try {
-   await signInWithCredential(auth, pendingCredential);
+   const userCredential = await signInWithCredential(auth, pendingCredential);
+   if(!userCredential.user.displayName) {
+    router.replace('/complete-profile');
+   } else {
+    router.replace('/profile');
+   }
   } catch (err: any) {
    console.error("Sign-in to existing account failed:", err);
    setError('Failed to sign in. Please try again.');

@@ -6,8 +6,9 @@ import { auth, db } from '@/utils/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useSegments } from 'expo-router';
 import { onAuthStateChanged, signInAnonymously, updateProfile, User } from 'firebase/auth';
-import { onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
+import { goOnline, onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 
 interface UserProfileWithPresence extends UserProfile {
   online?: boolean;
@@ -112,6 +113,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
     loadSelectedGroup();
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        // When the app comes to the foreground, ensure the connection is online.
+        // This will trigger your '.info/connected' listener and reset your online status.
+        goOnline(db);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, []);
 
   useEffect(() => {

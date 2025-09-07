@@ -30,6 +30,7 @@ export interface Meal {
   dayOfWeek?: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
   name: string;
   recipeId?: string;
+  addedToCookbook?: boolean; 
 }
 
 export enum ListView {

@@ -1,15 +1,15 @@
 // components/GroceryListView.tsx
-
 import { Item } from '@/types/types';
+import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { useCallback } from 'react';
 import {
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
@@ -106,12 +106,90 @@ export default function GroceryListView({
       setItems(newItems);
       markDirty();
   };
+  
 
-  const renderItem = useCallback(({ item, drag }: RenderItemParams<Item>) => {
+  /**
+ * Parses a string to find a quantity at the beginning OR end.
+ * @param text The full item text.
+ * @returns An object with the parsed quantity and the remaining text.
+ */
+const parseQuantityAndText = (text: string): { quantity: string | null; text: string } => {
+  if (!text) return { quantity: null, text: '' };
+  const trimmedText = text.trim();
+
+  // 1. Check for quantity at the START (e.g., "2 eggs")
+  // Regex: number, optional unit, then the rest of the text
+  const startRegex = /^(\d*\.?\d+)\s*([a-zA-Z]*)\s+(.*)/;
+  const startMatch = trimmedText.match(startRegex);
+
+  if (startMatch) {
+    const number = startMatch[1];
+    const unit = startMatch[2];
+    const remainingText = startMatch[3];
+    return {
+      quantity: `${number}${unit}`.trim(),
+      text: remainingText,
+    };
+  }
+
+  // 2. If no match at the start, check for quantity at the END (e.g., "eggs 2")
+  // Regex: the text, then a space, then the number and optional unit
+  const endRegex = /^(.*?)\s+(\d*\.?\d+\s*[a-zA-Z]*)$/;
+  const endMatch = trimmedText.match(endRegex);
+  
+  if (endMatch) {
+    const leadingText = endMatch[1];
+    const quantity = endMatch[2];
+    
+    // Edge case: Avoid misinterpreting years as quantities (e.g., "Wine Vintage 2020")
+    if (leadingText.toLowerCase().includes('vintage') && /^\d{4}$/.test(quantity.trim())) {
+        return { quantity: null, text: trimmedText };
+    }
+
+    return {
+      quantity: quantity.trim(),
+      text: leadingText,
+    };
+  }
+
+  // 3. No match found, return original text
+  return { quantity: null, text: trimmedText };
+};
+
+  const handleItemBlur = (item: Item) => {
+    // We only parse if there's no quantity already, or if the text has changed.
+    const { quantity, text: newText } = parseQuantityAndText(item.text);
+    
+    // Only update if the parsing resulted in a change
+    if (quantity || newText !== item.text) {
+        setItems(prev =>
+            prev.map(i =>
+                i.id === item.id
+                    ? { ...i, text: newText, quantity: quantity || i.quantity }
+                    : i
+            )
+        );
+        markDirty();
+    }
+    
+    // Clear editing state when the user taps away
+    setEditingId('');
+  };
+
+
+  const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<Item>) => {
     const isEditing = item.id === editingId;
     return (
       <View style={styles.itemRow}>
-        <Pressable onPressIn={drag} style={styles.dragHandle} hitSlop={10}>
+        <Pressable
+          onLongPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            drag();
+          }}
+          disabled={isActive}
+          style={styles.dragHandle}
+          hitSlop={20}
+        >
           <Text style={styles.dragIcon}>≡</Text>
         </Pressable>
         {!item.isSection && (
@@ -119,20 +197,26 @@ export default function GroceryListView({
             {item.checked ? <Text>✓</Text> : null}
           </TouchableOpacity>
         )}
+        { item.quantity && (
+          <View style={styles.quantityLabel}>
+            <Text>{item.quantity}</Text>
+          </View>
+        )}
         <TextInput
-          ref={assignRef(item.id)}
-          value={item.text}
-          style={[styles.editInput, item.checked && styles.checked, item.isSection && styles.sectionText]}
-          onChangeText={text => updateItemText(item.id, text)}
-          onFocus={() => setEditingId(item.id)}
-          onKeyPress={({ nativeEvent }) => {
-            if (nativeEvent.key === 'Backspace' && item.text === '') {
-              deleteItem(item.id);
-            }
-          }}
-          onSubmitEditing={() => addItemAfter(item.id)}
-          blurOnSubmit={false}
-          returnKeyType="done"
+            ref={assignRef(item.id)}
+            value={item.text}
+            style={[styles.editInput, item.checked && styles.checked, item.isSection && styles.sectionText]}
+            onChangeText={text => updateItemText(item.id, text)}
+            onFocus={() => setEditingId(item.id)}
+            onKeyPress={({ nativeEvent }) => {
+              if (nativeEvent.key === 'Backspace' && item.text === '') {
+                deleteItem(item.id);
+              }
+            }}
+            onSubmitEditing={() => addItemAfter(item.id)}
+            onBlur={() => handleItemBlur(item)}
+            blurOnSubmit={false}
+            returnKeyType="done"
         />
         {isEditing ? (
           <TouchableOpacity onPress={() => deleteItem(item.id)} style={styles.clearButton}>
@@ -169,7 +253,7 @@ export default function GroceryListView({
 }
 
 const styles = StyleSheet.create({
-  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
   dragHandle: { paddingHorizontal: 15, paddingVertical: 5 },
   dragIcon: { fontSize: 18, color: '#ccc' },
   checkbox: { width: 24, height: 24, marginRight: 10, borderWidth: 1, borderColor: '#999', alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
@@ -194,4 +278,11 @@ const styles = StyleSheet.create({
     color: '#aaa',
     marginTop: 8,
   },
+  quantityLabel: {
+    backgroundColor: '#ebebebff',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginHorizontal: 3
+  }
 });

@@ -1,5 +1,5 @@
 import { Recipe } from '@/types/types';
-import { getRecipe } from '@/utils/api';
+import { addUserCookbookRecipe, getRecipe, submitRecipeFeedback } from '@/utils/api';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -16,14 +16,6 @@ import {
     View
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
-
-// Mock API call for submitting feedback
-async function submitRecipeFeedback(recipeId: string, feedback: string, rating: 'liked' | 'disliked') {
-    console.log(`Submitting feedback for recipe ${recipeId}:`, { rating, feedback });
-    // In a real app, you would make an API call here.
-    // e.g., await authorizedFetch(`${BASE_URL}/recipe/${recipeId}/feedback`, { ... });
-    return { success: true };
-}
 
 // A helper function to mark a meal as rated to prevent re-prompting
 const markMealAsRated = async (mealId: string) => {
@@ -73,11 +65,19 @@ export default function RateMealScreen() {
         setStep('feedback');
     };
 
-    const handleLike = () => {
-        setStep('liked');
-        submitRecipeFeedback(recipe!.id, '', 'liked');
+    const handleLike = async () => {
+        setIsSubmitting(true);
+        try {
+        await submitRecipeFeedback(recipe!.id, 'liked');
         if (mealId) {
-            markMealAsRated(mealId);
+            await markMealAsRated(mealId);
+        }
+        setStep('liked');
+        } catch (error) {
+        console.error("Failed to submit 'like' feedback:", error);
+        Alert.alert("Error", "Could not save your rating. Please try again.");
+        } finally {
+        setIsSubmitting(false);
         }
     };
     
@@ -88,7 +88,7 @@ export default function RateMealScreen() {
         }
         setIsSubmitting(true);
         try {
-            await submitRecipeFeedback(recipe!.id, feedback, 'disliked');
+            await submitRecipeFeedback(recipe!.id, 'disliked', feedback);
             if (mealId) {
                 await markMealAsRated(mealId);
             }
@@ -102,14 +102,21 @@ export default function RateMealScreen() {
         }
     };
 
-    const handleAddToCookbook = () => {
+    const handleAddToCookbook = async () => {
+        setIsSubmitting(true);
+        try {
+        await addUserCookbookRecipe(recipe!.id);
         Alert.alert("Added to Cookbook!", `${recipe?.name} has been saved.`);
-        // Here you would call an API to add the recipe to a user's personal cookbook
-        // await addUserCookbookRecipe(recipe.id);
         if (mealId) {
-            markMealAsRated(mealId);
+            await markMealAsRated(mealId);
         }
         router.replace('/list');
+        } catch (error) {
+        console.error("Failed to add to cookbook:", error);
+        Alert.alert("Error", "Could not add recipe to your cookbook. Please try again.");
+        } finally {
+        setIsSubmitting(false);
+        }
     };
 
     const handleSkipAddToCookbook = () => {
@@ -140,6 +147,7 @@ export default function RateMealScreen() {
             Alert.alert("Photo Updated!", "Your new photo has been saved for this recipe.");
         }
     };
+
     
     // This would navigate to the screen that presents the AddEditRecipeModal
     const handleEditRecipe = () => {
