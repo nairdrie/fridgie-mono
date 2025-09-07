@@ -188,7 +188,8 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                 for (const ingredient of recipe.ingredients) {
                     const newItem: Item = {
                         id: uuid.v4() as string,
-                        text: ingredient.name,
+                        text: ingredient.name.trim(),
+                        quantity: ingredient.quantity.trim(),
                         checked: false,
                         listOrder: 'NEEDS-RANK', // Parent will handle ranking
                         isSection: false,

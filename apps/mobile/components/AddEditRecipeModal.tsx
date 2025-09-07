@@ -88,6 +88,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       const newItemsForRecipe: Item[] = savedRecipe.ingredients.map(ingredient => ({
         id: uuid.v4() as string,
         text: ingredient.name.trim(),
+        quantity: ingredient.quantity.trim(),
         checked: false,
         listOrder: 'NEEDS-RANK',
         isSection: false,
