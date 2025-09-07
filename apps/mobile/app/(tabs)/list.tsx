@@ -58,6 +58,9 @@ export default function HomeScreen() {
     const [cookbookRecipeIds, setCookbookRecipeIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
+        // 1. Directly command the animation to close. This is the key fix.
+        fabAnimation.value = withTiming(0, { duration: 150 });
+        // 2. Sync the React state to ensure consistency.
         setIsFabMenuOpen(false);
     }, [selectedView]);
 
@@ -451,41 +454,45 @@ export default function HomeScreen() {
             )}
 
             <View style={styles.fabContainer}>
-                {selectedView === ListView.MealPlan ? (
+                {isFabMenuOpen && (
                     <>
-                        <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                            <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
-                                <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                <Text style={styles.secondaryButtonText}>Suggest</Text>
-                            </TouchableOpacity>
-                        </Animated.View>
-                        <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                            <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
-                                <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                <Text style={styles.secondaryButtonText}>Meal</Text>
-                            </TouchableOpacity>
-                        </Animated.View>
-                    </>
-                ) : (
-                    <>
-                        <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
-                            <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAutoCategorize(); setIsFabMenuOpen(false); }} disabled={isCategorizing}>
-                                <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                <Text style={styles.secondaryButtonText}>Categorize</Text>
-                            </TouchableOpacity>
-                        </Animated.View>
-                        <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                            <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
-                                <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                <Text style={styles.secondaryButtonText}>Category</Text>
-                            </TouchableOpacity>
-                        </Animated.View>
-                        <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                            <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
-                                <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                <Text style={styles.secondaryButtonText}>Item</Text>
-                            </TouchableOpacity>
-                        </Animated.View>
+                        {selectedView === ListView.MealPlan ? (
+                            <>
+                                <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
+                                        <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <Text style={styles.secondaryButtonText}>Suggest</Text>
+                                    </TouchableOpacity>
+                                </Animated.View>
+                                <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
+                                        <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <Text style={styles.secondaryButtonText}>Meal</Text>
+                                    </TouchableOpacity>
+                                </Animated.View>
+                            </>
+                        ) : (
+                            <>
+                                <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
+                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAutoCategorize(); setIsFabMenuOpen(false); }} disabled={isCategorizing}>
+                                        <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <Text style={styles.secondaryButtonText}>Categorize</Text>
+                                    </TouchableOpacity>
+                                </Animated.View>
+                                <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
+                                        <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <Text style={styles.secondaryButtonText}>Category</Text>
+                                    </TouchableOpacity>
+                                </Animated.View>
+                                <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
+                                        <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <Text style={styles.secondaryButtonText}>Item</Text>
+                                    </TouchableOpacity>
+                                </Animated.View>
+                            </>
+                        )}
                     </>
                 )}
                 <TouchableOpacity style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)}>

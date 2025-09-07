@@ -174,7 +174,6 @@ function MealCard({
         setEditingId(newItem.id);
         markDirty();
     };
-    
     const handleDragEnd = ({ data }: { data: Item[] }) => {
         let rank = LexoRank.middle();
         const reRankedIngredients = data.map(item => {
@@ -186,24 +185,23 @@ function MealCard({
             const otherItems = prevAllItems.filter(item => item.mealId !== meal.id);
             return [...otherItems, ...reRankedIngredients];
         });
-        
         markDirty();
     };
 
     const renderIngredient = useCallback(({ item, drag, isActive, getIndex }: RenderItemParams<Item>) => {
         const isEditing = item.id === editingId;
         return (
-            <View style={styles.itemRow}>
-                <Pressable onPressIn={drag} style={styles.dragHandle} hitSlop={20} disabled={isActive}>
-                    <Text style={styles.dragIcon}>≡</Text>
-                </Pressable>
-                <TouchableOpacity style={styles.checkbox} onPress={() => handleToggleCheck(item.id)}>
-                    {item.checked && <Text>✓</Text>}
-                </TouchableOpacity>
-                <TextInput
-                    ref={assignRef(item.id)}
-                    value={item.text}
-                    style={[styles.editInput, item.checked && styles.checked]}
+        <View style={styles.itemRow}>
+            <Pressable onPressIn={drag} style={styles.dragHandle} hitSlop={20} disabled={isActive}>
+            <Text style={styles.dragIcon}>≡</Text>
+            </Pressable>
+            <TouchableOpacity style={styles.checkbox} onPress={() => handleToggleCheck(item.id)}>
+            {item.checked && <Text>✓</Text>}
+            </TouchableOpacity>
+            <TextInput
+            ref={assignRef(item.id)}
+            value={item.text}
+            style={[styles.editInput, item.checked && styles.checked]}
                     onChangeText={text => handleUpdateIngredientText(item.id, text)}
                     onFocus={() => setEditingId(item.id)}
                     onKeyPress={({ nativeEvent }) => {
@@ -214,13 +212,13 @@ function MealCard({
                     onSubmitEditing={() => handleAddIngredient(getIndex())}
                     blurOnSubmit={false}
                     returnKeyType="next"
-                />
-                {isEditing && (
-                    <TouchableOpacity onPress={() => handleDeleteIngredient(item.id)} style={styles.clearButton}>
-                        <Text style={styles.clearText}>✕</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
+            />
+            {isEditing && (
+            <TouchableOpacity onPress={() => handleDeleteIngredient(item.id)} style={styles.clearButton}>
+                <Text style={styles.clearText}>✕</Text>
+            </TouchableOpacity>
+            )}
+        </View>
         );
     }, [editingId, handleAddIngredient, handleDeleteIngredient, handleToggleCheck, handleUpdateIngredientText]);
 
@@ -510,7 +508,7 @@ const styles = StyleSheet.create({
         color: primary,
         fontWeight: '500',
         fontSize: 12,
-    },
+    }
 });
 
 export default React.memo(MealCard);
