@@ -1,4 +1,7 @@
+import Cookbook from '@/components/Cookbook';
 import { useAuth } from '@/context/AuthContext';
+import { Recipe } from '@/types/types';
+import { getUserCookbook } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, storage } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -9,7 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { updateEmail, updateProfile } from 'firebase/auth';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -170,6 +173,27 @@ export default function UserProfile() {
     const [isAtStart, setIsAtStart] = useState(true);
     const [isAtEnd, setIsAtEnd] = useState(false);
     const carouselData = [...defaultAvatars, 'upload'];
+
+    const [cookbook, setCookbook] = useState<Recipe[]>([]);
+    const [isCookbookLoading, setIsCookbookLoading] = useState(true);
+
+    const fetchCookbook = useCallback(async () => {
+        try {
+            setIsCookbookLoading(true);
+            const userCookbook = await getUserCookbook();
+            setCookbook(userCookbook);
+        } catch (error) {
+            console.error("Failed to fetch cookbook:", error);
+            Alert.alert("Error", "Could not load your recipes.");
+        } finally {
+            setIsCookbookLoading(false);
+        }
+    }, []); // Empty dependency array means this function is created only once.
+
+    useEffect(() => {
+        fetchCookbook();
+    }, [fetchCookbook]);
+
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
         const isEnd = contentOffset.x + layoutMeasurement.width >= contentSize.width - 10;
@@ -258,16 +282,17 @@ export default function UserProfile() {
                         <Text style={styles.statLabel}>Followers</Text>
                     </View>
                     <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>0</Text>
+                        <Text style={styles.statNumber}>{isCookbookLoading ? '...' : cookbook.length}</Text>
                         <Text style={styles.statLabel}>Recipes</Text>
                     </View>
                 </View>
-                <View style={styles.feedContainer}>
-                    <Text style={styles.sectionTitle}>My Recipes</Text>
-                    <View style={styles.feedPlaceholder}>
-                        <Ionicons name="receipt-outline" size={48} color="#ccc" />
-                        <Text style={styles.feedPlaceholderText}>Your saved recipes will appear here.</Text>
-                    </View>
+                 <View style={styles.feedContainer}>
+                    <Text style={styles.sectionTitle}>My Cookbook</Text>
+                    <Cookbook
+                        recipes={cookbook}
+                        isLoading={isCookbookLoading}
+                        onRefresh={fetchCookbook}
+                    />
                 </View>
             </ScrollView>
             <Modal visible={editPhotoModalVisible} animationType="slide" transparent={true}>
@@ -409,6 +434,7 @@ const styles = StyleSheet.create({
     },
     feedContainer: {
         paddingHorizontal: 16,
+        overflow: 'visible'
     },
     sectionTitle: {
         fontSize: 22,

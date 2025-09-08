@@ -80,6 +80,12 @@ export default function RootLayout() {
                   headerShown: false
                 }}
               />
+              <Stack.Screen
+                name="recipe/[id]"
+                options={{ 
+                  headerShown: false
+                }}
+              />
             </Stack>
           </RootView>
         </ListProvider>

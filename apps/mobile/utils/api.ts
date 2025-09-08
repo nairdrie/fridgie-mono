@@ -367,3 +367,7 @@ export async function getUserCookbook(): Promise<Recipe[]> {
   const res = await authorizedFetch(`${BASE_URL}/cookbook`);
   return res.json();
 }
+
+export async function addRecipeToList(listId: string, Recipe: Recipe): Promise<void> {
+  return;
+}
