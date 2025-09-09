@@ -28,6 +28,8 @@ You MUST return a single raw JSON object matching this exact structure. Do not i
 DO NOT include markdown, code fences, or any text outside of the JSON object.
 
 Separate preparation methods from ingredient names. For example, if you find "1 cup butter, melted", the ingredient name should be just "butter", and you must create a new first step in the instructions array, eg: "Melt the butter."
+
+If an ingredient's quantity is listed with multiple units (e.g., '200g / 7 oz'), you must only use the first value and unit listed. The output for the example should be '200g'.
 `;
 
 route.use('*', auth);
