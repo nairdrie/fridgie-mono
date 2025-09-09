@@ -37,7 +37,8 @@ export default function RecipeCard({ recipe, onAddToMealPlan, onView }: RecipeCa
             <View style={styles.cardContent}>
                 <Text style={styles.cardTitle} numberOfLines={1}>{recipe.name}</Text>
                 <View style={styles.dateLabel}>
-                    <Text style={styles.dateLabelText}>Sep 4, 2025</Text>
+                    {/* TODO: last ate date */}
+                    <Text style={styles.dateLabelText}>Sep 4, 2025</Text> 
                 </View>
                 <Text style={styles.cardDescription} numberOfLines={3}>{recipe.description}</Text>
             </View>

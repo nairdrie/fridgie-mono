@@ -1,11 +1,13 @@
 import { Ingredient, Item, Meal, Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import uuid from 'react-native-uuid';
 import { getRecipe, importRecipeFromUrl, saveRecipe } from '../utils/api';
 
+// TODO the photoURL saving is not working. also on rate-meal. 
 interface AddEditRecipeModalProps {
   isVisible: boolean;
   onClose: () => void;
@@ -103,6 +105,25 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     }
   };
 
+  const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Sorry, we need camera roll permissions to add a photo.');
+        return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.7,
+    });
+
+    if (!result.canceled && result.assets[0].uri) {
+        // Reuse the existing handler to update the recipe state
+        handleRecipeFieldChange('photoURL', result.assets[0].uri);
+    }
+  };
+
   const handleRecipeFieldChange = (field: keyof Recipe, value: string) => setEditingRecipe(p => p ? { ...p, [field]: value } : null);
   const handleIngredientChange = (index: number, field: keyof Ingredient, value: string) => {
     setEditingRecipe(p => {
@@ -143,6 +164,23 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                 </View>
                 {editingRecipe && (
                 <>
+                    {/* --- NEW PHOTO SECTION --- */}
+                      <View style={styles.formSectionContainer}>
+                          {editingRecipe.photoURL ? (
+                              <TouchableOpacity onPress={handlePickImage}>
+                                  <Image source={{ uri: editingRecipe.photoURL }} style={styles.recipeImage} />
+                                  <View style={styles.imageEditIcon}>
+                                      <Ionicons name="pencil" size={18} color="#fff" />
+                                  </View>
+                              </TouchableOpacity>
+                          ) : (
+                              <TouchableOpacity style={[styles.recipeImage, styles.addImageButton]} onPress={handlePickImage}>
+                                  <Ionicons name="camera-outline" size={24} color={primary} />
+                                  <Text style={styles.addImageButtonText}>Add Photo</Text>
+                              </TouchableOpacity>
+                          )}
+                      </View>
+                    {/* --- END PHOTO SECTION --- */}
                     <View style={styles.formSectionContainer}>
                         <TextInput style={styles.recipeNameInput} placeholder="Recipe Name" placeholderTextColor="#999" value={editingRecipe.name} onChangeText={(val) => handleRecipeFieldChange('name', val)} />
                         <TextInput style={[styles.formInput, styles.descriptionInput]} placeholder="A short, tasty description..." placeholderTextColor="#999" value={editingRecipe.description} onChangeText={(val) => handleRecipeFieldChange('description', val)} multiline />
@@ -200,4 +238,31 @@ const styles = StyleSheet.create({
     secondaryButton: { backgroundColor: '#EFEFEF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, marginRight: 10 },
     secondaryButtonText: { color: '#333', fontSize: 16, fontWeight: 'bold' },
     disabledButton: { opacity: 0.6 },
+    recipeImage: {
+        width: '100%',
+        aspectRatio: 16 / 9,
+        borderRadius: 10,
+        backgroundColor: '#f0f0f0',
+        resizeMode: 'cover',
+    },
+    addImageButton: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 2,
+        borderColor: '#e0e0e0',
+        borderStyle: 'dashed',
+    },
+    addImageButtonText: {
+        marginTop: 8,
+        color: primary,
+        fontWeight: '600',
+    },
+    imageEditIcon: {
+        position: 'absolute',
+        bottom: 10,
+        right: 10,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        padding: 8,
+        borderRadius: 16,
+    },
 });

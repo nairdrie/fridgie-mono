@@ -1,4 +1,6 @@
 // components/GroceryListView.tsx
+
+// TODO: if I have 200g sugar in list, 2 tsp sugar in a meal, the quantity is updated to "200 g + 2 tsp". Convert tsp to the unit in main list.
 import { Item } from '@/types/types';
 import { primary } from '@/utils/styles';
 import * as Haptics from 'expo-haptics';
@@ -16,21 +18,6 @@ import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flat
 import uuid from 'react-native-uuid';
 import QuantityEditorModal, { parseQuantityAndText } from './QuantityEditorModal';
 
-// --- TYPES ---
-/*
-* NOTE: The fix below assumes your `Item` type includes these optional properties.
-*
-* export interface Item {
-* id: string;
-* text: string;
-* checked: boolean;
-* listOrder: string;
-* isSection: boolean;
-* quantity?: string;
-* mealId?: string; // Differentiates items from meals
-* overrideQuantity?: string; // [NEW] Used to bypass aggregation logic
-* }
-*/
 type AggregatedItem = Item & {
  sourceIds: string[];
  totalQuantity: string;

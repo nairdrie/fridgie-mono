@@ -1,3 +1,5 @@
+// TODO: Replace alerts, specifically Added to Cookbook! (an animated thumbs up, then route.)
+
 import { Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getRecipe, submitRecipeFeedback } from '@/utils/api';
 import { primary } from '@/utils/styles';
@@ -142,10 +144,19 @@ export default function RateMealScreen() {
 
         if (!result.canceled) {
             const photoUri = result.assets[0].uri;
-            // In a real app, you would upload this URI to your backend/storage
-            // and update the recipe's photoURL.
-            console.log("New photo selected:", photoUri);
-            Alert.alert("Photo Updated!", "Your new photo has been saved for this recipe.");
+            
+            // [FIX] Update the recipe state to immediately display the new photo
+            // instead of showing an alert.
+            setRecipe(prevRecipe => {
+                if (!prevRecipe) return null;
+                return {
+                    ...prevRecipe,
+                    photoURL: photoUri, // Overwrite with the local file URI
+                };
+            });
+
+            // In a real app, you would now trigger an async upload of this photoUri 
+            // to your backend and update the permanent recipe photoURL.
         }
     };
 
@@ -192,10 +203,10 @@ export default function RateMealScreen() {
                         
                         <View style={styles.ratingActions}>
                             <TouchableOpacity onPress={handleDislike} style={[styles.ratingButton, styles.dislikeButton]}>
-                                <Ionicons name="thumbs-down-outline" size={32} color="#D9534F" />
+                                <Ionicons name="thumbs-down" size={32} color="#D9534F" />
                             </TouchableOpacity>
                             <TouchableOpacity onPress={handleLike} style={[styles.ratingButton, styles.likeButton]}>
-                                <Ionicons name="thumbs-up-outline" size={32} color="#5CB85C" />
+                                <Ionicons name="thumbs-up" size={32} color="#5CB85C" />
                             </TouchableOpacity>
                         </View>
                     </>
@@ -229,7 +240,12 @@ export default function RateMealScreen() {
                         { recipe.photoURL ? (
                              <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
                         ) : (
-                             <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
+                             <View style={styles.mainImage}>
+                                <TouchableOpacity style={styles.actionChip} onPress={handlePickImage}>
+                                    <Ionicons name="camera-outline" size={16} color="white" />
+                                    <Text style={styles.actionChipText}>Add a Photo</Text>
+                                </TouchableOpacity>
+                             </View>
                         )}
                         <Text style={styles.subtitle}>Would you like to add it to your personal cookbook for next time?</Text>
                         <TouchableOpacity style={styles.primaryButton} onPress={handleAddToCookbook}>
@@ -249,19 +265,6 @@ export default function RateMealScreen() {
                     </>
                 )}
                 
-                {/* Additional Actions available after initial rating */}
-                {step !== 'rating' && step !== 'submitted' && (
-                    <View style={styles.additionalActions}>
-                        <TouchableOpacity style={styles.actionChip} onPress={handlePickImage}>
-                            <Ionicons name="camera-outline" size={16} color="#333" />
-                            <Text style={styles.actionChipText}>Add a Photo</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionChip} onPress={handleEditRecipe}>
-                            <Ionicons name="pencil-outline" size={16} color="#333" />
-                            <Text style={styles.actionChipText}>Edit Recipe</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
             </View>
         </KeyboardAwareScrollView>
     );
@@ -273,7 +276,10 @@ const styles = StyleSheet.create({
     title: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
     recipeName: { fontSize: 24, fontWeight: '600', color: primary, marginBottom: 24, textAlign: 'center' },
     subtitle: { fontSize: 18, color: '#666', marginBottom: 32, textAlign: 'center' },
-    mainImage: { width: '100%', aspectRatio: 16/9, borderRadius: 12, marginBottom: 32, backgroundColor: '#eee' },
+    mainImage: { 
+        width: '100%', aspectRatio: 16/9, borderRadius: 12, marginBottom: 32, backgroundColor: '#eee' 
+        , justifyContent: 'center', alignItems: 'center' 
+    },
     ratingActions: { flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
     ratingButton: {
         width: 80,
@@ -303,13 +309,18 @@ const styles = StyleSheet.create({
     actionChip: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#f0f0f0',
+        backgroundColor: primary,
         paddingVertical: 8,
         paddingHorizontal: 16,
         borderRadius: 20,
         marginHorizontal: 8,
+        color: 'white'
     },
     actionChipText: {
+        color: 'white',
+        marginLeft:10
+    },
+    addAPhoto: {
         marginLeft: 8,
         fontSize: 14,
         fontWeight: '500',

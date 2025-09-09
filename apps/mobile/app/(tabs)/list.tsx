@@ -369,6 +369,7 @@ export default function HomeScreen() {
                         mealDate.setDate(weekStartDate.getDate() + dayIndex);
                         return mealDate < today;
                     });
+                    // const unratedPastMeals = meals;
                     if (unratedPastMeals.length > 0) {
                         const mealToRate = unratedPastMeals.sort((a, b) => {
                             const dateA = new Date(selectedList.weekStart);
@@ -501,7 +502,7 @@ export default function HomeScreen() {
                     </Animated.View>
                 </TouchableOpacity>
             </View>
-
+            {/* TODO: pass isInCookbook and onCookbookUpdate */}
             <ViewRecipeModal isVisible={!!recipeToViewId} onClose={() => setRecipeToViewId(null)} recipeId={recipeToViewId} onEdit={handleEditRecipe} />
             <AddEditRecipeModal isVisible={!!recipeToEdit} onClose={() => setRecipeToEdit(null)} mealForRecipe={recipeToEdit} onRecipeSave={handleRecipeSaved} />
             <MealSuggestionsModal isVisible={isSuggestionModalVisible} onClose={() => setSuggestionModalVisible(false)} onAddSelectedMeals={handleAddMealsFromSuggestion} listId={selectedList?.id ?? ''} />
