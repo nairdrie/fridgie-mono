@@ -8,6 +8,9 @@ import uuid from 'react-native-uuid';
 import { getRecipe, importRecipeFromUrl, saveRecipe } from '../utils/api';
 
 // TODO the photoURL saving is not working. also on rate-meal. 
+// 1. some photo pickers in this project are saving local file:// URLs, need to use that for local state but upload to firebase storage before making API POST. (see profile pic saving for example which is working correctly.) 
+// 2. I don't even think we have a post with recipe ID for edits, it's just creating a new one?
+
 interface AddEditRecipeModalProps {
   isVisible: boolean;
   onClose: () => void;
