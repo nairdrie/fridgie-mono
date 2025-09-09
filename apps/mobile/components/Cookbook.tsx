@@ -30,7 +30,7 @@ interface CookbookProps {
 }
 
 export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProps) {
-    const { allLists, isLoading: areListsLoading } = useLists();
+    const { allLists, isLoading: areListsLoading, selectedGroup } = useLists();
     const [searchTerm, setSearchTerm] = useState('');
 
     const [isWeekSelectorVisible, setWeekSelectorVisible] = useState(false);
@@ -75,12 +75,13 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
     };
 
     const handleSelectWeek = async (list: List) => {
+        if(!selectedGroup) return;
         if (!selectedRecipeForMealPlan) return;
 
         setIsSubmitting(true);
         try {
             // NOTE: You need to implement `addRecipeToList` in your API utils
-            await addRecipeToList(list.id, selectedRecipeForMealPlan);
+            await addRecipeToList(selectedGroup.id, list.id, selectedRecipeForMealPlan);
             Alert.alert("Success", `Added "${selectedRecipeForMealPlan.name}" to your meal plan.`);
             setWeekSelectorVisible(false);
             setSelectedRecipeForMealPlan(null);

@@ -1,5 +1,6 @@
 // components/GroceryListView.tsx
 import { Item } from '@/types/types';
+import { primary } from '@/utils/styles';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -137,7 +138,18 @@ export default function GroceryListView({
    markDirty();
  };
 
- const addItemAfter = (currentItem: AggregatedItem | Item) => {
+ const addItemAfter = (currentItem?: AggregatedItem | Item) => {
+  if(!currentItem) {
+    const newItem: Item = {
+      id: uuid.v4() as string, text: '', checked: false,
+      listOrder: LexoRank.middle().toString(), isSection: false,
+    }
+    setItems(prev => [...prev, newItem]);
+    setEditingId(newItem.id);
+    markDirty();
+    setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
+    return;
+  }
    const currentIndex = aggregatedItems.findIndex(i => i.id === currentItem.id);
    if (currentIndex === -1) return;
    const currentRank = LexoRank.parse(aggregatedItems[currentIndex].listOrder);
@@ -354,7 +366,17 @@ export default function GroceryListView({
  }, [items, editingId, aggregatedItems]);
 
  return (
-   <>
+   <View style={{ flex: 1 }}>
+    { aggregatedItems.length == 0 && 
+         <View style={styles.emptyMealsContainer}>
+           <Text style={styles.emptyMealsText}>Your list is empty</Text>
+           <TouchableOpacity 
+               style={styles.addMealButton}
+               onPress={() => addItemAfter()}>
+               <Text style={styles.addMealText}>+ Add Item</Text>
+           </TouchableOpacity>
+         </View>
+      }
      <DraggableFlatList
        data={aggregatedItems} onDragEnd={({ data }) => reRankItems(data)}
        keyExtractor={item => item.id} renderItem={renderItem as any}
@@ -365,7 +387,7 @@ export default function GroceryListView({
        isVisible={isModalVisible} item={selectedItem}
        onSave={handleSaveQuantity} onClose={closeQuantityEditor}
      />
-   </>
+   </View>
  );
 }
 
@@ -381,5 +403,18 @@ const styles = StyleSheet.create({
  sectionText: { fontWeight: 'bold', fontSize: 18, marginLeft: 10, color: '#333' },
  quantityLabel: { backgroundColor: '#ebebebff', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginRight: 6 },
  quantityChecked: { backgroundColor: '#eeeeee' },
- quantityText: { color: '#333' }
+ quantityText: { color: '#333' },
+ emptyMealsContainer: {
+     flex: 1,
+     justifyContent: 'center',
+     alignItems: 'center',
+   },
+   emptyMealsText: {
+     fontSize: 28,
+     fontWeight: 'bold',
+     color: 'grey'
+ 
+   },
+   addMealButton: { paddingVertical: 5 },
+   addMealText: { color: primary, fontSize: 16, textAlign: 'center'  }
 });

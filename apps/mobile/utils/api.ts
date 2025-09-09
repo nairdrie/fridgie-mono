@@ -8,7 +8,7 @@ import {
   User
 } from "firebase/auth";
 import { Platform } from 'react-native';
-import { Group, Item, MealPreferences, Recipe } from "../types/types";
+import { Group, Item, Meal, MealPreferences, Recipe } from "../types/types";
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
@@ -368,6 +368,16 @@ export async function getUserCookbook(): Promise<Recipe[]> {
   return res.json();
 }
 
-export async function addRecipeToList(listId: string, Recipe: Recipe): Promise<void> {
-  return;
+export async function addRecipeToList(groupId: string, listId: string, recipe: Recipe): Promise<Meal> {
+  console.log(groupId)
+    const res = await authorizedFetch(`${BASE_URL}/meal?groupId=${groupId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        // The body now contains all the necessary info
+        body: JSON.stringify({ groupId, listId, recipe }),
+    });
+
+    return res.json();
 }

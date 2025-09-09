@@ -258,43 +258,41 @@ export default function UserProfile() {
                     <Ionicons name="settings-outline" size={28} color="#000" />
                 </TouchableOpacity>
             </View>
-            <ScrollView>
-                 <View style={styles.profileContainer}>
-                    <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
-                        {user?.photoURL && (
-                            <Image source={{ uri: user.photoURL }} style={styles.profileImage} />
-                        )}
-                        <View style={styles.editIconContainer}>
-                            <Ionicons name="pencil" size={16} color="#fff" />
-                        </View>
-                    </TouchableOpacity>
+            <View style={styles.profileContainer}>
+                <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
+                    {user?.photoURL && (
+                        <Image source={{ uri: user.photoURL }} style={styles.profileImage} />
+                    )}
+                    <View style={styles.editIconContainer}>
+                        <Ionicons name="pencil" size={16} color="#fff" />
+                    </View>
+                </TouchableOpacity>
 
-                    <Text style={styles.displayName}>{user?.displayName || 'Set Your Name'}</Text>
-                    {user?.email && <Text style={styles.usernameText}>@{user.email.split('@')[0]}</Text>}
+                <Text style={styles.displayName}>{user?.displayName || 'Set Your Name'}</Text>
+                {user?.email && <Text style={styles.usernameText}>@{user.email.split('@')[0]}</Text>}
+            </View>
+            <View style={styles.statsContainer}>
+                <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>0</Text>
+                    <Text style={styles.statLabel}>Following</Text>
                 </View>
-                <View style={styles.statsContainer}>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>0</Text>
-                        <Text style={styles.statLabel}>Following</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>0</Text>
-                        <Text style={styles.statLabel}>Followers</Text>
-                    </View>
-                    <View style={styles.statItem}>
-                        <Text style={styles.statNumber}>{isCookbookLoading ? '...' : cookbook.length}</Text>
-                        <Text style={styles.statLabel}>Recipes</Text>
-                    </View>
+                <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>0</Text>
+                    <Text style={styles.statLabel}>Followers</Text>
                 </View>
-                 <View style={styles.feedContainer}>
-                    <Text style={styles.sectionTitle}>My Cookbook</Text>
-                    <Cookbook
-                        recipes={cookbook}
-                        isLoading={isCookbookLoading}
-                        onRefresh={fetchCookbook}
-                    />
+                <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>{isCookbookLoading ? '...' : cookbook.length}</Text>
+                    <Text style={styles.statLabel}>Recipes</Text>
                 </View>
-            </ScrollView>
+            </View>
+            <View style={styles.feedContainer}>
+                <Text style={styles.sectionTitle}>My Cookbook</Text>
+                <Cookbook
+                    recipes={cookbook}
+                    isLoading={isCookbookLoading}
+                    onRefresh={fetchCookbook}
+                />
+            </View>
             <Modal visible={editPhotoModalVisible} animationType="slide" transparent={true}>
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
@@ -434,7 +432,7 @@ const styles = StyleSheet.create({
     },
     feedContainer: {
         paddingHorizontal: 16,
-        overflow: 'visible'
+        flex: 1
     },
     sectionTitle: {
         fontSize: 22,

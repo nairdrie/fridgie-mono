@@ -98,7 +98,7 @@ export default function MealPlanView({
   }, [meals]);
 
   return (
-    <>
+    <View style={{ flex: 1 }}>
      { sortedMeals.length == 0 && 
       <View style={styles.emptyMealsContainer}>
         <Text style={styles.emptyMealsText}>Let's get cooking!</Text>
@@ -109,6 +109,7 @@ export default function MealPlanView({
         </TouchableOpacity>
       </View>
      }
+     { sortedMeals.length > 0 && 
       <FlatList
         data={sortedMeals}
         keyExtractor={(item) => item.id}
@@ -137,13 +138,14 @@ export default function MealPlanView({
         windowSize={10}
         contentContainerStyle={styles.container}
       />
+     }
       <QuantityEditorModal
           isVisible={isModalVisible}
           item={selectedItem}
           onSave={handleSaveQuantity}
           onClose={closeQuantityEditor}
       />
-    </>
+    </View>
   );
 }
 
@@ -155,7 +157,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: 100
   },
   emptyMealsText: {
     fontSize: 28,

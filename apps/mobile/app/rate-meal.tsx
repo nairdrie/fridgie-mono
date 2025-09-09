@@ -1,5 +1,6 @@
 import { Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getRecipe, submitRecipeFeedback } from '@/utils/api';
+import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
@@ -225,7 +226,11 @@ export default function RateMealScreen() {
                 {step === 'liked' && (
                     <>
                         <Text style={styles.title}>Glad you liked it!</Text>
-                        <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
+                        { recipe.photoURL ? (
+                             <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
+                        ) : (
+                             <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
+                        )}
                         <Text style={styles.subtitle}>Would you like to add it to your personal cookbook for next time?</Text>
                         <TouchableOpacity style={styles.primaryButton} onPress={handleAddToCookbook}>
                             <Text style={styles.primaryButtonText}>Yes, Add to Cookbook</Text>
@@ -238,7 +243,7 @@ export default function RateMealScreen() {
                 
                 {step === 'submitted' && (
                      <>
-                        <Ionicons name="checkmark-circle-outline" size={80} color="#5CB85C" />
+                        <Ionicons name="checkmark-circle-outline" size={80} color={primary} />
                         <Text style={styles.title}>Thanks!</Text>
                         <Text style={styles.subtitle}>Your feedback helps us make better suggestions.</Text>
                     </>
@@ -266,7 +271,7 @@ const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: '#fff' },
     container: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     title: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
-    recipeName: { fontSize: 24, fontWeight: '600', color: '#00715a', marginBottom: 24, textAlign: 'center' },
+    recipeName: { fontSize: 24, fontWeight: '600', color: primary, marginBottom: 24, textAlign: 'center' },
     subtitle: { fontSize: 18, color: '#666', marginBottom: 32, textAlign: 'center' },
     mainImage: { width: '100%', aspectRatio: 16/9, borderRadius: 12, marginBottom: 32, backgroundColor: '#eee' },
     ratingActions: { flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
@@ -278,10 +283,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         borderWidth: 2,
     },
-    likeButton: { borderColor: '#5CB85C', backgroundColor: '#eaf6ea' },
+    likeButton: { borderColor: primary, backgroundColor: '#eaf6ea' },
     dislikeButton: { borderColor: '#D9534F', backgroundColor: '#fbeaea' },
     input: { width: '100%', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 14, fontSize: 16, minHeight: 100, textAlignVertical: 'top', marginBottom: 24 },
-    primaryButton: { width: '100%', backgroundColor: '#00715a', paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
+    primaryButton: { width: '100%', backgroundColor: primary, paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
     primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
     secondaryButton: { width: '100%', backgroundColor: '#f0f0f0', paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
     secondaryButtonText: { color: '#333', fontSize: 16, fontWeight: '600' },
