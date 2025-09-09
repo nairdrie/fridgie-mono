@@ -1,3 +1,4 @@
+// components/QuantityEditorModal.tsx
 import { Item } from "@/types/types";
 import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -6,14 +7,15 @@ import { Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } 
 
 const UNITS = ['g', 'oz', 'ml', 'cups', 'tbsp'];
 const CONVERSIONS: { [key: string]: { toBase: (v: number) => number; fromBase: (b: number) => number; unit: string, variations: RegExp } } = {
-    g:    { toBase: v => v,          fromBase: b => b,          unit: 'g',    variations: /^g(rams?)?$/i },
-    oz:   { toBase: v => v / 0.035274, fromBase: b => b * 0.035274, unit: 'oz',   variations: /^oz|ounces?$/i },
-    ml:   { toBase: v => v,          fromBase: b => b,          unit: 'ml',   variations: /^ml|milliliters?$/i },
-    cups: { toBase: v => v * 236.59, fromBase: b => b / 236.59, unit: 'cups', variations: /^cups?|c$/i },
-    tbsp: { toBase: v => v * 14.79,  fromBase: b => b / 14.79,  unit: 'tbsp', variations: /^tbsps?|tablespoons?$/i },
+    g:     { toBase: v => v,            fromBase: b => b,            unit: 'g',    variations: /^g(rams?)?$/i },
+    oz:    { toBase: v => v / 0.035274, fromBase: b => b * 0.035274, unit: 'oz',   variations: /^oz|ounces?$/i },
+    ml:    { toBase: v => v,            fromBase: b => b,            unit: 'ml',   variations: /^ml|milliliters?$/i },
+    cups:  { toBase: v => v * 236.59,   fromBase: b => b / 236.59,   unit: 'cups', variations: /^cups?|c$/i },
+    tbsp:  { toBase: v => v * 14.79,    fromBase: b => b / 14.79,    unit: 'tbsp', variations: /^tbsps?|tablespoons?$/i },
 };
 
 const parseForConversion = (text: string) => {
+    if (!text) return null;
     const parseRegex = /^(\d*\.?\d+)\s*([a-zA-Z]+)$/;
     const match = text.trim().match(parseRegex);
     if (!match) return null;
@@ -31,12 +33,13 @@ const parseForConversion = (text: string) => {
 
 interface QuantityEditorModalProps {
     isVisible: boolean;
-    item: Item | null;
+    // [FIXED] Allow the passed item to have a `totalQuantity` property
+    item: (Item & { totalQuantity?: string }) | null;
     onSave: (newQuantity: string) => void;
     onClose: () => void;
 }
 
-  /**
+ /**
  * Parses a string to find a quantity at the beginning OR end.
  * @param text The full item text.
  * @returns An object with the parsed quantity and the remaining text.
@@ -58,8 +61,6 @@ export const parseQuantityAndText = (text: string): { quantity: string | null; t
     };
   }
 
-  // 2. If no match at the start, check for quantity at the END (e.g., "eggs 2")
-  // Regex: the text, then a space, then the number and optional unit
   const endRegex = /^(.*?)\s+(\d*\.?\d+\s*[a-zA-Z]*)$/;
   const endMatch = trimmedText.match(endRegex);
   
@@ -77,7 +78,6 @@ export const parseQuantityAndText = (text: string): { quantity: string | null; t
     };
   }
 
-  // 3. No match found, return original text
   return { quantity: null, text: trimmedText };
 };
 
@@ -86,10 +86,11 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
     const [anchor, setAnchor] = useState<{ value: number, unit: string } | null>(null);
 
     useEffect(() => {
-        // Pre-fill the input with the current quantity when the modal opens
+        // [FIXED] Use the aggregated total quantity if it exists, otherwise fall back.
         if (item) {
-            setQuantity(item.quantity || '');
-            if(item.quantity) setAnchor(parseForConversion(item.quantity));
+            const initialQuantity = item.totalQuantity || item.quantity || '';
+            setQuantity(initialQuantity);
+            setAnchor(parseForConversion(initialQuantity));
         }
     }, [item]);
 
@@ -110,23 +111,19 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
     }, [quantity]);
 
     const handleCycleUnits = () => {
-        if (!anchor) return; // Can't convert if there's no valid anchor
+        if (!anchor) return;
         Keyboard.dismiss();
 
-        // 1. Determine the currently displayed unit
         const currentlyDisplayedInfo = parseForConversion(quantity);
         if (!currentlyDisplayedInfo) return;
 
-        // 2. Find the next unit in the cycle
         const currentIndex = UNITS.indexOf(currentlyDisplayedInfo.unit);
         const nextIndex = (currentIndex + 1) % UNITS.length;
         const nextUnit = UNITS[nextIndex];
 
-        // 3. IMPORTANT: Convert from the original, precise anchor value
         const baseValue = CONVERSIONS[anchor.unit].toBase(anchor.value);
         const newValue = CONVERSIONS[nextUnit].fromBase(baseValue);
         
-        // 4. Format and update the displayed quantity
         let formattedValue;
         if (newValue < 1) formattedValue = newValue.toFixed(2);
         else if (newValue < 10) formattedValue = newValue.toFixed(1);
@@ -135,11 +132,8 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
         setQuantity(`${formattedValue} ${CONVERSIONS[nextUnit].unit}`);
     };
     
-    // --- NEW: Handler for when the user types in the input ---
     const handleTextChange = (text: string) => {
         setQuantity(text);
-        // When the user types, reset the anchor to this new value.
-        // All future conversions will be based on what they just typed.
         setAnchor(parseForConversion(text));
     };
 
@@ -222,7 +216,6 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
         color: '#666',
         marginBottom: 16,
     },
-    // --- NEW: Style for the input and button wrapper ---
     inputContainer: {
       height:50,
         flexDirection: 'row',
@@ -234,14 +227,13 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
         marginHorizontal: 5
     },
     modalInput: {
-        flex: 1, // Take up available space
+        flex: 1,
         padding: 12,
         fontSize: 16,
         textAlign: 'center',
-        borderWidth: 0, // Remove individual border
+        borderWidth: 0,
         marginHorizontal: 5
     },
-    // --- NEW: Style for the cycle button ---
     cycleButton: {
         paddingHorizontal: 12,
         height: '100%',

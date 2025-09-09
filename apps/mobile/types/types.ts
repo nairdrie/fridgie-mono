@@ -7,6 +7,7 @@ export type Item = {
     isSection: boolean; 
     mealId?: string;
     quantity?: string;
+    overrideQuantity?: string;
   };
   
 export type List = {
