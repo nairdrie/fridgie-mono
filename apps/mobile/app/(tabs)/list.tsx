@@ -419,6 +419,9 @@ export default function HomeScreen() {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={100}
             >
+                {/* TODO: the keyboardavoiding here is not as good as on login page now. also add/edit recipe one is good. (CHECK IOS) */}
+                {/* TODO: on IOS, any action outside the keyboard should minimize it (unless its a click to another input). basically we want the keyboard to be smart enough to close when were not using it (on scroll)*/}
+                {/* TODO: on android, any action outside the keyboard should not minimize it, we use the back swipe to do this. */}
                 { selectedView == ListView.GroceryList ? (
                     <GroceryListView
                         items={items}

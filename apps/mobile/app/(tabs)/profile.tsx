@@ -29,6 +29,8 @@ import {
     View
 } from 'react-native';
 
+// TODO: we can go back from login to access profile for unauthed user.
+
 // Reusable component for editable text fields, now only used in SettingsModal
 const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bold = false, editable = true, placeholder = "" }: { placeholder?: string, editable?: boolean, label: string; value: string; showLabel?: boolean; onSave: (newValue: string) => Promise<void>, size?: number, bold?: boolean }) => {
     const [isEditing, setIsEditing] = useState(false);
