@@ -62,10 +62,11 @@ export interface Ingredient {
 }
 
 export interface Recipe {
-  id: string;
+  id:string;
   name: string;
   description: string;
   photoURL?: string;
-  ingredients: Ingredient [];
+  ingredients: Ingredient[];
   instructions: string[];
+  lastAte?: string;
 }

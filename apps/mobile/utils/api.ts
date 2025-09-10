@@ -211,10 +211,39 @@ export async function registerForPushNotificationsAsync() {
   return token;
 }
 
-export async function saveRecipe(recipe: Omit<Recipe, 'id'>): Promise<Recipe> {
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { storage } from './firebase';
+
+export async function uploadImage(uri: string, path: string): Promise<string> {
+  if(!auth.currentUser) throw new Error("User not found");
+  if(!uri.startsWith('file://')) {
+    return uri;
+  }
+  const response = await fetch(uri);
+  const blob = await response.blob();
+  const storageRef = ref(storage, path);
+  await uploadBytes(storageRef, blob);
+  return await getDownloadURL(storageRef);
+}
+
+export async function uploadUserPhoto(uri: string): Promise<string> {
+  if(!auth.currentUser) throw new Error("User not found");
+  const path = `profile_images/${auth.currentUser.uid}`;
+  return await uploadImage(uri, path);
+}
+
+export async function uploadRecipePhoto(uri: string, recipeId: string) {
+  if(!auth.currentUser) throw new Error("User not found");
+  const path = `recipe_images/${recipeId}/${Date.now()}`;
+  return await uploadImage(uri, path);
+}
+
+export async function saveRecipe(recipe: Recipe): Promise<Recipe> {
   const res = await authorizedFetch(`${BASE_URL}/recipe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    // For POST, send the whole data, for PUT, the backend might only need the changed fields,
+    // but sending the whole object is a common pattern for simplicity.
     body: JSON.stringify(recipe),
   });
   return res.json();

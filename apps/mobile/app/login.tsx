@@ -31,11 +31,11 @@ import {
 
 // --- Your Project's Imports ---
 import { auth } from '@/utils/firebase';
+import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import Logo from '../components/Logo';
 
 
@@ -313,36 +313,15 @@ const handleCreateAccount = async () => {
  };
  
  return (
-  <KeyboardAwareScrollView
-    contentContainerStyle={styles.outerContainer}
-    keyboardShouldPersistTaps="handled"
-  >
+  <>
    <StatusBar style="light" />
-   <Modal visible={showConflictModal} transparent={true} animationType="fade">
-    <View style={styles.modalContainer}>
-     <View style={styles.modalContent}>
-      <Text style={styles.modalTitle}>Account Exists</Text>
-      <Text style={styles.modalMessage}>
-       This social account is already linked to another user. Would you like to sign in to that account instead?
-       Your current guest session will be discarded.
-      </Text>
-      <View style={styles.modalButtons}>
-       <TouchableOpacity style={styles.modalButton} onPress={() => {
-        setShowConflictModal(false);
-        setPendingCredential(null);
-       }}>
-        <Text>Cancel</Text>
-       </TouchableOpacity>
-       <TouchableOpacity style={[styles.modalButton, styles.modalConfirmButton]} onPress={handleSignInToExistingAccount}>
-        <Text style={styles.modalConfirmButtonText}>Sign In</Text>
-       </TouchableOpacity>
+      <View
+        style={styles.outerContainer}
+      >
+      <View style={styles.logoContainer}>
+        <Logo variant="wide" style={styles.logo}/>
       </View>
-     </View>
-    </View>
-   </Modal>
-
-   <Logo variant="wide" style={styles.logo}/>
-   <View style={styles.loginCard}>
+      <View style={styles.loginCard}>
         <View style={styles.loginCardUpper}>
           {uiState !== 'initial' && (
             <TouchableOpacity onPress={() => {
@@ -364,7 +343,7 @@ const handleCreateAccount = async () => {
         </View>
 
         {uiState === 'initial' ? (
-          <TextInput
+            <TextInput
             style={styles.inputField}
             placeholder="Enter your email address..."
             value={email}
@@ -487,25 +466,50 @@ const handleCreateAccount = async () => {
 
     {error && <Text style={styles.error}>{error}</Text>}
    </View>
-  </KeyboardAwareScrollView>
+    </View>
+
+
+       <Modal visible={showConflictModal} transparent={true} animationType="fade">
+        <View style={styles.modalContainer}>
+        <View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>Account Exists</Text>
+          <Text style={styles.modalMessage}>
+          This social account is already linked to another user. Would you like to sign in to that account instead?
+          Your current guest session will be discarded.
+          </Text>
+          <View style={styles.modalButtons}>
+          <TouchableOpacity style={styles.modalButton} onPress={() => {
+            setShowConflictModal(false);
+            setPendingCredential(null);
+          }}>
+            <Text>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.modalButton, styles.modalConfirmButton]} onPress={handleSignInToExistingAccount}>
+            <Text style={styles.modalConfirmButtonText}>Sign In</Text>
+          </TouchableOpacity>
+          </View>
+        </View>
+        </View>
+   </Modal>
+  </>
  );
 }
 
 // --- Add the new styles to your existing StyleSheet ---
 const styles = StyleSheet.create({
  outerContainer: { 
-  flexGrow: 1,
+    flex: 1,
     alignItems: 'center',
   backgroundColor: '#0b2215'
  },
  loginCard: { 
-  backgroundColor: 'white', borderRadius: 12, padding: 24, width: '100%', maxWidth: 400, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5, flexGrow: 1
+  backgroundColor: 'white', borderTopLeftRadius: 12, borderTopRightRadius: 12, padding: 24, width: '100%', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5
  },
   loginCardUpper: {
     flexDirection: 'row', alignItems:'center', marginBottom: 24,
   },
  heading: { fontSize: 24, fontWeight: '600', textAlign: 'center', flex: 1, },
- primaryButton: { backgroundColor: '#106b23', paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
+ primaryButton: { backgroundColor: primary, paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
  appleButton: { height: 52, marginBottom: 16 },
  disabledButton: { opacity: 0.6 },
@@ -518,7 +522,7 @@ const styles = StyleSheet.create({
  modalButton: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, minWidth: 100, alignItems: 'center' },
  modalConfirmButton: { backgroundColor: '#4285F4' },
  modalConfirmButtonText: { color: 'white', fontWeight: 'bold' },
- logo: { padding: 20, marginTop:100, marginBottom: 80 },
+ logo: { padding: 20},
  logoText: { fontSize: 32, fontWeight: 'bold' },
  googleButton: {
   backgroundColor: '#FFFFFF',
@@ -595,4 +599,10 @@ const styles = StyleSheet.create({
   paddingLeft: 10,
   alignSelf: 'flex-start'
  },
+ logoContainer: {
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexDirection: 'column',
+  flexGrow: 1
+ }
 });

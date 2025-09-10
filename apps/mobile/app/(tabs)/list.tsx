@@ -295,35 +295,36 @@ export default function HomeScreen() {
         }
     };
 
-    const handleToggleCookbook = async (meal: Meal) => {
-        if (!meal.recipeId) return;
+    const handleToggleCookbookById = async (recipeId: string) => {
+        const isInCookbook = cookbookRecipeIds.has(recipeId);
+        const originalCookbookIds = new Set(cookbookRecipeIds);
 
-        const isInCookbook = cookbookRecipeIds.has(meal.recipeId);
-        const originalCookbookIds = new Set(cookbookRecipeIds); // For rollback on error
-
-        // Optimistic UI update
         setCookbookRecipeIds(prev => {
             const newSet = new Set(prev);
             if (isInCookbook) {
-                newSet.delete(meal.recipeId!);
+                newSet.delete(recipeId);
             } else {
-                newSet.add(meal.recipeId!);
+                newSet.add(recipeId);
             }
             return newSet;
         });
 
         try {
             if (isInCookbook) {
-                await removeUserCookbookRecipe(meal.recipeId);
+                await removeUserCookbookRecipe(recipeId);
             } else {
-                await addUserCookbookRecipe(meal.recipeId);
+                await addUserCookbookRecipe(recipeId);
             }
         } catch (error) {
             console.error(`Failed to ${isInCookbook ? 'remove from' : 'add to'} cookbook:`, error);
             Alert.alert("Error", `Could not update your cookbook. Please try again.`);
-            // Rollback on error
             setCookbookRecipeIds(originalCookbookIds);
         }
+    };
+
+    const handleToggleCookbook = async (meal: Meal) => {
+        if (!meal.recipeId) return;
+        await handleToggleCookbookById(meal.recipeId);
     };
     
     const handleAddItem = (isSection = false) => {
@@ -502,8 +503,16 @@ export default function HomeScreen() {
                     </Animated.View>
                 </TouchableOpacity>
             </View>
-            {/* TODO: pass isInCookbook and onCookbookUpdate */}
-            <ViewRecipeModal isVisible={!!recipeToViewId} onClose={() => setRecipeToViewId(null)} recipeId={recipeToViewId} onEdit={handleEditRecipe} />
+            <ViewRecipeModal
+                isVisible={!!recipeToViewId}
+                onClose={() => setRecipeToViewId(null)}
+                recipeId={recipeToViewId}
+                onEdit={handleEditRecipe}
+                isInCookbook={recipeToViewId ? cookbookRecipeIds.has(recipeToViewId) : false}
+                onCookbookUpdate={() => {
+                    if (recipeToViewId) handleToggleCookbookById(recipeToViewId);
+                }}
+            />
             <AddEditRecipeModal isVisible={!!recipeToEdit} onClose={() => setRecipeToEdit(null)} mealForRecipe={recipeToEdit} onRecipeSave={handleRecipeSaved} />
             <MealSuggestionsModal isVisible={isSuggestionModalVisible} onClose={() => setSuggestionModalVisible(false)} onAddSelectedMeals={handleAddMealsFromSuggestion} listId={selectedList?.id ?? ''} />
         </View>

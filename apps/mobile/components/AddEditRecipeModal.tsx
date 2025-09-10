@@ -5,11 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import uuid from 'react-native-uuid';
-import { getRecipe, importRecipeFromUrl, saveRecipe } from '../utils/api';
-
-// TODO the photoURL saving is not working. also on rate-meal. 
-// 1. some photo pickers in this project are saving local file:// URLs, need to use that for local state but upload to firebase storage before making API POST. (see profile pic saving for example which is working correctly.) 
-// 2. I don't even think we have a post with recipe ID for edits, it's just creating a new one?
+import { getRecipe, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 
 interface AddEditRecipeModalProps {
   isVisible: boolean;
@@ -78,15 +74,22 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   const handleSaveRecipe = async () => {
     if (!editingRecipe || !mealForRecipe) return;
   
-    // Pass the full recipe object, including the ID, to the API.
-    // The `saveRecipe` function should handle create vs. update.
-    const recipeToSave: Recipe = {
-      ...editingRecipe,
-      ingredients: (editingRecipe.ingredients || []).filter(i => (i.name ?? '').trim() !== ''),
-      instructions: (editingRecipe.instructions || []).filter(i => (i ?? '').trim() !== ''),
-    };
-  
+    if(editingRecipe.photoURL) {
+      try {
+        editingRecipe.photoURL = await uploadRecipePhoto(editingRecipe.photoURL, editingRecipe.id);
+      } catch(e) {
+        console.error("Failed to save recipe", e);
+        Alert.alert("Error", "Could not save the recipe.");
+        return;
+      }
+    }
     try {
+      const recipeToSave: Recipe = {
+        ...editingRecipe,
+        ingredients: (editingRecipe.ingredients || []).filter(i => (i.name ?? '').trim() !== ''),
+        instructions: (editingRecipe.instructions || []).filter(i => (i ?? '').trim() !== ''),
+      };
+
       const savedRecipe = await saveRecipe(recipeToSave);
       const updatedMeal = { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name };
       

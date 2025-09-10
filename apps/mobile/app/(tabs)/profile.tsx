@@ -1,9 +1,9 @@
 import Cookbook from '@/components/Cookbook';
 import { useAuth } from '@/context/AuthContext';
 import { Recipe } from '@/types/types';
-import { getUserCookbook } from '@/utils/api';
+import { getUserCookbook, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
-import { auth, storage } from '@/utils/firebase';
+import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
 import { toReadablePhone } from '@/utils/utils'; // Assuming this utility is still needed for the settings modal
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -11,7 +11,6 @@ import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { updateEmail, updateProfile } from 'firebase/auth';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -209,17 +208,8 @@ export default function UserProfile() {
         if (!newPhotoUri) return;
         setLoading(true);
         try {
-            const userToUpdate = auth.currentUser;
-            if (!userToUpdate) throw new Error("User not found");
-            let finalPhotoURL = newPhotoUri;
-            if (newPhotoUri.startsWith('file://')) {
-                const response = await fetch(newPhotoUri);
-                const blob = await response.blob();
-                const storageRef = ref(storage, `profile_images/${userToUpdate.uid}`);
-                await uploadBytes(storageRef, blob);
-                finalPhotoURL = await getDownloadURL(storageRef);
-            }
-            await updateProfile(userToUpdate, { photoURL: finalPhotoURL });
+            const url = await uploadUserPhoto(newPhotoUri);
+            await updateProfile(auth.currentUser!, { photoURL: url });
             refreshAuthUser();
         } catch (err) {
             Alert.alert("Error", "Could not update profile picture.");

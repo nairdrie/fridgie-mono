@@ -1,5 +1,3 @@
-// TODO: Replace alerts, specifically Added to Cookbook! (an animated thumbs up, then route.)
-
 import { Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getRecipe, submitRecipeFeedback } from '@/utils/api';
 import { primary } from '@/utils/styles';
@@ -7,10 +5,11 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     Image,
     StyleSheet,
     Text,
@@ -42,6 +41,8 @@ export default function RateMealScreen() {
     const [feedback, setFeedback] = useState('');
     const [step, setStep] = useState<'rating' | 'feedback' | 'liked' | 'submitted'>('rating');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [showAddedToCookbook, setShowAddedToCookbook] = useState(false);
+    const animatedValue = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
         if (!recipeId) {
@@ -71,16 +72,16 @@ export default function RateMealScreen() {
     const handleLike = async () => {
         setIsSubmitting(true);
         try {
-        await submitRecipeFeedback(recipe!.id, 'liked');
-        if (mealId) {
-            await markMealAsRated(mealId);
-        }
-        setStep('liked');
+            await submitRecipeFeedback(recipe!.id, 'liked');
+            if (mealId) {
+                await markMealAsRated(mealId);
+            }
+            setStep('liked');
         } catch (error) {
-        console.error("Failed to submit 'like' feedback:", error);
-        Alert.alert("Error", "Could not save your rating. Please try again.");
+            console.error("Failed to submit 'like' feedback:", error);
+            Alert.alert("Error", "Could not save your rating. Please try again.");
         } finally {
-        setIsSubmitting(false);
+            setIsSubmitting(false);
         }
     };
     
@@ -107,18 +108,24 @@ export default function RateMealScreen() {
 
     const handleAddToCookbook = async () => {
         setIsSubmitting(true);
-        try {
-        await addUserCookbookRecipe(recipe!.id);
-        Alert.alert("Added to Cookbook!", `${recipe?.name} has been saved.`);
-        if (mealId) {
-            await markMealAsRated(mealId);
-        }
-        router.replace('/list');
+        try { 
+            await addUserCookbookRecipe(recipe!.id);
+            setShowAddedToCookbook(true);
+            Animated.timing(animatedValue, {
+                toValue: 1,
+                duration: 500,
+                useNativeDriver: true,
+            }).start(async () => {
+                // Wait for animation to finish
+                if (mealId) {
+                    await markMealAsRated(mealId);
+                }
+                setTimeout(() => router.replace('/list'), 1000); // Wait a bit after animation
+            });
         } catch (error) {
-        console.error("Failed to add to cookbook:", error);
-        Alert.alert("Error", "Could not add recipe to your cookbook. Please try again.");
-        } finally {
-        setIsSubmitting(false);
+            console.error("Failed to add to cookbook:", error);
+            Alert.alert("Error", "Could not add recipe to your cookbook. Please try again.");
+            setIsSubmitting(false);
         }
     };
 
@@ -194,77 +201,94 @@ export default function RateMealScreen() {
             contentContainerStyle={styles.safeArea}
         >
             <View style={styles.container}>
-                {step === 'rating' && (
+                {showAddedToCookbook ? (
+                    <Animated.View style={{
+                        opacity: animatedValue,
+                        alignItems: 'center',
+                        transform: [{
+                            scale: animatedValue.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0.5, 1.1]
+                            })
+                        }]
+                    }}>
+                        <Ionicons name="thumbs-up" size={100} color={primary} />
+                        <Text style={[styles.title, { marginTop: 20 }]}>Added to Cookbook!</Text>
+                    </Animated.View>
+                ) : (
                     <>
-                        <Text style={styles.title}>How was the</Text>
-                        <Text style={styles.recipeName}>{recipe.name}?</Text>
-                        
-                        {recipe.photoURL && <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />}
-                        
-                        <View style={styles.ratingActions}>
-                            <TouchableOpacity onPress={handleDislike} style={[styles.ratingButton, styles.dislikeButton]}>
-                                <Ionicons name="thumbs-down" size={32} color="#D9534F" />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={handleLike} style={[styles.ratingButton, styles.likeButton]}>
-                                <Ionicons name="thumbs-up" size={32} color="#5CB85C" />
-                            </TouchableOpacity>
-                        </View>
-                    </>
-                )}
+                        {step === 'rating' && (
+                            <>
+                                <Text style={styles.title}>How was the</Text>
+                                <Text style={styles.recipeName}>{recipe.name}?</Text>
 
-                {step === 'feedback' && (
-                    <>
-                        <Text style={styles.title}>Sorry you didn't like it!</Text>
-                        <Text style={styles.subtitle}>What could be better?</Text>
-                        <TextInput
-                            style={styles.input}
-                            placeholder="e.g., Too salty, instructions were unclear..."
-                            value={feedback}
-                            onChangeText={setFeedback}
-                            placeholderTextColor="#999"
-                            multiline
-                        />
-                        <TouchableOpacity
-                            style={[styles.primaryButton, (isSubmitting || !feedback) && styles.disabledButton]}
-                            onPress={handleSubmitFeedback}
-                            disabled={isSubmitting || !feedback}
-                        >
-                            {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Submit Feedback</Text>}
-                        </TouchableOpacity>
-                    </>
-                )}
+                                {recipe.photoURL && <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />}
 
-                {step === 'liked' && (
-                    <>
-                        <Text style={styles.title}>Glad you liked it!</Text>
-                        { recipe.photoURL ? (
-                             <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
-                        ) : (
-                             <View style={styles.mainImage}>
-                                <TouchableOpacity style={styles.actionChip} onPress={handlePickImage}>
-                                    <Ionicons name="camera-outline" size={16} color="white" />
-                                    <Text style={styles.actionChipText}>Add a Photo</Text>
-                                </TouchableOpacity>
-                             </View>
+                                <View style={styles.ratingActions}>
+                                    <TouchableOpacity onPress={handleDislike} style={[styles.ratingButton, styles.dislikeButton]}>
+                                        <Ionicons name="thumbs-down" size={32} color="#D9534F" />
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={handleLike} style={[styles.ratingButton, styles.likeButton]}>
+                                        <Ionicons name="thumbs-up" size={32} color="#5CB85C" />
+                                    </TouchableOpacity>
+                                </View>
+                            </>
                         )}
-                        <Text style={styles.subtitle}>Would you like to add it to your personal cookbook for next time?</Text>
-                        <TouchableOpacity style={styles.primaryButton} onPress={handleAddToCookbook}>
-                            <Text style={styles.primaryButtonText}>Yes, Add to Cookbook</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.secondaryButton} onPress={handleSkipAddToCookbook}>
-                            <Text style={styles.secondaryButtonText}>No, Thanks</Text>
-                        </TouchableOpacity>
+
+                        {step === 'feedback' && (
+                            <>
+                                <Text style={styles.title}>Sorry you didn't like it!</Text>
+                                <Text style={styles.subtitle}>What could be better?</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="e.g., Too salty, instructions were unclear..."
+                                    value={feedback}
+                                    onChangeText={setFeedback}
+                                    placeholderTextColor="#999"
+                                    multiline
+                                />
+                                <TouchableOpacity
+                                    style={[styles.primaryButton, (isSubmitting || !feedback) && styles.disabledButton]}
+                                    onPress={handleSubmitFeedback}
+                                    disabled={isSubmitting || !feedback}
+                                >
+                                    {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Submit Feedback</Text>}
+                                </TouchableOpacity>
+                            </>
+                        )}
+
+                        {step === 'liked' && (
+                            <>
+                                <Text style={styles.title}>Glad you liked it!</Text>
+                                {recipe.photoURL ? (
+                                    <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
+                                ) : (
+                                    <View style={styles.mainImage}>
+                                        <TouchableOpacity style={styles.actionChip} onPress={handlePickImage}>
+                                            <Ionicons name="camera-outline" size={16} color="white" />
+                                            <Text style={styles.actionChipText}>Add a Photo</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+                                <Text style={styles.subtitle}>Would you like to add it to your personal cookbook for next time?</Text>
+                                <TouchableOpacity style={[styles.primaryButton, isSubmitting && styles.disabledButton]} onPress={handleAddToCookbook} disabled={isSubmitting}>
+                                    {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Yes, Add to Cookbook</Text>}
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.secondaryButton} onPress={handleSkipAddToCookbook}>
+                                    <Text style={styles.secondaryButtonText}>No, Thanks</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+
+                        {step === 'submitted' && (
+                            <>
+                                <Ionicons name="checkmark-circle-outline" size={80} color={primary} />
+                                <Text style={styles.title}>Thanks!</Text>
+                                <Text style={styles.subtitle}>Your feedback helps us make better suggestions.</Text>
+                            </>
+                        )}
                     </>
                 )}
-                
-                {step === 'submitted' && (
-                     <>
-                        <Ionicons name="checkmark-circle-outline" size={80} color={primary} />
-                        <Text style={styles.title}>Thanks!</Text>
-                        <Text style={styles.subtitle}>Your feedback helps us make better suggestions.</Text>
-                    </>
-                )}
-                
             </View>
         </KeyboardAwareScrollView>
     );

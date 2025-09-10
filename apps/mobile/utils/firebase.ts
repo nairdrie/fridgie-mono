@@ -1,7 +1,10 @@
 // utils/firebase.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { browserLocalPersistence, getReactNativePersistence, initializeAuth } from 'firebase/auth'; // TODO: this is just a TS error, it compiles and works
+// @ts-ignore - This is a known issue with Firebase JS SDK in a universal React Native project.
+// The bundler will correctly resolve the platform-specific persistence, but TypeScript
+// tries to validate both, leading to an error. The code compiles and works correctly.
+import { browserLocalPersistence, getReactNativePersistence, initializeAuth } from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
 import { getStorage } from 'firebase/storage';
 import { Platform } from 'react-native';

@@ -1,16 +1,17 @@
 // components/Cookbook.tsx
-
+// TODO DRAG TO REFRESH
 import { useLists } from '@/context/ListContext';
 import { Item, List, Meal, Recipe } from '@/types/types';
 import { addRecipeToList } from '@/utils/api'; // You'll need to create this API function
 import { getWeekLabel } from '@/utils/date';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
     Modal,
+    RefreshControl,
     SafeAreaView,
     StyleSheet,
     Text,
@@ -43,6 +44,8 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
 
+    const [isRefreshing, setIsRefreshing] = useState(false); 
+
     const checkmarkAnimation = useSharedValue(0);
 
     useEffect(() => {
@@ -52,6 +55,17 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
             checkmarkAnimation.value = 0;
         }
     }, [submissionState]);
+
+    const handleRefresh = useCallback(async () => {
+        setIsRefreshing(true); // Show the spinner
+        try {
+        await onRefresh(); // Call the refresh function passed from the parent
+        } catch (error) {
+        console.error('Failed to refresh recipes', error);
+        } finally {
+        setIsRefreshing(false); // Hide the spinner
+        }
+    }, [onRefresh]);
 
     const animatedCheckmarkStyle = useAnimatedStyle(() => ({
         opacity: checkmarkAnimation.value,
@@ -190,6 +204,14 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
                 contentContainerStyle={{ paddingBottom: 20 }}
                 ListEmptyComponent={
                     <Text style={styles.emptyText}>No recipes match your search.</Text>
+                }
+                refreshControl={
+                    <RefreshControl
+                        refreshing={isRefreshing}
+                        onRefresh={handleRefresh}
+                        tintColor={primary} // Optional: customizes the spinner color on iOS
+                        colors={[primary]} // Optional: customizes the spinner color on Android
+                    />
                 }
             />
 

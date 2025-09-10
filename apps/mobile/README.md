@@ -1,4 +1,6 @@
-TODO make more descriptive
+# Fridgie: Your Smart Meal Planner
+
+Fridgie is a mobile application built with Expo that helps you plan your meals, manage your recipes and cookbook, and create smart grocery lists.
 
 # Welcome to your Expo app 👋
 
