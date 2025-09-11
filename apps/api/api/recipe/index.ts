@@ -17,7 +17,15 @@ route.post('/', async (c) => {
     createdAt: new Date(),
   }
 
-  const docRef = await fs.collection('recipes').add(recipeData)
+  const recipeDoc = await fs.collection('recipes').doc(id).get()
+
+  let docRef;
+  if (!recipeDoc.exists) {
+    docRef = await fs.collection('recipes').add(recipeData)
+  } else {
+    docRef = fs.collection('recipes').doc(id)
+    await docRef.update(recipeData)
+  }
   
   return c.json({ id: docRef.id, ...recipeData })
 })

@@ -4,8 +4,9 @@ import { serve } from 'bun'
 import fg from 'fast-glob'
 import { cors } from 'hono/cors'
 import { ref, onValue } from 'firebase/database'
-import { clientRtdb } from './utils/firebase'      // adjust if needed
+import { adminAuth, adminRtdb, clientRtdb } from './utils/firebase'      // adjust if needed
 import type { ServerWebSocket } from 'bun'
+import type { DataSnapshot } from 'firebase-admin/database'
 
 // 1️⃣ Hono app for HTTP routes
 const app = new Hono()
@@ -35,16 +36,38 @@ for (const file of files) {
 serve({
   idleTimeout: 30,
   // Step 1: route HTTP & trigger WS upgrade
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url)
 
     // If this is our WS path, do the upgrade
     if (url.pathname.startsWith('/api/ws/list/')) {
-      const listId = url.pathname.split('/').pop()!
-      const groupId = url.searchParams.get('groupId')
-      server.upgrade(req, { data: { listId, groupId } })
-      // Must return a Response; 204 is safe since it's never sent
-      return new Response(null, { status: 204 })
+      const token = url.searchParams.get('token');
+      if (!token) {
+        // No token provided, reject the connection
+        return new Response('Missing authentication token', { status: 401 });
+      }
+      try {
+        // ✅ Verify the token using the Admin SDK
+        const decodedToken = await adminAuth.verifyIdToken(token);
+        const uid = decodedToken.uid;
+
+        // --- At this point, the user is AUTHENTICATED ---
+        // Now you can perform your AUTHORIZATION check (like groupAuth)
+        const groupId = url.searchParams.get('groupId');
+        // Example check: const isMember = await isUserInGroup(uid, groupId);
+        // if (!isMember) return new Response('Forbidden', { status: 403 });
+
+        const listId = url.pathname.split('/').pop()!;
+        
+        // ✅ Success! Upgrade the connection and pass the verified uid
+        server.upgrade(req, { data: { listId, groupId, uid } });
+        return new Response(null, { status: 204 });
+
+      } catch (error) {
+        // Token is invalid or expired, reject the connection
+        console.error("WebSocket auth error:", error);
+        return new Response('Invalid authentication token', { status: 401 });
+      }
     }
 
     // Otherwise, let Hono handle the HTTP request
@@ -52,22 +75,21 @@ serve({
   },
 
   // Step 2: Bun-native WebSocket handlers
-  // TODO: maybe use admin sdk here. depends once we set up access restrictions for who can read/write from which group. 
   websocket: {
     // onOpen: subscribe to Firebase
-    open(ws: ServerWebSocket<{ groupId: string, listId: string; unsubscribe?: () => void }>) {
-      const { groupId, listId } = ws.data
-      const dbRef = ref(clientRtdb, `lists/${groupId}/${listId}`)
+    open(ws: ServerWebSocket<{ groupId: string; listId: string; uid: string; listener?: (snap: DataSnapshot) => void }>) {
+      const { groupId, listId, uid } = ws.data;
 
-      ws.data.unsubscribe = onValue(dbRef, (snap) => {
-        try {
-          ws.send(JSON.stringify(snap.val()))
-        } catch (err) {
-          console.error('WS send error:', err)
-        }
-      })
+      console.log(`✅ WebSocket opened for verified user: ${uid}`);
+      
+      // ✅ Now that the user is authorized, use the powerful adminRtdb
+      const dbRef = adminRtdb.ref(`lists/${groupId}/${listId}`);
+      
+      ws.data.listener = (snap: DataSnapshot) => {
+        ws.send(JSON.stringify(snap.val()));
+      };
+      dbRef.on('value', ws.data.listener);
     },
-
     // onMessage: optional client→server messages
     message(
       ws: ServerWebSocket<{ listId: string; unsubscribe?: () => void }>,
@@ -77,9 +99,12 @@ serve({
       // e.g. ws.send(`Echo: ${message}`)
     },
 
-    // onClose: clean up the Firebase listener
-    close(ws: ServerWebSocket<{ listId: string; unsubscribe?: () => void }>) {
-      ws.data.unsubscribe?.()
+    close(ws: ServerWebSocket<{ groupId: string; listId: string; uid: string; listener?: (snap: DataSnapshot) => void }>) {
+      const { groupId, listId } = ws.data;
+      if (ws.data.listener) {
+        const dbRef = adminRtdb.ref(`lists/${groupId}/${listId}`);
+        dbRef.off('value', ws.data.listener);
+      }
     }
   },
 })

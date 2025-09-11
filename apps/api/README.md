@@ -12,4 +12,10 @@ To run:
 bun run dev
 ```
 
-This project was created using `bun init` in bun v1.2.9. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+To container:
+
+```bash
+rm -rf node_modules bun.lock
+bun install --production
+docker build -t fridgie:0.x .
+```

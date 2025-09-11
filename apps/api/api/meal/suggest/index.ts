@@ -33,9 +33,9 @@ interface SuggestionRequestBody {
 // --- Hono Route Setup ---
 const route = new Hono();
 
-// --- API Client Initialization ---
+const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
 const openai = new OpenAI({
-    apiKey: Bun.env.OPENAI_API_KEY,
+  apiKey
 });
 
 const systemPrompt = `

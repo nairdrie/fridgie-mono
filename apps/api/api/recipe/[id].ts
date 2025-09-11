@@ -25,5 +25,4 @@ route.get('/', async (c) => {
   return c.json({ id: recipeDoc.id, ...recipeData })
 })
 
-
 export default route

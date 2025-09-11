@@ -15,10 +15,17 @@ const clientApp = initClientApp({
 
 export const clientRtdb = getClientDatabase(clientApp)
 
+let serviceAccount;
 // --- Server SDK (for admin operations)
-const serviceAccount = JSON.parse(
-  readFileSync('./utils/firebase-service-account.json', 'utf8')
-)
+if(process.env.FIREBASE_CREDENTIALS) {
+  serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS)
+}
+else {
+  serviceAccount = JSON.parse(
+    readFileSync('./utils/firebase-service-account.json', 'utf8')
+  )
+}
+
 
 if (!admin.apps.length) {
   admin.initializeApp({

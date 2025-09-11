@@ -9,12 +9,12 @@ import { type Item, type List, type Meal, type Recipe } from '@/utils/types'
 
 const route = new Hono()
 
-route.use('*', auth, groupAuth)
+route.use('*', auth)
 
 /**
  * Creates a new Meal on a List from a Recipe using a manual read-then-write operation.
  */
-route.post('/', async (c) => {
+route.post('/', groupAuth, async (c) => {
     const { groupId, listId, recipe } = await c.req.json<{
         groupId: string;
         listId: string;

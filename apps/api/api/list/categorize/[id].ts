@@ -10,8 +10,9 @@ const route = new Hono();
 
 route.use('*', auth, groupAuth)
 
+const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
 const openai = new OpenAI({
-  apiKey: Bun.env.OPENAI_API_KEY
+  apiKey
 });
 
 // Helper to normalize text for consistent cache keys
