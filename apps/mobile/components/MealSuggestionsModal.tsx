@@ -76,6 +76,7 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
             setMealPreferences(null);
             setIsSuggesting(false);
 
+            // TODO: CHECK ON PREFERENCES SETUP FOR NEW USERS
             try {
                 const prefs = await getMealPreferences();
                 setMealPreferences(prefs);

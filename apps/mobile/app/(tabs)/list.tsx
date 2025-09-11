@@ -95,53 +95,72 @@ export default function HomeScreen() {
 
     // Handles ALL incoming data (Initial Fetch + Real-time Updates)
     useEffect(() => {
-        if (!selectedList || !selectedGroup) {
-            setItems([]);
-            setMeals([]);
-            return;
-        }
+    if (!selectedList || !selectedGroup) {
+        setItems([]);
+        setMeals([]);
+        return;
+    }
 
-        const unsubscribe = listenToList(selectedGroup.id, selectedList.id, (list: List) => {
-            if (!list) {
-                console.warn(`Received null data for list ${selectedList.id}, ignoring update.`);
-                return;
-            }
+    // 1. Declare a variable to hold the real unsubscribe function later
+    let unsubscribe: () => void;
 
-            if (Date.now() < dirtyUntilRef.current) return;
-
-            const rawItems = Array.isArray(list.items) ? list.items : [];
-            const withOrder = rawItems
-                .map((item: Item) => ({ ...item, listOrder: item.listOrder ?? LexoRank.middle().toString() }))
-                .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
-
-            setItems(prev => {
-                const sameLength = prev.length === withOrder.length;
-                const sameAll = sameLength && prev.every((p, i) =>
-                    p.id === withOrder[i].id &&
-                    p.text === withOrder[i].text &&
-                    p.checked === withOrder[i].checked &&
-                    p.listOrder === withOrder[i].listOrder &&
-                    p.isSection === withOrder[i].isSection
-                );
-                if (sameAll) return prev;
-
-                if (withOrder.length === 0) {
-                    return [{
-                        id: uuid.v4() as string,
-                        text: '',
-                        checked: false,
-                        listOrder: LexoRank.middle().toString(),
-                        isSection: false,
-                    }];
+    // 2. Create an async function inside the effect
+    const setupListener = async () => {
+        try {
+            // 3. Await the promise to get the actual unsubscribe function
+            unsubscribe = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
+                if (!list) {
+                    console.warn(`Received null data for list ${selectedList.id}, ignoring update.`);
+                    return;
                 }
-                return withOrder;
+                if (Date.now() < dirtyUntilRef.current) return;
+
+                // --- ALL OF YOUR EXISTING LOGIC STAYS EXACTLY THE SAME ---
+                const rawItems = Array.isArray(list.items) ? list.items : [];
+                const withOrder = rawItems
+                    .map((item: Item) => ({ ...item, listOrder: item.listOrder ?? LexoRank.middle().toString() }))
+                    .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
+                
+                setItems(prev => {
+                    const sameLength = prev.length === withOrder.length;
+                    const sameAll = sameLength && prev.every((p, i) =>
+                        p.id === withOrder[i].id &&
+                        p.text === withOrder[i].text &&
+                        p.checked === withOrder[i].checked &&
+                        p.listOrder === withOrder[i].listOrder &&
+                        p.isSection === withOrder[i].isSection
+                    );
+                    if (sameAll) return prev;
+                    if (withOrder.length === 0) {
+                        return [{
+                            id: uuid.v4() as string,
+                            text: '',
+                            checked: false,
+                            listOrder: LexoRank.middle().toString(),
+                            isSection: false,
+                        }];
+                    }
+                    return withOrder;
+                });
+                setMeals(Array.isArray(list.meals) ? list.meals : []);
+                // --- END OF YOUR EXISTING LOGIC ---
             });
+        } catch (error) {
+            console.error("Failed to set up list listener:", error);
+        }
+    };
 
-            setMeals(Array.isArray(list.meals) ? list.meals : []);
-        });
+    // Call the async setup function
+    setupListener();
 
-        return () => unsubscribe();
-    }, [selectedList, selectedGroup]);
+    // 4. The useEffect cleanup function is now correct
+    return () => {
+        // It checks if `unsubscribe` was successfully assigned before calling it
+        if (unsubscribe) {
+            unsubscribe();
+        }
+    };
+}, [selectedList, selectedGroup]);
 
     // Handles ALL outgoing data (Debounced Saving)
     useEffect(() => {

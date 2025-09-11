@@ -3,6 +3,7 @@
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import {
+  getAuth,
   getIdToken,
   signInAnonymously,
   User
@@ -297,32 +298,51 @@ export const getMealPreferences = async (): Promise<MealPreferences> => {
 
 // ─────── REAL-TIME UPDATES ──────────────────────────────────────────────────
 
-export function listenToList(
+export async function listenToList(
   groupId: string,
   id: string,
   onData: (data: any) => void,
   onError?: (err: any) => void
 ) {
-  const wsUrl = BASE_URL.replace(/^http/, "ws")
-  const ws = new WebSocket(`${wsUrl}/ws/list/${id}?groupId=${groupId}`)
+  const auth = getAuth();
+  const user = auth.currentUser;
+
+  // 3. Handle the case where no user is logged in
+  if (!user) {
+    const authError = new Error("User is not authenticated.");
+    console.error(authError);
+    onError?.(authError);
+    // Return an empty unsubscribe function to prevent crashes
+    return () => {}; 
+  }
+
+  // 4. Get the ID token asynchronously
+  const idToken = await user.getIdToken();
+
+  // The rest of your code is now correct
+  const wsUrl = BASE_URL.replace(/^http/, "ws");
+  const ws = new WebSocket(
+    `${wsUrl}/ws/list/${id}?groupId=${groupId}&token=${idToken}`
+  );
 
   ws.onmessage = (e) => {
     try {
-      onData(JSON.parse(e.data))
+      onData(JSON.parse(e.data));
     } catch (err) {
-      console.error("WS parse error", err)
+      console.error("WS parse error", err);
     }
-  }
+  };
   ws.onerror = (err) => {
-    console.warn("WS error", err)
-    onError?.(err)
-  }
+    console.warn("WS error", err);
+    onError?.(err);
+  };
   ws.onclose = () => {
-  }
+    // You could optionally call onError here as well
+  };
 
   return () => {
-    if (ws.readyState <= 1) ws.close()
-  }
+    if (ws.readyState <= 1) ws.close();
+  };
 }
 
 // lib/api.ts
