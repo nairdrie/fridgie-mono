@@ -1,6 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import { Group, UserProfile } from '@/types/types';
-import { createGroup, searchUsers } from '@/utils/api'; // NOTE: You will need to add API functions for updating/deleting groups
+import { createGroup, searchUsers, sendGroupInvitation } from '@/utils/api'; // NOTE: You will need to add API functions for updating/deleting groups
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -53,7 +53,6 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<User[]>([]);
     const [isSearching, setIsSearching] = useState(false);
-    const [invitedMembers, setInvitedMembers] = useState<User[]>([]);
 
     // Debounced search handler, encapsulated within the item
     const debouncedSearch = React.useCallback(
@@ -67,12 +66,10 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                 const results = await searchUsers(query);
                 const currentUserUid = auth.currentUser?.uid;
                 const existingMemberUids = new Set(members.map(m => m.uid));
-                const invitedMemberUids = new Set(invitedMembers.map(m => m.uid));
 
                 const filteredResults = results.filter(u =>
                     u.uid !== currentUserUid &&
-                    !existingMemberUids.has(u.uid) &&
-                    !invitedMemberUids.has(u.uid)
+                    !existingMemberUids.has(u.uid)
                 );
                 setSearchResults(filteredResults);
             } catch (error) {
@@ -81,7 +78,7 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                 setIsSearching(false);
             }
         }, 300),
-        [members, invitedMembers]
+        [members]
     );
 
     const handleSearchChange = (text: string) => {
@@ -94,7 +91,6 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     if (isExpanded) {
         setIsConfirmingDelete(false);
         setEditedName(group.name);
-        setInvitedMembers([]);
         setSearchResults([]);
         setSearchQuery('');
 
@@ -103,13 +99,17 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     }
 }, [isExpanded, group]);
 
-    const handleInviteUser = (user: User) => {
-        setInvitedMembers(prev => [...prev, user]);
-        setSearchResults(prev => prev.filter(u => u.uid !== user.uid));
-    };
-
-    const handleRemoveInvitedUser = (user: User) => {
-        setInvitedMembers(prev => prev.filter(u => u.uid !== user.uid));
+    const handleInviteUser = async (user: User) => {
+        // OLD: setInvitedMembers(...)
+        // NEW: Call the API
+        try {
+            await sendGroupInvitation(group.id, user.uid);
+            // Give user feedback
+            Alert.alert("Success", `Invitation sent to ${user.displayName}.`);
+            setSearchResults(prev => prev.filter(u => u.uid !== user.uid)); // Remove from search results
+        } catch (error) {
+            Alert.alert("Error", "Could not send invitation.");
+        }
     };
     
     const handleRemoveExistingMember = (user: UserProfile) => {
@@ -129,7 +129,6 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
             // NOTE: Add your API call to update the group here
             // await updateGroup(group.id, {
             //     name: editedName,
-            //     addMembers: invitedMembers.map(m => m.uid),
             // });
             console.log("Saving changes for group:", group.id);
             onGroupUpdated(); // Refresh the main list
@@ -190,13 +189,6 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                             </View>
                         ))
                     }
-                    {invitedMembers.map(member => (
-                         <View key={member.uid} style={[styles.userItem, {backgroundColor: '#eef2f5'}]}>
-                            <Image source={{ uri: member.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
-                            <Text style={styles.userName}>{member.displayName}</Text>
-                            <TouchableOpacity onPress={() => handleRemoveInvitedUser(member)}><Ionicons name="close-circle" size={24} color="#ff3b30" /></TouchableOpacity>
-                        </View>
-                    ))}
                     
                     <View style={styles.modalFooter}>
                          <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => onToggleExpand(group)}>
