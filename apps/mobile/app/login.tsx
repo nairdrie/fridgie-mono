@@ -532,7 +532,7 @@ const styles = StyleSheet.create({
   modalMessage: { textAlign: 'center', marginBottom: 20, fontSize: 16, lineHeight: 22 },
   modalButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
   modalButton: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, minWidth: 100, alignItems: 'center' },
-  modalConfirmButton: { backgroundColor: '#4285F4' },
+  modalConfirmButton: { backgroundColor: primary },
   modalConfirmButtonText: { color: 'white', fontWeight: 'bold' },
   logo: { padding: 20 },
   googleButton: {

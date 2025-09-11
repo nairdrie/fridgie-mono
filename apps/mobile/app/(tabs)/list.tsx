@@ -5,6 +5,7 @@ import GroceryListView from '@/components/GroceryListView'; // Import the new co
 import MealPlanView from '@/components/MealPlanView';
 import MealSuggestionsModal from '@/components/MealSuggestionsModal';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
+import { useAuth } from '@/context/AuthContext';
 import { useLists } from '@/context/ListContext';
 import { Item, List, ListView, Meal, Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
@@ -35,6 +36,7 @@ import { addUserCookbookRecipe, categorizeList, getUserCookbook, listenToList, r
 export default function HomeScreen() {
     const router = useRouter();
     const { selectedList, isLoading, selectedGroup, selectedView } = useLists();
+    const { user } = useAuth();
     
     const [meals, setMeals] = useState<Meal[]>([]);
     const [items, setItems] = useState<Item[]>([]);
@@ -342,6 +344,10 @@ export default function HomeScreen() {
     };
 
     const handleToggleCookbook = async (meal: Meal) => {
+        if(!user || user.isAnonymous) {
+            router.navigate('/profile');
+            return;
+        }
         if (!meal.recipeId) return;
         await handleToggleCookbookById(meal.recipeId);
     };

@@ -140,6 +140,11 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
                     }
 
                     <Text style={styles.sectionTitle}>Preferences</Text>
+                    <TouchableOpacity style={styles.manageGroups} onPress={() => router.push('/groups')}>
+                        <Ionicons name="people" size={16} color={primary}></Ionicons>
+                        <Text style={styles.editMealPreferencesText}>Manage Groups</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity style={styles.editMealPreferences} onPress={() => router.push('/meal-preferences')}>
                         <Ionicons name="open-outline" size={16} color={primary}></Ionicons>
                         <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
@@ -177,6 +182,8 @@ export default function UserProfile() {
 
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
     const [isCookbookLoading, setIsCookbookLoading] = useState(true);
+
+     const router = useRouter(); 
 
     const fetchCookbook = useCallback(async () => {
         try {
@@ -243,13 +250,40 @@ export default function UserProfile() {
         setEditPhotoModalVisible(true);
     };
 
+    if (!user || user.isAnonymous) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.ctaContainer}>
+                    <Ionicons name="person-add-outline" size={60} color={primary} style={styles.ctaIcon} />
+                    <Text style={styles.ctaTitle}>Create an Account</Text>
+                    <Text style={styles.ctaSubtitle}>
+                        Ready for the full experience? Sign up or log in to:
+                    </Text>
+
+                    <View style={styles.benefitsContainer}>
+                        <View style={styles.ctaBenefit}>
+                            <Ionicons name="bookmark-outline" size={24} color={primary} />
+                            <Text style={styles.ctaBenefitText}>Save recipes to your personal cookbook</Text>
+                        </View>
+                        <View style={styles.ctaBenefit}>
+                            <Ionicons name="people-outline" size={24} color={primary} />
+                            <Text style={styles.ctaBenefitText}>Collaborate on shopping lists and meal plans</Text>
+                        </View>
+                    </View>
+
+                    <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/login')}>
+                        <Text style={styles.primaryButtonText}>Sign Up or Log In</Text>
+                    </TouchableOpacity>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
         <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
-                    <Ionicons name="settings-outline" size={28} color="#000" />
-                </TouchableOpacity>
-            </View>
+            <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
+                <Ionicons name="settings-outline" size={28} color="#000" />
+            </TouchableOpacity>
             <View style={styles.profileContainer}>
                 <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
                     {user?.photoURL && (
@@ -273,7 +307,7 @@ export default function UserProfile() {
                     <Text style={styles.statLabel}>Followers</Text>
                 </View>
                 <View style={styles.statItem}>
-                    <Text style={styles.statNumber}>{isCookbookLoading ? '...' : cookbook.length}</Text>
+                    <Text style={styles.statNumber}>{cookbook.length || 0}</Text>
                     <Text style={styles.statLabel}>Recipes</Text>
                 </View>
             </View>
@@ -358,8 +392,11 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     settingsButton: {
-        flex: 1, // Take up remaining space
-        alignItems: 'flex-end',
+        position:'absolute',
+        top: Constants.statusBarHeight,
+        marginTop:10,
+        marginRight:20,
+        right:0
     },
     profileContainer: {
         alignItems: 'center',
@@ -576,6 +613,13 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-start',
         borderRadius: 8,
     },
+    manageGroups: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        borderRadius: 8,
+        marginBottom: 16,
+    },
     editMealPreferencesText: {
         color: primary,
         fontSize: 16,
@@ -592,5 +636,43 @@ const styles = StyleSheet.create({
         backgroundColor: primary,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+     ctaContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 30,
+        backgroundColor: '#fff',
+    },
+    ctaIcon: {
+        marginBottom: 20,
+    },
+    ctaTitle: {
+        fontSize: 26,
+        fontWeight: 'bold',
+        textAlign: 'center',
+        marginBottom: 12,
+        color: '#212529',
+    },
+    ctaSubtitle: {
+        fontSize: 16,
+        color: '#6c757d',
+        textAlign: 'center',
+        marginBottom: 40,
+        lineHeight: 24,
+    },
+    benefitsContainer: {
+        alignSelf: 'stretch',
+    },
+    ctaBenefit: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    ctaBenefitText: {
+        fontSize: 16,
+        marginLeft: 15,
+        color: '#495057',
+        flex: 1, // Allow text to wrap
     },
 });

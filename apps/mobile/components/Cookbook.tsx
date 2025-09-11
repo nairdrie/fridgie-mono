@@ -1,5 +1,4 @@
 // components/Cookbook.tsx
-// TODO DRAG TO REFRESH
 import { useLists } from '@/context/ListContext';
 import { Item, List, Meal, Recipe } from '@/types/types';
 import { addRecipeToList } from '@/utils/api'; // You'll need to create this API function

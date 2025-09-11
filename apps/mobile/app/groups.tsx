@@ -1,8 +1,6 @@
-// screens/UserProfile.tsx
-
 import { useAuth } from '@/context/AuthContext';
-import { Group } from '@/types/types';
-import { createGroup, searchUsers } from '@/utils/api'; // Import searchUsers
+import { Group, UserProfile } from '@/types/types';
+import { createGroup, searchUsers } from '@/utils/api'; // NOTE: You will need to add API functions for updating/deleting groups
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -12,12 +10,13 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { User } from 'firebase/auth';
 import { debounce } from 'lodash';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     FlatList,
     Image,
+    LayoutAnimation,
     Modal,
     SafeAreaView,
     ScrollView,
@@ -28,24 +27,37 @@ import {
     View
 } from 'react-native';
 
-export default function GroupsScreen() {
-    const router = useRouter();
-    const { groups, selectedGroup, selectGroup, refreshAuthUser } = useAuth();
-    const [loading, setLoading] = useState(false);
 
-    // --- Create Group Modal State ---
-    const [isGroupModalVisible, setGroupModalVisible] = useState(false);
-    const [newGroupName, setNewGroupName] = useState('');
+// TODO: member invitations needs a rework. we cant just force people into groups lol.
+
+/**
+ * A new, self-contained component for rendering and managing a single group item.
+ * This encapsulates all the logic for expanding, showing members, and editing.
+ */
+const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, onGroupUpdated }: {
+    group: Group;
+    isSelected: boolean;
+    isExpanded: boolean;
+    onSelect: (group: Group) => void;
+    onToggleExpand: (group: Group) => void;
+    onGroupUpdated: () => void; // Function to refresh the main group list
+}) => {
+    // --- State for the expanded/editing view ---
+    const [members, setMembers] = useState<UserProfile[]>([]);
+    const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+
+    // Editing state
+    const [editedName, setEditedName] = useState(group.name);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<User[]>([]);
-    const [invitedMembers, setInvitedMembers] = useState<User[]>([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [invitedMembers, setInvitedMembers] = useState<User[]>([]);
 
-
-    
-    // --- Debounced Search Handler ---
-    const debouncedSearch = useCallback(
-        debounce(async (query:any) => {
+    // Debounced search handler, encapsulated within the item
+    const debouncedSearch = React.useCallback(
+        debounce(async (query: string) => {
             if (query.length < 2) {
                 setSearchResults([]);
                 setIsSearching(false);
@@ -53,7 +65,200 @@ export default function GroupsScreen() {
             }
             try {
                 const results = await searchUsers(query);
-                // Filter out the current user and already invited members from results
+                const currentUserUid = auth.currentUser?.uid;
+                const existingMemberUids = new Set(members.map(m => m.uid));
+                const invitedMemberUids = new Set(invitedMembers.map(m => m.uid));
+
+                const filteredResults = results.filter(u =>
+                    u.uid !== currentUserUid &&
+                    !existingMemberUids.has(u.uid) &&
+                    !invitedMemberUids.has(u.uid)
+                );
+                setSearchResults(filteredResults);
+            } catch (error) {
+                console.error("Search failed:", error);
+            } finally {
+                setIsSearching(false);
+            }
+        }, 300),
+        [members, invitedMembers]
+    );
+
+    const handleSearchChange = (text: string) => {
+        setSearchQuery(text);
+        setIsSearching(true);
+        debouncedSearch(text);
+    };
+
+    useEffect(() => {
+    if (isExpanded) {
+        setIsConfirmingDelete(false);
+        setEditedName(group.name);
+        setInvitedMembers([]);
+        setSearchResults([]);
+        setSearchQuery('');
+
+        // ✅ CORRECT: Set members directly from the prop.
+        setMembers(group.members || []);
+    }
+}, [isExpanded, group]);
+
+    const handleInviteUser = (user: User) => {
+        setInvitedMembers(prev => [...prev, user]);
+        setSearchResults(prev => prev.filter(u => u.uid !== user.uid));
+    };
+
+    const handleRemoveInvitedUser = (user: User) => {
+        setInvitedMembers(prev => prev.filter(u => u.uid !== user.uid));
+    };
+    
+    const handleRemoveExistingMember = (user: UserProfile) => {
+        // NOTE: Add your API call here to update the group in Firebase
+        Alert.alert("Confirm", `Are you sure you want to remove ${user.displayName}?`, [
+            { text: "Cancel", style: "cancel" },
+            { text: "Remove", style: "destructive", onPress: () => {
+                console.log(`Removing ${user.uid} from ${group.id}`);
+                setMembers(prev => prev.filter(m => m.uid !== user.uid));
+            }},
+        ]);
+    };
+
+    const handleSaveChanges = async () => {
+        setIsSaving(true);
+        try {
+            // NOTE: Add your API call to update the group here
+            // await updateGroup(group.id, {
+            //     name: editedName,
+            //     addMembers: invitedMembers.map(m => m.uid),
+            // });
+            console.log("Saving changes for group:", group.id);
+            onGroupUpdated(); // Refresh the main list
+            onToggleExpand(group); // Close the item
+        } catch (error) {
+            Alert.alert("Error", "Could not save changes.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+    
+    const handleDeleteGroup = () => {
+        // NOTE: Add your API call to delete the group here
+        console.log("Deleting group", group.id);
+        setIsConfirmingDelete(false);
+        onGroupUpdated(); // Refresh the main list
+    };
+
+    return (
+        <View style={styles.groupItemContainer}>
+            <View style={styles.groupItem}>
+                <TouchableOpacity style={styles.groupSelectableArea} onPress={() => onSelect(group)}>
+                    <Ionicons name={isSelected ? "checkmark-circle" : "ellipse-outline"} size={24} color={isSelected ? primary : "#ccc"} />
+                    <Text style={styles.groupName}>{group.name}</Text>
+                    {isSelected && <Text style={styles.selectedText}>(Selected)</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.expandButton} onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); onToggleExpand(group); }}>
+                    <Ionicons name={isExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={24} color="#666" />
+                </TouchableOpacity>
+            </View>
+
+            {isExpanded && (
+                <View style={styles.expandedContent}>
+                    <Text style={styles.inputLabel}>Group Name</Text>
+                    <TextInput style={styles.textInput} value={editedName} onChangeText={setEditedName} />
+
+                    <Text style={styles.inputLabel}>Members</Text>
+                    {isLoadingMembers ? <ActivityIndicator/> : members.map(member => (
+                        <View key={member.uid} style={styles.userItem}>
+                            <Image source={{ uri: member.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
+                            <Text style={styles.userName}>{member.displayName}</Text>
+                            {member.uid !== auth.currentUser?.uid && (
+                                <TouchableOpacity onPress={() => handleRemoveExistingMember(member)}>
+                                    <Ionicons name="close-circle" size={24} color="#ccc" />
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    ))}
+
+                    <Text style={styles.inputLabel}>Invite New Members</Text>
+                    <TextInput style={styles.textInput} placeholder="Search by name, email, or phone" value={searchQuery} onChangeText={handleSearchChange} />
+                    {isSearching ? <ActivityIndicator style={{marginVertical: 10}}/> :
+                        searchResults.map(user => (
+                            <View key={user.uid} style={styles.userItem}>
+                                <Image source={{ uri: user.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
+                                <View style={styles.userInfo}><Text style={styles.userName}>{user.displayName}</Text></View>
+                                <TouchableOpacity style={styles.inlineButton} onPress={() => handleInviteUser(user)}><Text style={styles.inlineButtonText}>Invite</Text></TouchableOpacity>
+                            </View>
+                        ))
+                    }
+                    {invitedMembers.map(member => (
+                         <View key={member.uid} style={[styles.userItem, {backgroundColor: '#eef2f5'}]}>
+                            <Image source={{ uri: member.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
+                            <Text style={styles.userName}>{member.displayName}</Text>
+                            <TouchableOpacity onPress={() => handleRemoveInvitedUser(member)}><Ionicons name="close-circle" size={24} color="#ff3b30" /></TouchableOpacity>
+                        </View>
+                    ))}
+                    
+                    <View style={styles.modalFooter}>
+                         <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => onToggleExpand(group)}>
+                            <Text style={styles.secondaryButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.modalButton, styles.primaryButton]} onPress={handleSaveChanges} disabled={isSaving}>
+                            {isSaving ? <ActivityIndicator color="#fff"/> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
+                        </TouchableOpacity>
+                    </View>
+                    {/* TODO: this is fragile do a isPrivate prop or something */}
+                    {group.name != "Private" && (
+                        <View style={styles.deleteSection}>
+                            {isConfirmingDelete ? (
+                                <View style={styles.confirmationContainer}>
+                                    <Text style={styles.confirmationText}>Are you sure?</Text>
+                                    <View style={{ flexDirection: 'row' }}>
+                                        <TouchableOpacity style={[styles.confirmButton, styles.cancelButton]} onPress={() => setIsConfirmingDelete(false)}>
+                                            <Text style={styles.cancelButtonText}>Cancel</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={[styles.confirmButton, styles.deleteConfirmButton]} onPress={handleDeleteGroup}>
+                                            <Text style={styles.deleteButtonText}>Delete</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            ) : (
+                                <TouchableOpacity style={styles.deleteButton} onPress={() => setIsConfirmingDelete(true)}>
+                                    <Ionicons name="trash-outline" size={16} color="#c94444" />
+                                    <Text style={styles.deleteButtonText}>Delete Group</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    )}
+                </View>
+            )}
+        </View>
+    );
+};
+
+
+export default function GroupsScreen() {
+    const router = useRouter();
+    const { groups, selectedGroup, selectGroup, refreshAuthUser } = useAuth();
+    const [loading, setLoading] = useState(false);
+    
+    const [isGroupModalVisible, setGroupModalVisible] = useState(false);
+    const [newGroupName, setNewGroupName] = useState('');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<User[]>([]);
+    const [invitedMembers, setInvitedMembers] = useState<User[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    
+    const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+
+    const debouncedSearch = useCallback(
+        debounce(async (query: string) => {
+            if (query.length < 2) {
+                setSearchResults([]);
+                setIsSearching(false);
+                return;
+            }
+            try {
+                const results = await searchUsers(query);
                 const currentUserUid = auth.currentUser?.uid;
                 const invitedMemberUids = new Set(invitedMembers.map(m => m.uid));
                 const filteredResults = results.filter(
@@ -66,32 +271,14 @@ export default function GroupsScreen() {
             } finally {
                 setIsSearching(false);
             }
-        }, 300), // 300ms delay
-        [invitedMembers] // Recreate debounce function if invitedMembers changes
+        }, 300),
+        [invitedMembers]
     );
     
     const handleSearchChange = (text: string) => {
         setSearchQuery(text);
         setIsSearching(true);
         debouncedSearch(text);
-    };
-
-    // --- Group Creation Logic ---
-    const openCreateGroupModal = () => {
-        if (!auth.currentUser || auth.currentUser.isAnonymous) {
-            router.push('/login');
-            return;
-        }
-        // Reset state when opening
-        setNewGroupName('');
-        setSearchQuery('');
-        setSearchResults([]);
-        setInvitedMembers([]);
-        setGroupModalVisible(true);
-    };
-    
-    const handleSelectGroup = (group: Group) => {
-        selectGroup(group);
     };
 
     const handleInviteUser = (userToInvite: User) => {
@@ -111,11 +298,11 @@ export default function GroupsScreen() {
         setLoading(true);
         try {
             const memberUids = invitedMembers.map(m => m.uid);
-            if(auth.currentUser?.uid) {
+            if (auth.currentUser?.uid) {
                 memberUids.push(auth.currentUser.uid);
             }
             await createGroup(newGroupName, memberUids);
-            refreshAuthUser(); // This will refetch groups in your AuthContext
+            refreshAuthUser();
             setGroupModalVisible(false);
         } catch (err) {
             console.error('Failed to create group', err);
@@ -125,10 +312,29 @@ export default function GroupsScreen() {
         }
     };
 
+    const openCreateGroupModal = () => {
+        if (!auth.currentUser || auth.currentUser.isAnonymous) {
+            router.push('/login');
+            return;
+        }
+        setNewGroupName('');
+        setSearchQuery('');
+        setSearchResults([]);
+        setInvitedMembers([]);
+        setGroupModalVisible(true);
+    };
+    
+    const handleSelectGroup = (group: Group) => {
+        selectGroup(group);
+    };
+
+    const handleToggleExpand = (group: Group) => {
+        setExpandedGroupId(prevId => (prevId === group.id ? null : group.id));
+    };
+
     return (
         <SafeAreaView style={styles.container}>
             <ScrollView>
-                {/* Groups Section */}
                 <View style={styles.groupsContainer}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.headerLeft}>
@@ -141,53 +347,40 @@ export default function GroupsScreen() {
                             <Ionicons name="add" size={24} color="#fff" />
                         </TouchableOpacity>
                     </View>
-                    <FlatList
-                            data={groups}
-                            keyExtractor={(g) => g.id}
-                            scrollEnabled={false}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity style={styles.groupItem} onPress={() => handleSelectGroup(item)}>
-                                    <Text style={styles.groupName}>{item.name}</Text>
-                                    { selectedGroup?.id === item.id ? (
-                                        <View style={styles.viewContainer}>
-                                            <Ionicons name="checkmark-circle" size={24} color={primary} />
-                                        </View>
-                                    ) : (
-                                        <View style={styles.viewContainer}>
-                                            <Ionicons name="ellipse-outline" size={24} color="#ccc" />
-                                        </View>
-                                    )}
-                                </TouchableOpacity>
-                            )}
+                    
+                    {groups.map(item => (
+                        <GroupItem
+                            key={item.id}
+                            group={item}
+                            isSelected={selectedGroup?.id === item.id}
+                            isExpanded={expandedGroupId === item.id}
+                            onSelect={handleSelectGroup}
+                            onToggleExpand={handleToggleExpand}
+                            onGroupUpdated={refreshAuthUser}
                         />
+                    ))}
 
-                        <View style={styles.emptyContainer}>
+                    {groups.length === 0 && (
+                         <View style={styles.emptyContainer}>
                             <Ionicons name="people-outline" size={40} color="#ccc" style={styles.emptyIcon} />
                             <Text style={styles.emptySubtitle}>Create or join a group to start sharing lists.</Text>
                             <TouchableOpacity style={styles.primaryButton} onPress={openCreateGroupModal}>
                                 <Text style={styles.primaryButtonText}>Create Group</Text>
                             </TouchableOpacity>
-                        </View>
-
+                       </View>
+                    )}
                 </View>
             </ScrollView>
 
-            {/* --- Create Group Modal --- */}
             <Modal visible={isGroupModalVisible} animationType="slide">
                 <SafeAreaView style={styles.modalViewContainer}>
-                    {/* FIX: Replaced ScrollView with a single FlatList.
-                      The searchResults are the main data for this list.
-                    */}
                     <FlatList
                         contentContainerStyle={styles.modalScrollView}
-                        // Use searchResults as the primary data source
                         data={searchResults}
                         keyExtractor={(item) => item.uid}
-                        // Header contains all content BEFORE the search results list
                         ListHeaderComponent={
                             <>
                                 <Text style={styles.modalTitle}>Create New Group</Text>
-
                                 <Text style={styles.inputLabel}>Group Name</Text>
                                 <TextInput
                                     style={styles.textInput}
@@ -196,7 +389,6 @@ export default function GroupsScreen() {
                                     value={newGroupName}
                                     onChangeText={setNewGroupName}
                                 />
-
                                 <Text style={styles.inputLabel}>Invite Members</Text>
                                 <TextInput
                                     style={styles.textInput}
@@ -205,11 +397,9 @@ export default function GroupsScreen() {
                                     value={searchQuery}
                                     onChangeText={handleSearchChange}
                                 />
-
                                 {isSearching && <ActivityIndicator style={{ marginVertical: 10 }} />}
                             </>
                         }
-                        // renderItem handles the main list data (the search results)
                         renderItem={({ item }) => (
                             <View style={styles.userItem}>
                                 <Image source={{ uri: item.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
@@ -222,20 +412,16 @@ export default function GroupsScreen() {
                                 </TouchableOpacity>
                             </View>
                         )}
-                        // Footer contains all content AFTER the search results list
                         ListFooterComponent={
                             <>
                                 {invitedMembers.length > 0 && (
                                     <>
                                         <Text style={styles.inputLabel}>Invited</Text>
-                                        {/* FIX: Use a simple map for the short list of invited members
-                                          to avoid nesting a VirtualizedList.
-                                        */}
                                         {invitedMembers.map((item) => (
                                             <View key={item.uid} style={styles.userItem}>
                                                 <Image source={{ uri: item.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
                                                 <View style={styles.userInfo}>
-                                                  <Text style={styles.userName}>{item.displayName}</Text>
+                                                    <Text style={styles.userName}>{item.displayName}</Text>
                                                 </View>
                                                 <TouchableOpacity onPress={() => handleRemoveUser(item)}>
                                                     <Ionicons name="close-circle" size={24} color="#ff3b30" />
@@ -247,8 +433,6 @@ export default function GroupsScreen() {
                             </>
                         }
                     />
-
-                    {/* The action buttons remain outside the list to stay at the bottom */}
                     <View style={styles.modalFooter}>
                         <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => setGroupModalVisible(false)}>
                             <Text style={styles.secondaryButtonText}>Cancel</Text>
@@ -264,261 +448,56 @@ export default function GroupsScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#f8f9fa',
-        paddingTop: Constants.statusBarHeight,
-    },
-    profileInner: {
-        backgroundColor: '#fff',
-        padding: 16,
-        borderRadius: 8,
-        borderColor: '#eee',
-        borderWidth: 1,
-    },
-    profileHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingBottom: 24,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
-        marginBottom: 16
-    },
-    profileImageContainer: {
-        marginRight: 16
-    },
-    profileImage: { width: 90, height: 90, borderRadius: 45, borderWidth: 2, borderColor: '#ecececff' },
-    editIconContainer: {
-        position: 'absolute',
-        bottom: -2,
-        right: -2,
-        backgroundColor: primary,
-        borderRadius: 12,
-        padding: 4,
-        borderWidth: 2,
-        borderColor: '#fff',
-    },
-    profileInfo: { flex: 1 },
-    infoRow: {
-        paddingVertical: 6,
-    },
-    infoLabel: {
-        fontSize: 14,
-        color: '#666',
-        marginBottom: 4,
-    },
-    viewContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    headerLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    infoValue: {
-        fontSize: 16,
-        fontWeight: '500',
-    },
-    editContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    infoInput: {
-        flex: 1,
-        fontSize: 16,
-        borderWidth: 1,
-        borderColor: '#ccc',
-        borderRadius: 6,
-        padding: 8,
-        marginRight: 8,
-    },
-    editPencilButton: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: primary,
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 2,
-        borderColor: '#fff'
-    },
-    groupsContainer: {
-        paddingHorizontal: 16,
-        marginBottom: 16,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom:15
-    },
-    sectionTitle: { fontSize: 22, fontWeight: 'bold', marginVertical: 10 },
-    addButton: {
-        backgroundColor: primary,
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    groupItem: {
-        backgroundColor: '#fff',
-        padding: 16,
-        borderRadius: 8,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 10,
-        borderColor: '#eee',
-        borderWidth: 1,
-    },
-    groupName: { fontSize: 16 },
-    emptyContainer: {
-        alignItems: 'center',
-        paddingVertical: 40,
-    },
+    container: { flex: 1, backgroundColor: '#f8f9fa', paddingTop: Constants.statusBarHeight },
+    groupsContainer: { paddingHorizontal: 16, marginBottom: 16 },
+    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
+    headerLeft: { flexDirection: 'row', alignItems: 'center' },
+    sectionTitle: { fontSize: 22, fontWeight: 'bold' },
+    addButton: { backgroundColor: primary, width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+    backButton: { paddingRight: 10 },
+    emptyContainer: { alignItems: 'center', paddingVertical: 40 },
     emptyIcon: { marginBottom: 16 },
     emptySubtitle: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20, paddingHorizontal: 20 },
-
-    primaryButton: {
-        backgroundColor: primary,
-        paddingVertical: 12,
-        paddingHorizontal: 30,
-        borderRadius: 25,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
+    primaryButton: { backgroundColor: primary, paddingVertical: 12, paddingHorizontal: 30, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
     primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-    secondaryButton: {
-        backgroundColor: 'transparent',
-        borderColor: primary,
-        borderWidth: 1,
-    },
-    secondaryButtonText: {
-        color: primary,
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    inlineButton: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        backgroundColor: primary,
-        borderRadius: 15,
-        marginLeft: 8,
-    },
-    inlineButtonText: {
-        color: '#fff',
-        fontWeight: '500'
-    },
-    inlineButtonSecondary: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-    },
-    inlineButtonSecondaryText: {
-        color: '#666',
-        fontWeight: '500'
-    },
-    backButton: {
-        paddingRight: 10
-    },
-
-    // --- Modal & Carousel Styles ---
-    modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
-    modalContent: { backgroundColor: 'white', padding: 20, borderRadius: 10, width: '90%', alignItems: 'center' },
-    modalTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, alignSelf: 'center' },
-    modalMainAvatar: { width: 100, height: 100, borderRadius: 50, backgroundColor: '#eee', marginBottom: 16 },
-    modalButtons: { flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 20 },
-    modalButton: {
-        flex: 1,
-        marginHorizontal: 8,
-        paddingVertical: 12,
-        borderRadius: 25,
-        alignItems: 'center'
-    },
-    carouselContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        width: '100%',
-    },
-    arrowButton: {
-        paddingHorizontal: 4,
-    },
-    transparentButton: {
-        opacity: 0,
-    },
-    flatListContent: {
-        paddingHorizontal: 10,
-    },
-    gridAvatar: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#eee' },
-    selectedAvatar: { borderWidth: 3, borderColor: primary },
-    uploadButton: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
+    modalViewContainer: { flex: 1, backgroundColor: '#f8f9fa' },
+    modalScrollView: { padding: 16 },
+    modalTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
     
-    // --- New Styles for Create Group Modal ---
-    modalViewContainer: {
-        flex: 1,
-        backgroundColor: '#f8f9fa',
-    },
-    modalScrollView: {
-        padding: 16,
-    },
-    inputLabel: {
-        fontSize: 16,
-        fontWeight: '500',
-        color: '#333',
-        marginBottom: 8,
-        marginTop: 16,
-    },
-    textInput: {
-        backgroundColor: '#fff',
-        borderWidth: 1,
-        borderColor: '#ccc',
-        borderRadius: 8,
-        padding: 12,
-        fontSize: 16,
-    },
-    userItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#fff',
-        padding: 10,
-        borderRadius: 8,
-        marginBottom: 8,
-    },
-    userAvatar: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        marginRight: 12,
-    },
-    userInfo: {
-        flex: 1,
-    },
-    userName: {
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    userContact: {
-        fontSize: 14,
-        color: '#666',
-    },
-    modalFooter: {
-        flexDirection: 'row',
-        padding: 16,
-        borderTopWidth: 1,
-        borderTopColor: '#eee',
-        backgroundColor: '#fff',
-    },
-    editMealPreferences: {
-        marginTop: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'flex-start',
-    },
-    editMealPreferencesText: {
-        color: primary,
-        fontSize: 16,
-        fontWeight: '500',
-        marginLeft: 5
-    }
+    // Shared styles for user items
+    userItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 10, borderRadius: 8, marginBottom: 8 },
+    userAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, borderWidth:1,borderColor:'#ddd' },
+    userInfo: { flex: 1 },
+    userName: { fontSize: 16, fontWeight: '500', marginRight:10 },
+    userContact: { fontSize: 14, color: '#666' },
+    inlineButton: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: primary, borderRadius: 15, marginLeft: 8 },
+    inlineButtonText: { color: '#fff', fontWeight: '500' },
+    
+    // Styles for Create/Edit Modals/Views
+    inputLabel: { fontSize: 14, fontWeight: '500', color: '#333', marginBottom: 8, marginTop: 10 },
+    textInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 10 },
+    modalFooter: { flexDirection: 'row', paddingVertical: 16, marginTop: 16, borderTopWidth: 1, borderTopColor: '#eee', backgroundColor: '#fff', paddingHorizontal: 8 },
+    modalButton: { flex: 1, marginHorizontal: 8, paddingVertical: 12, borderRadius: 25, alignItems: 'center' },
+    secondaryButton: { backgroundColor: '#e9ecef' },
+    secondaryButtonText: { color: '#495057', fontSize: 16, fontWeight: '600' },
+
+    // Styles for GroupItem
+    groupItemContainer: { backgroundColor: '#fff', borderRadius: 8, marginBottom: 10, borderColor: '#eee', borderWidth: 1, overflow: 'hidden' },
+    groupItem: { paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    groupSelectableArea: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 10 },
+    groupName: { fontSize: 16, marginLeft: 12 },
+    selectedText: { fontSize: 14, fontStyle: 'italic', color: primary, marginLeft: 8 },
+    expandButton: { padding: 5 },
+    
+    // Styles for Expanded View
+    expandedContent: { paddingHorizontal: 16, paddingBottom: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+    deleteSection: { paddingTop: 15, marginTop: 15, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+    deleteButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10 },
+    deleteButtonText: { color: '#c94444', fontWeight: '600', marginLeft: 8 },
+    confirmationContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    confirmationText: { fontSize: 14, fontWeight: '500' },
+    confirmButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20 },
+    cancelButton: { backgroundColor: '#e9ecef' },
+    cancelButtonText: { fontWeight: '600' },
+    deleteConfirmButton: { backgroundColor: '#c94444' },
 });

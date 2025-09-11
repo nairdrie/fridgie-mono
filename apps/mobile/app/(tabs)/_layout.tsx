@@ -48,7 +48,6 @@ export default function TabLayout() {
             options={{
                 title: 'Profile',
                 headerShown: false,
-                href: !user || user.isAnonymous ? '/login' : '/profile',
                 tabBarIcon: ({ color, focused }) => {
                     // Use 'tabBarIcon' instead of 'tab'
                     if (user?.photoURL) {
