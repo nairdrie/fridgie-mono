@@ -309,10 +309,47 @@ const deleteItem = (aggItem: AggregatedItem) => {
 
  const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<AggregatedItem | Item>) => {
    if (item.isSection) {
-     return (
-       <View style={styles.itemRow}><Pressable onLongPress={drag} disabled={isActive} style={styles.dragHandle} hitSlop={20}><Text style={styles.dragIcon}>≡</Text></Pressable><Text style={styles.sectionText}>{item.text}</Text></View>
-     );
-   }
+        const isEditing = editingId === item.id;
+        return (
+            <View style={styles.itemRow}>
+                <Pressable onLongPress={drag} disabled={isActive} style={styles.dragHandle} hitSlop={20}>
+                    <Text style={styles.dragIcon}>≡</Text>
+                </Pressable>
+
+                {/* Use a TextInput for sections */}
+                <TextInput
+                    ref={assignRef(item.id)}
+                    value={item.text}
+                    style={[styles.editInput, styles.sectionText]}
+                    onChangeText={text => updateItemText(item.id, text)}
+                    onFocus={() => setEditingId(item.id)}
+                    onBlur={() => setEditingId('')}
+                    onSubmitEditing={() => addItemAfter(item)}
+                    onKeyPress={({ nativeEvent }) => {
+                        if (nativeEvent.key === 'Backspace' && item.text === '') {
+                            // Simple delete for sections
+                            setItems(prev => prev.filter(i => i.id !== item.id));
+                            markDirty();
+                        }
+                    }}
+                    returnKeyType="next"
+                    blurOnSubmit={false}
+                />
+
+                {isEditing && (
+                    <TouchableOpacity
+                        onPress={() => {
+                            setItems(prev => prev.filter(i => i.id !== item.id));
+                            markDirty();
+                        }}
+                        style={styles.clearButton}
+                    >
+                        <Text style={styles.clearText}>✕</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        );
+    }
    
    const aggItem = item as AggregatedItem;
    const baseItemId = aggItem.sourceIds[0];
