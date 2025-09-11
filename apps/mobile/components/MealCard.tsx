@@ -140,18 +140,18 @@ function MealCard({
         if (index === -1) return;
         delete inputRefs.current[id];
         
-        setAllItems(prev => prev.filter(item => item.id !== id));
-        markDirty();
+    setAllItems(prev => prev.filter(item => item.id !== id));
+    markDirty();
 
         if (isKeyboardVisible) {
-            const nextFocusId = ingredients[Math.max(0, index - 1)]?.id;
-            if (nextFocusId) {
-                setEditingId(nextFocusId);
-            }
+  const nextFocusId = ingredients[Math.max(0, index - 1)]?.id;
+  if (nextFocusId) {
+    setEditingId(nextFocusId);
+  }
         } else {
             setEditingId('');
         }
-    };
+};
 
     const handleAddIngredient = (afterIndex: number | undefined) => {
         if(afterIndex === undefined) afterIndex = ingredients.length -1;

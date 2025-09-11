@@ -152,14 +152,14 @@ export default function GroceryListView({
    setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
  };
 
- const deleteItem = (aggItem: AggregatedItem) => {
+const deleteItem = (aggItem: AggregatedItem) => {
    const sourceIdsToDelete = new Set(aggItem.sourceIds);
    const updatedItems = items.filter(item => !sourceIdsToDelete.has(item.id));
    setItems(updatedItems);
    markDirty();
    if (isKeyboardVisible) {
-     const currentIndex = aggregatedItems.findIndex(i => i.id === aggItem.id);
-     const prevItem = aggregatedItems[Math.max(0, currentIndex - 1)];
+  const currentIndex = aggregatedItems.findIndex(i => i.id === aggItem.id);
+  const prevItem = aggregatedItems[Math.max(0, currentIndex - 1)];
      if (prevItem && prevItem.id !== aggItem.id && 'sourceIds' in prevItem) {
        setEditingId(prevItem.sourceIds[0]);
      } else {
@@ -168,8 +168,8 @@ export default function GroceryListView({
    } else {
      setEditingId('');
    }
- };
- 
+};
+
  const handleItemBlur = (aggItem: AggregatedItem) => {
    const baseItemId = aggItem.sourceIds[0];
    const baseItem = items.find(i => i.id === baseItemId);
