@@ -32,6 +32,8 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import uuid from 'react-native-uuid';
 import { addUserCookbookRecipe, categorizeList, getUserCookbook, listenToList, removeUserCookbookRecipe, scheduleMealRating, updateList } from '../../utils/api';
 
+// TODO: need a loading indicator when categorizing
+// TODO: if the user already categorized, adding a meal should also categorize
 
 export default function HomeScreen() {
     const router = useRouter();
