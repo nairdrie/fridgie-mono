@@ -1,6 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
-import { Group, UserProfile } from '@/types/types';
-import { ApiError, createGroup, deleteGroup, searchUsers, sendGroupInvitation, updateGroup } from '@/utils/api'; // NOTE: You will need to add API functions for updating/deleting groups
+import { Group, PendingInvitation, UserProfile } from '@/types/types';
+import { ApiError, createGroup, declineGroupInvitation, deleteGroup, getPendingInvitations, searchUsers, sendGroupInvitation, updateGroup } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -27,12 +27,8 @@ import {
     View
 } from 'react-native';
 
-
-// TODO: member invitations needs a rework. we cant just force people into groups lol.
-
 /**
- * A new, self-contained component for rendering and managing a single group item.
- * This encapsulates all the logic for expanding, showing members, and editing.
+ * A self-contained component for rendering and managing a single group item.
  */
 const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, onGroupUpdated }: {
     group: Group;
@@ -40,13 +36,15 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     isExpanded: boolean;
     onSelect: (group: Group) => void;
     onToggleExpand: (group: Group) => void;
-    onGroupUpdated: () => void; // Function to refresh the main group list
+    onGroupUpdated: () => void;
 }) => {
     // --- State for the expanded/editing view ---
     const [members, setMembers] = useState<UserProfile[]>([]);
-    const [isLoadingMembers, setIsLoadingMembers] = useState(false);
-    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const [initialMembers, setInitialMembers] = useState<UserProfile[]>([]);
+    const [newlyInvited, setNewlyInvited] = useState<User[]>([]);
+    const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
     // Editing state
     const [editedName, setEditedName] = useState(group.name);
@@ -54,7 +52,36 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     const [searchResults, setSearchResults] = useState<User[]>([]);
     const [isSearching, setIsSearching] = useState(false);
 
-    // Debounced search handler, encapsulated within the item
+    const isOwner = auth.currentUser?.uid === group.owner;
+    const canEdit = isOwner && group.name !== 'Private';
+
+    // Reset component state when it's expanded or the group data changes
+    useEffect(() => {
+        if (isExpanded) {
+            const currentMembers = group.members || [];
+            setMembers(currentMembers);
+            setInitialMembers(currentMembers);
+            setNewlyInvited([]);
+            setEditedName(group.name);
+            setSearchQuery('');
+            setSearchResults([]);
+            setIsConfirmingDelete(false);
+            setPendingInvites([]);
+
+            const fetchDetails = async () => {
+                if (canEdit) { // Only owners should see pending invites
+                    try {
+                        const invites = await getPendingInvitations(group.id);
+                        setPendingInvites(invites);
+                    } catch (error) {
+                        console.error("Failed to fetch pending invitations:", error);
+                    }
+                }
+            };
+            fetchDetails();
+        }
+    }, [isExpanded, group]);
+
     const debouncedSearch = React.useCallback(
         debounce(async (query: string) => {
             if (query.length < 2) {
@@ -66,10 +93,14 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                 const results = await searchUsers(query);
                 const currentUserUid = auth.currentUser?.uid;
                 const existingMemberUids = new Set(members.map(m => m.uid));
+                const newlyInvitedUids = new Set(newlyInvited.map(m => m.uid));
+                const pendingInviteUids = new Set(pendingInvites.map(i => i.invitee.uid));
 
                 const filteredResults = results.filter(u =>
                     u.uid !== currentUserUid &&
-                    !existingMemberUids.has(u.uid)
+                    !existingMemberUids.has(u.uid) &&
+                    !newlyInvitedUids.has(u.uid) &&
+                    !pendingInviteUids.has(u.uid)
                 );
                 setSearchResults(filteredResults);
             } catch (error) {
@@ -78,7 +109,7 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                 setIsSearching(false);
             }
         }, 300),
-        [members]
+        [members, newlyInvited, pendingInvites]
     );
 
     const handleSearchChange = (text: string) => {
@@ -87,66 +118,92 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
         debouncedSearch(text);
     };
 
-    useEffect(() => {
-    if (isExpanded) {
-        setIsConfirmingDelete(false);
-        setEditedName(group.name);
-        setSearchResults([]);
-        setSearchQuery('');
-
-        // ✅ CORRECT: Set members directly from the prop.
-        setMembers(group.members || []);
-    }
-}, [isExpanded, group]);
-
-    const handleInviteUser = async (user: User) => {
-        // OLD: setInvitedMembers(...)
-        // NEW: Call the API
-        try {
-            await sendGroupInvitation(group.id, user.uid);
-            // Give user feedback
-            Alert.alert("Success", `Invitation sent to ${user.displayName}.`);
-            setSearchResults(prev => prev.filter(u => u.uid !== user.uid)); // Remove from search results
-        } catch (error) {
-            Alert.alert("Error", "Could not send invitation.");
-        }
+    const handleStageInvite = (userToInvite: User) => {
+        setNewlyInvited(prev => [...prev, userToInvite]);
+        setSearchResults(prev => prev.filter(u => u.uid !== userToInvite.uid));
     };
-    
-    const handleRemoveExistingMember = (user: UserProfile) => {
-        // NOTE: Add your API call here to update the group in Firebase
-        Alert.alert("Confirm", `Are you sure you want to remove ${user.displayName}?`, [
-            { text: "Cancel", style: "cancel" },
-            { text: "Remove", style: "destructive", onPress: () => {
-                console.log(`Removing ${user.uid} from ${group.id}`);
-                setMembers(prev => prev.filter(m => m.uid !== user.uid));
-            }},
-        ]);
+
+    const handleRemoveStagedInvite = (userToUninvite: User) => {
+        setNewlyInvited(prev => prev.filter(u => u.uid !== userToUninvite.uid));
+    };
+
+    const handleStageRemoval = (userToRemove: UserProfile) => {
+        setMembers(prev => prev.filter(m => m.uid !== userToRemove.uid));
+    };
+
+    const handleRevokeInvitation = async (invitation: PendingInvitation) => {
+        Alert.alert(
+            "Revoke Invitation",
+            `Are you sure you want to revoke the invitation for ${invitation.invitee.displayName}?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Revoke",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            await declineGroupInvitation(invitation.id);
+                            setPendingInvites(prev => prev.filter(i => i.id !== invitation.id));
+                            Alert.alert("Success", "Invitation has been revoked.");
+                        } catch (error) {
+                            const message = error instanceof ApiError ? error.message : "Could not revoke invitation.";
+                            Alert.alert("Error", message);
+                        }
+                    },
+                },
+            ]
+        );
     };
 
     const handleSaveChanges = async () => {
         setIsSaving(true);
         try {
-            await updateGroup(group.id, {
-                name: editedName,
-                members: members.map(m => m.uid)
-            });
-            console.log("Saving changes for group:", group.id);
-            onGroupUpdated(); // Refresh the main list
-            onToggleExpand(group); // Close the item
-        } catch (error) {
-            if(error instanceof ApiError) {
-                Alert.alert("Error", error.message);
+            const promises = [];
+            const initialMemberUids = new Set(initialMembers.map(m => m.uid));
+            const currentMemberUids = new Set(members.map(m => m.uid));
+            const membersChanged = initialMemberUids.size !== currentMemberUids.size || ![...initialMemberUids].every(uid => currentMemberUids.has(uid));
+            const nameChanged = editedName.trim() !== group.name;
+
+            if (nameChanged || membersChanged) {
+                promises.push(
+                    updateGroup(group.id, {
+                        name: editedName.trim(),
+                        members: members.map(m => m.uid)
+                    })
+                );
             }
+
+            for (const userToInvite of newlyInvited) {
+                promises.push(sendGroupInvitation(group.id, userToInvite.uid));
+            }
+
+            if (promises.length === 0) {
+                onToggleExpand(group);
+                return;
+            }
+
+            await Promise.all(promises);
+            Alert.alert("Success", "Group changes have been saved.");
+            onGroupUpdated();
+            onToggleExpand(group);
+
+        } catch (error) {
+            const message = error instanceof ApiError ? error.message : "An error occurred while saving.";
+            Alert.alert("Error", message);
         } finally {
             setIsSaving(false);
         }
     };
     
-    const handleDeleteGroup = async (group: Group) => {
-        console.log("DELETING GROUP");
-        await deleteGroup(group.id);
-        setIsConfirmingDelete(false);
-        onGroupUpdated(); // Refresh the main list
+    const handleDeleteGroup = async () => {
+        try {
+            await deleteGroup(group.id);
+            setIsConfirmingDelete(false);
+            onGroupUpdated();
+        } catch (error) {
+            const message = error instanceof ApiError ? error.message : "Could not delete the group.";
+            Alert.alert("Error", message);
+        }
     };
 
     return (
@@ -165,43 +222,91 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
             {isExpanded && (
                 <View style={styles.expandedContent}>
                     <Text style={styles.inputLabel}>Group Name</Text>
-                    <TextInput style={styles.textInput} value={editedName} onChangeText={setEditedName} />
+                    <TextInput style={[styles.textInput, !canEdit && styles.readOnlyInput]} value={editedName} onChangeText={setEditedName} editable={canEdit} />
 
                     <Text style={styles.inputLabel}>Members</Text>
-                    {isLoadingMembers ? <ActivityIndicator/> : members.map(member => (
+                    {members.map(member => (
                         <View key={member.uid} style={styles.userItem}>
                             <Image source={{ uri: member.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
                             <Text style={styles.userName}>{member.displayName}</Text>
-                            {member.uid !== auth.currentUser?.uid && (
-                                <TouchableOpacity onPress={() => handleRemoveExistingMember(member)}>
+                            {canEdit && member.uid !== group.owner && (
+                                <TouchableOpacity onPress={() => handleStageRemoval(member)}>
                                     <Ionicons name="close-circle" size={24} color="#ccc" />
                                 </TouchableOpacity>
                             )}
                         </View>
                     ))}
 
-                    <Text style={styles.inputLabel}>Invite New Members</Text>
-                    <TextInput style={styles.textInput} placeholder="Search by name, email, or phone" value={searchQuery} onChangeText={handleSearchChange} />
-                    {isSearching ? <ActivityIndicator style={{marginVertical: 10}}/> :
-                        searchResults.map(user => (
-                            <View key={user.uid} style={styles.userItem}>
-                                <Image source={{ uri: user.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
-                                <View style={styles.userInfo}><Text style={styles.userName}>{user.displayName}</Text></View>
-                                <TouchableOpacity style={styles.inlineButton} onPress={() => handleInviteUser(user)}><Text style={styles.inlineButtonText}>Invite</Text></TouchableOpacity>
-                            </View>
-                        ))
-                    }
+                    {canEdit && pendingInvites.length > 0 && (
+                        <>
+                            <Text style={styles.inputLabel}>Pending Invitations</Text>
+                            {pendingInvites.map(invite => (
+                                <View key={invite.id} style={[styles.userItem, styles.pendingItem]}>
+                                    <Image source={{ uri: invite.invitee.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
+                                    <View style={styles.userInfo}>
+                                        <Text style={styles.userName}>{invite.invitee.displayName}</Text>
+                                        <Text style={styles.userContact}>(Invited)</Text>
+                                    </View>
+                                    <TouchableOpacity onPress={() => handleRevokeInvitation(invite)}>
+                                        <Ionicons name="close-circle" size={24} color="#ff9500" />
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                        </>
+                    )}
+
+                    {canEdit && (
+                        <>
+                            <Text style={styles.inputLabel}>Invite New Members</Text>
+                            <TextInput style={styles.textInput} placeholder="Search by name, email, or phone" value={searchQuery} onChangeText={handleSearchChange} />
+                            
+                            {isSearching && <ActivityIndicator style={{marginVertical: 10}}/>}
+                            
+                            {searchResults.map(user => (
+                                <View key={user.uid} style={styles.userItem}>
+                                    <Image source={{ uri: user.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
+                                    <View style={styles.userInfo}><Text style={styles.userName}>{user.displayName}</Text></View>
+                                    <TouchableOpacity style={styles.inlineButton} onPress={() => handleStageInvite(user)}>
+                                        <Text style={styles.inlineButtonText}>Invite</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ))}
+                            
+                            {newlyInvited.length > 0 && (
+                                <>
+                                    <Text style={styles.inputLabel}>Staged Invitations</Text>
+                                    {newlyInvited.map(user => (
+                                        <View key={user.uid} style={[styles.userItem, styles.stagedItem]}>
+                                            <Image source={{ uri: user.photoURL || defaultAvatars[0] }} style={styles.userAvatar} />
+                                            <View style={styles.userInfo}><Text style={styles.userName}>{user.displayName}</Text></View>
+                                            <TouchableOpacity onPress={() => handleRemoveStagedInvite(user)}>
+                                                <Ionicons name="close-circle" size={24} color="#ff3b30" />
+                                            </TouchableOpacity>
+                                        </View>
+                                    ))}
+                                </>
+                            )}
+                        </>
+                    )}
                     
                     <View style={styles.modalFooter}>
-                         <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => onToggleExpand(group)}>
-                            <Text style={styles.secondaryButtonText}>Cancel</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.modalButton, styles.primaryButton]} onPress={handleSaveChanges} disabled={isSaving}>
-                            {isSaving ? <ActivityIndicator color="#fff"/> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
-                        </TouchableOpacity>
+                        {canEdit ? (
+                            <>
+                                <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => onToggleExpand(group)}>
+                                    <Text style={styles.secondaryButtonText}>Cancel</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={[styles.modalButton, styles.primaryButton]} onPress={handleSaveChanges} disabled={isSaving}>
+                                    {isSaving ? <ActivityIndicator color="#fff"/> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                             <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => onToggleExpand(group)}>
+                                <Text style={styles.secondaryButtonText}>Close</Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
-                    {/* TODO: this is fragile do a isPrivate prop or something */}
-                    {group.name != "Private" && (
+                    
+                    {canEdit && (
                         <View style={styles.deleteSection}>
                             {isConfirmingDelete ? (
                                 <View style={styles.confirmationContainer}>
@@ -210,7 +315,7 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                                         <TouchableOpacity style={[styles.confirmButton, styles.cancelButton]} onPress={() => setIsConfirmingDelete(false)}>
                                             <Text style={styles.cancelButtonText}>Cancel</Text>
                                         </TouchableOpacity>
-                                        <TouchableOpacity style={[styles.confirmButton, styles.deleteConfirmButton]} onPress={() => handleDeleteGroup(group)}>
+                                        <TouchableOpacity style={[styles.confirmButton, styles.deleteConfirmButton]} onPress={handleDeleteGroup}>
                                             <Text style={styles.deleteConfirmButtonText}>Delete</Text>
                                         </TouchableOpacity>
                                     </View>
@@ -289,18 +394,27 @@ export default function GroupsScreen() {
             Alert.alert("Validation Error", "Please enter a name for your group.");
             return;
         }
+        if (!auth.currentUser?.uid) {
+            // Handle case where user is not logged in
+            return;
+        }
+
         setLoading(true);
+
         try {
-            const memberUids = invitedMembers.map(m => m.uid);
-            if (auth.currentUser?.uid) {
-                memberUids.push(auth.currentUser.uid);
-            }
-            await createGroup(newGroupName, memberUids);
-            refreshAuthUser();
-            setGroupModalVisible(false);
+            // ONE API call to create the group and send invitations
+            const inviteeUids = invitedMembers.map(member => member.uid);
+            await createGroup(newGroupName, inviteeUids);
+            
+            Alert.alert("Success", `Group "${newGroupName}" created and invitations sent.`);
+            refreshAuthUser(); // Refresh the user's groups
+            setGroupModalVisible(false); // Close the modal
+
         } catch (err) {
-            console.error('Failed to create group', err);
-            Alert.alert("Error", "Could not create the group. Please try again.");
+            console.error(err);
+            const message = err instanceof ApiError ? err.message : "Could not create the group.";
+            Alert.alert('Error', message);
+        
         } finally {
             setLoading(false);
         }
@@ -466,10 +580,13 @@ const styles = StyleSheet.create({
     userContact: { fontSize: 14, color: '#666' },
     inlineButton: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: primary, borderRadius: 15, marginLeft: 8 },
     inlineButtonText: { color: '#fff', fontWeight: '500' },
+    stagedItem: { backgroundColor: '#eef5ff' },
+    pendingItem: { backgroundColor: '#fffbe6' },
     
     // Styles for Create/Edit Modals/Views
     inputLabel: { fontSize: 14, fontWeight: '500', color: '#333', marginBottom: 8, marginTop: 10 },
     textInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 10 },
+    readOnlyInput: { backgroundColor: '#f0f0f0', color: '#666' },
     modalFooter: { flexDirection: 'row', paddingVertical: 16, marginTop: 16, borderTopWidth: 1, borderTopColor: '#eee', backgroundColor: '#fff', paddingHorizontal: 8 },
     modalButton: { flex: 1, marginHorizontal: 8, paddingVertical: 12, borderRadius: 25, alignItems: 'center' },
     secondaryButton: { backgroundColor: '#e9ecef' },
@@ -496,3 +613,4 @@ const styles = StyleSheet.create({
     deleteConfirmButton: { backgroundColor: '#c94444', color: 'white', marginLeft: 8 },
     deleteConfirmButtonText: { color: 'white' }
 });
+

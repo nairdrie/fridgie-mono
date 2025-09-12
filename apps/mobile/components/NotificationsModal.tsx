@@ -1,5 +1,4 @@
 // components/NotificationsModal.tsx
-import { GroupInvitation } from '@/utils/api'; // Assuming you have this type in api.ts
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
@@ -31,12 +30,12 @@ export default function NotificationsModal({ isVisible, onClose, notifications, 
                             if (notif.type === 'group_invitation') {
                                 return (
                                     <View key={notif.id} style={styles.notificationItem}>
-                                        <Text><Text style={{fontWeight: 'bold'}}>{notif.inviterName}</Text> invited you to join <Text style={{fontWeight: 'bold'}}>{notif.groupName}</Text>.</Text>
+                                        <Text><Text style={{fontWeight: 'bold'}}>{notif.data.inviterName}</Text> invited you to join <Text style={{fontWeight: 'bold'}}>{notif.data.groupName}</Text>.</Text>
                                         <View style={styles.actions}>
-                                            <TouchableOpacity style={[styles.button, styles.acceptButton]} onPress={() => onAccept(notif.id)}>
+                                            <TouchableOpacity style={[styles.button, styles.acceptButton]} onPress={() => onAccept(notif.data.invitationId)}>
                                                 <Text style={styles.acceptButtonText}>Accept</Text>
                                             </TouchableOpacity>
-                                            <TouchableOpacity style={[styles.button, styles.declineButton]} onPress={() => onDecline(notif.id)}>
+                                            <TouchableOpacity style={[styles.button, styles.declineButton]} onPress={() => onDecline(notif.data.invitationId)}>
                                                 <Text style={styles.declineButtonText}>Decline</Text>
                                             </TouchableOpacity>
                                         </View>

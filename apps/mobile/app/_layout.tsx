@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 // Import your components
 import { AuthProvider } from "@/context/AuthContext";
 import { ListProvider } from '@/context/ListContext';
+import { NotificationProvider } from "@/context/NotificationContext";
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -26,64 +27,66 @@ export default function RootLayout() {
   return (
       <SafeAreaProvider>
         <AuthProvider>
-        <ListProvider>
-          <RootView>
-            <StatusBar style="dark" />
-            {/* The Stack component defines the navigator */}
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen
-                name="index"
-                options={{ 
-                  title: 'index',
-                  headerShown: false
-                }}
-              />
-              <Stack.Screen
-                name="login"
-                options={{ 
-                  title: 'Login',
-                  headerShown: false
-                }}
-              />
-              <Stack.Screen
-                name="groups"
-                options={{ 
-                  title: 'Groups',
-                  headerShown: false
-                }}
-              />
-              <Stack.Screen
-                name="complete-profile"
-                options={{ 
-                  title: 'Complete Profile',
-                  headerShown: false
-                }}
-              />
-              <Stack.Screen
-                name="meal-preferences"
-                options={{ 
-                  title: 'Meal Preferences',
-                  headerShown: false
-                }}
-              />
-              <Stack.Screen
-                name="rate-meal"
-                options={{ 
-                  title: 'Rate Meal',
-                  headerShown: false
-                }}
-              />
-              <Stack.Screen
-                name="oauthredirect"
-                options={{ 
-                  headerShown: false
-                }}
-              />
-            </Stack>
-          </RootView>
-        </ListProvider>
-      </AuthProvider>
+          <NotificationProvider>
+            <ListProvider>
+              <RootView>
+                <StatusBar style="dark" />
+                {/* The Stack component defines the navigator */}
+                <Stack>
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen
+                    name="index"
+                    options={{ 
+                      title: 'index',
+                      headerShown: false
+                    }}
+                  />
+                  <Stack.Screen
+                    name="login"
+                    options={{ 
+                      title: 'Login',
+                      headerShown: false
+                    }}
+                  />
+                  <Stack.Screen
+                    name="groups"
+                    options={{ 
+                      title: 'Groups',
+                      headerShown: false
+                    }}
+                  />
+                  <Stack.Screen
+                    name="complete-profile"
+                    options={{ 
+                      title: 'Complete Profile',
+                      headerShown: false
+                    }}
+                  />
+                  <Stack.Screen
+                    name="meal-preferences"
+                    options={{ 
+                      title: 'Meal Preferences',
+                      headerShown: false
+                    }}
+                  />
+                  <Stack.Screen
+                    name="rate-meal"
+                    options={{ 
+                      title: 'Rate Meal',
+                      headerShown: false
+                    }}
+                  />
+                  <Stack.Screen
+                    name="oauthredirect"
+                    options={{ 
+                      headerShown: false
+                    }}
+                  />
+                </Stack>
+              </RootView>
+            </ListProvider>
+          </NotificationProvider>
+        </AuthProvider>
       </SafeAreaProvider>
   );
 }

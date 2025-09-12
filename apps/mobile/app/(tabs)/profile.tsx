@@ -1,9 +1,10 @@
 import Cookbook from '@/components/Cookbook';
-import NotificationsModal from '@/components/NotificationsModal';
 import NotificationBell from '@/components/NotificationBell';
+import NotificationsModal from '@/components/NotificationsModal';
 import { useAuth } from '@/context/AuthContext';
+import { useNotifications } from '@/context/NotificationContext';
 import { Recipe } from '@/types/types';
-import { acceptGroupInvitation, declineGroupInvitation, getMyNotifications, getUserCookbook, uploadUserPhoto } from '@/utils/api';
+import { getUserCookbook, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -175,29 +176,21 @@ export default function UserProfile() {
     const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [newPhotoUri, setNewPhotoUri] = useState(user?.photoURL || null);
-    const [isNotificationsVisible, setNotificationsVisible] = useState(false);
-    const [notifications, setNotifications] = useState<any[]>([]);
-    const [isLoadingNotifs, setIsLoadingNotifs] = useState(false);
-    const [notificationCount, setNotificationCount] = useState(0); // For the tab bar badge
+    const { notifications, isLoading, acceptInvitation, declineInvitation, fetchNotifications } = useNotifications();
 
-    const fetchNotifications = async () => {
-        setIsLoadingNotifs(true);
-        try {
-            const notifs = await getMyNotifications();
-            setNotifications(notifs);
-        } catch (error) { console.error(error); }
-        finally { setIsLoadingNotifs(false); }
-    }
+    const [isNotificationsVisible, setNotificationsVisible] = useState(false);
 
     const handleAccept = async (invitationId: string) => {
-        await acceptGroupInvitation(invitationId);
-        setNotifications(prev => prev.filter(n => n.id !== invitationId)); // Optimistic update
-        // You'll need to call a function from AuthContext to refresh groups
+        acceptInvitation(invitationId, () => {
+            // Optional: You might want to refresh groups after accepting
+            refreshAuthUser();
+            setNotificationsVisible(false); // Close modal on success
+            router.navigate('/groups');
+        });
     };
 
     const handleDecline = async (invitationId: string) => {
-        await declineGroupInvitation(invitationId);
-        setNotifications(prev => prev.filter(n => n.id !== invitationId)); // Optimistic update
+        declineInvitation(invitationId);
     };
 
     // --- Carousel State and Logic ---
@@ -309,8 +302,11 @@ export default function UserProfile() {
         <SafeAreaView style={styles.container}>
             <View style={styles.headerButtons}>
                 <NotificationBell
-                    onPress={() => { fetchNotifications(); setNotificationsVisible(true); }}
-                    setNotificationCount={setNotificationCount} // Pass setter down
+                    onPress={() => {
+                        // The bell now just opens the modal. 
+                        // The context keeps the data fresh automatically.
+                        setNotificationsVisible(true);
+                    }}
                 />
                 <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
                     <Ionicons name="settings-outline" size={28} color="#000" />
@@ -405,8 +401,8 @@ export default function UserProfile() {
             <NotificationsModal
                 isVisible={isNotificationsVisible}
                 onClose={() => setNotificationsVisible(false)}
-                notifications={notifications}
-                isLoading={isLoadingNotifs}
+                notifications={notifications} // from context
+                isLoading={isLoading}       // from context
                 onAccept={handleAccept}
                 onDecline={handleDecline}
             />

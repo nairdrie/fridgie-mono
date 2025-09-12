@@ -1,5 +1,6 @@
 import ListHeader from '@/components/ListHeader';
 import { useAuth } from '@/context/AuthContext';
+import { useNotifications } from '@/context/NotificationContext';
 import { primary } from '@/utils/styles';
 import IonIcons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
@@ -9,6 +10,7 @@ import { Image, StyleSheet } from 'react-native';
 export default function TabLayout() {
     // const { profile, loading, user } = useAuth();
     const { loading, user } = useAuth();
+    const { notificationCount } = useNotifications(); // 2. Get the count from the context
   return (
     <Tabs screenOptions={{ 
         tabBarActiveTintColor: primary,
@@ -48,6 +50,8 @@ export default function TabLayout() {
             options={{
                 title: 'Profile',
                 headerShown: false,
+                tabBarBadge: notificationCount > 0 ? notificationCount : undefined,
+                tabBarBadgeStyle: { backgroundColor: primary },
                 tabBarIcon: ({ color, focused }) => {
                     // Use 'tabBarIcon' instead of 'tab'
                     if (user?.photoURL) {

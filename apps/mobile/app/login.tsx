@@ -206,7 +206,12 @@ export default function LoginScreen() {
     setLoading("password");
     setError(null);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+       if (!userCredential.user.displayName) {
+          router.replace('/complete-profile');
+        } else {
+          router.replace('/profile');
+        }
     } catch (err: any) {
       if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
         setError("Invalid email or password.");

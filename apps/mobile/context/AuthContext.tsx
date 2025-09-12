@@ -132,6 +132,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (!user) return;
 
+    // TODO: some issues here on read and write (especially around logging out)
     const userStatusRef = ref(db, `/status/${user.uid}`);
     const connectedRef = ref(db, '.info/connected');
 

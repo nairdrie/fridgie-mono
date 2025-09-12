@@ -9,7 +9,7 @@ import {
   User
 } from "firebase/auth";
 import { Platform } from 'react-native';
-import { Group, Item, Meal, MealPreferences, Recipe } from "../types/types";
+import { Group, Item, Meal, MealPreferences, PendingInvitation, Recipe } from "../types/types";
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
@@ -143,6 +143,12 @@ export async function sendGroupInvitation(groupId: string, inviteeUid: string): 
   });
 }
 
+export async function getPendingInvitations(groupId: string): Promise<PendingInvitation[]> {
+  console.log("getting pending invitations");
+    const res = await authorizedFetch(`${BASE_URL}/group/invitation/${groupId}`);
+    return res.json();
+}
+
 export async function updateGroup(groupId: string, updates: { name?: string; members?: string[] }): Promise<void> {
     // Placeholder for updating group name or removing a member
     await authorizedFetch(`${BASE_URL}/group/${groupId}`, {
@@ -155,13 +161,6 @@ export async function updateGroup(groupId: string, updates: { name?: string; mem
 export async function deleteGroup(groupId: string): Promise<void> {
   console.log("CALLING DELETE GROUP");
   await authorizedFetch(`${BASE_URL}/group/${groupId}`, { method: 'DELETE' });
-}
-
-
-// --- Invitation Management API ---
-export async function getMyInvitations(): Promise<GroupInvitation[]> {
-  const res = await authorizedFetch(`${BASE_URL}/invitation`);
-  return res.json();
 }
 
 export async function acceptGroupInvitation(invitationId: string): Promise<void> {
@@ -199,11 +198,9 @@ export async function searchUsers(query: string): Promise<User[]> {
  * @param memberUids An array of user UIDs to invite to the group.
  * @returns A promise that resolves to the newly created group.
  */
-export async function createGroup(name: string, memberUids?: string[]): Promise<Group> {
-  const body: {name: string, memberUids?: string[]} = { name };
-  if (memberUids) {
-    body['memberUids'] = memberUids;
-  }
+export async function createGroup(name: string, inviteeUids?: string[]): Promise<Group> {
+  const body: {name: string, inviteeUids?: string[]} = { name, inviteeUids };
+
   const res = await authorizedFetch(`${BASE_URL}/group`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

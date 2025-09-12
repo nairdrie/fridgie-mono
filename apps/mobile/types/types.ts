@@ -22,7 +22,8 @@ export type List = {
 export interface Group {
   id: string;
   name: string;
-  members: UserProfile[]
+  members: UserProfile[];
+  owner: string;
 }
 
 export interface Meal {
@@ -69,4 +70,12 @@ export interface Recipe {
   ingredients: Ingredient[];
   instructions: string[];
   lastAte?: string;
+}
+
+export interface PendingInvitation {
+    id: string; // The invitation document ID
+    groupId: string;
+    groupName: string;
+    inviterName: string;
+    invitee: UserProfile; // Enriched with invitee details for the frontend
 }
