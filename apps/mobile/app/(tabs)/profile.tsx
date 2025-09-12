@@ -1,7 +1,9 @@
 import Cookbook from '@/components/Cookbook';
+import NotificationsModal from '@/components/NotificationsModal';
+import NotificationBell from '@/components/NotificationBell';
 import { useAuth } from '@/context/AuthContext';
 import { Recipe } from '@/types/types';
-import { getUserCookbook, uploadUserPhoto } from '@/utils/api';
+import { acceptGroupInvitation, declineGroupInvitation, getMyNotifications, getUserCookbook, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -173,6 +175,30 @@ export default function UserProfile() {
     const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [newPhotoUri, setNewPhotoUri] = useState(user?.photoURL || null);
+    const [isNotificationsVisible, setNotificationsVisible] = useState(false);
+    const [notifications, setNotifications] = useState<any[]>([]);
+    const [isLoadingNotifs, setIsLoadingNotifs] = useState(false);
+    const [notificationCount, setNotificationCount] = useState(0); // For the tab bar badge
+
+    const fetchNotifications = async () => {
+        setIsLoadingNotifs(true);
+        try {
+            const notifs = await getMyNotifications();
+            setNotifications(notifs);
+        } catch (error) { console.error(error); }
+        finally { setIsLoadingNotifs(false); }
+    }
+
+    const handleAccept = async (invitationId: string) => {
+        await acceptGroupInvitation(invitationId);
+        setNotifications(prev => prev.filter(n => n.id !== invitationId)); // Optimistic update
+        // You'll need to call a function from AuthContext to refresh groups
+    };
+
+    const handleDecline = async (invitationId: string) => {
+        await declineGroupInvitation(invitationId);
+        setNotifications(prev => prev.filter(n => n.id !== invitationId)); // Optimistic update
+    };
 
     // --- Carousel State and Logic ---
     const flatListRef = useRef<FlatList | null>(null);
@@ -281,9 +307,15 @@ export default function UserProfile() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
-                <Ionicons name="settings-outline" size={28} color="#000" />
-            </TouchableOpacity>
+            <View style={styles.headerButtons}>
+                <NotificationBell
+                    onPress={() => { fetchNotifications(); setNotificationsVisible(true); }}
+                    setNotificationCount={setNotificationCount} // Pass setter down
+                />
+                <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
+                    <Ionicons name="settings-outline" size={28} color="#000" />
+                </TouchableOpacity>
+            </View>
             <View style={styles.profileContainer}>
                 <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
                     {user?.photoURL && (
@@ -369,6 +401,15 @@ export default function UserProfile() {
             </Modal>
             {/* Settings Modal */}
             <SettingsModal isVisible={settingsModalVisible} onClose={() => setSettingsModalVisible(false)} />
+
+            <NotificationsModal
+                isVisible={isNotificationsVisible}
+                onClose={() => setNotificationsVisible(false)}
+                notifications={notifications}
+                isLoading={isLoadingNotifs}
+                onAccept={handleAccept}
+                onDecline={handleDecline}
+            />
         </SafeAreaView>
     );
 }
@@ -378,6 +419,12 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#f8f9fa',
         paddingTop: Constants.statusBarHeight,
+    },
+    headerButtons: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        paddingHorizontal: 10,
+        alignItems: 'center',
     },
     header: {
         flexDirection: 'row',
@@ -392,11 +439,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     settingsButton: {
-        position:'absolute',
-        top: Constants.statusBarHeight,
-        marginTop:10,
-        marginRight:20,
-        right:0
+        padding: 5,
     },
     profileContainer: {
         alignItems: 'center',
