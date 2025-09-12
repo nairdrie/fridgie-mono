@@ -23,6 +23,9 @@ function toRoute(file: string) {
 
 // Mount *only* your pure-HTTP Hono modules
 const files = await fg(['api/**/*.ts'])
+
+files.sort().reverse();
+
 for (const file of files) {
   const mod = await import(`./${file}`)
   // If it has a `.routes` array, it's a Hono app:
@@ -79,8 +82,6 @@ serve({
     // onOpen: subscribe to Firebase
     open(ws: ServerWebSocket<{ groupId: string; listId: string; uid: string; listener?: (snap: DataSnapshot) => void }>) {
       const { groupId, listId, uid } = ws.data;
-
-      console.log(`✅ WebSocket opened for verified user: ${uid}`);
       
       // ✅ Now that the user is authorized, use the powerful adminRtdb
       const dbRef = adminRtdb.ref(`lists/${groupId}/${listId}`);

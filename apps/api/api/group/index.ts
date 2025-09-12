@@ -4,8 +4,6 @@ import { adminRtdb, fs } from '@/utils/firebase'
 import { v4 as uuid } from 'uuid'
 import { auth } from '@/middleware/auth'
 import { getAuth } from 'firebase-admin/auth';
-
-// TODO: Centralize
 interface UserProfile {
   uid: string;
   email?: string | null;
@@ -20,7 +18,7 @@ const route = new Hono()
 // 1) Protect every /api/group/* route
 route.use('*', auth)
 
-// GET /api/groups
+// GET /api/group
 route.get('/', async (c) => {
   const uid = c.get('uid') as string
   const snap = await adminRtdb.ref('groups').once('value')
@@ -88,33 +86,71 @@ route.get('/', async (c) => {
   return c.json(groupsWithProfiles);
 })
 
-// POST /api/groups
+// POST /api/group
 route.post('/', async (c) => {
-  const uid = c.get('uid') as string
-  const { name, memberUids } = await c.req.json<{ name?: string, memberUids?: string[] }>()
+    const uid = c.get('uid') as string;
+    const { name, inviteeUids } = await c.req.json<{ name?: string, inviteeUids?: string[] }>();
 
-  if (!name || typeof name !== 'string') {
-    return c.json({ error: '`name` is required' }, 400)
-  }
-
-  const id = uuid()
-  const newGroup: {name: string, owner: string, members: Record<string, boolean>, createdAt: number} = {
-    name,
-    owner: uid,
-    members: {},
-    createdAt: Date.now(),
-  }
-
-  if(memberUids && Array.isArray(memberUids)) {
-    for (const memberUid of memberUids) {
-      newGroup.members[memberUid] = true;
+    if (!name || typeof name !== 'string') {
+        return c.json({ error: '`name` is required' }, 400);
     }
-  }
 
-  // 5) write under this user’s node
-  await adminRtdb.ref(`groups/${id}`).set(newGroup)
+    const id = uuid();
+    const newGroupForDb = {
+        name,
+        owner: uid,
+        members: { [uid]: true },
+        createdAt: Date.now(),
+    };
 
-  return c.json({ id, ...newGroup })
-})
+    try {
+        // Step 1: Create the group in the Realtime Database.
+        console.log(`Attempting to create group '${name}' in RTDB with id: ${id}`);
+        await adminRtdb.ref(`groups/${id}`).set(newGroupForDb);
+        console.log(`Successfully created group in RTDB.`);
+
+        // Step 2: If there are invitees, send invitations.
+        if (inviteeUids && inviteeUids.length > 0) {
+            console.log(`Attempting to send ${inviteeUids.length} invitations...`);
+            const inviterRecord = await getAuth().getUser(uid);
+            const inviterName = inviterRecord.displayName || inviterRecord.email || 'A user';
+
+            const invitationPromises = inviteeUids.map(inviteeUid => {
+                const invitationRef = fs.collection('group_invitations').doc();
+                const notificationRef = fs.collection('notifications').doc();
+                const batch = fs.batch();
+
+                // Batch the two Firestore writes (invitation + notification)
+                batch.set(invitationRef, { groupId: id, groupName: name, inviterUid: uid, inviterName, inviteeUid, status: 'pending', createdAt: new Date() });
+                batch.set(notificationRef, { recipientUid: inviteeUid, type: 'group_invitation', read: false, createdAt: new Date(), data: { invitationId: invitationRef.id, groupId: id, groupName: name, inviterName } });
+                
+                return batch.commit();
+            });
+
+            await Promise.all(invitationPromises);
+            console.log("Successfully committed all Firestore batches for invitations.");
+        }
+
+        // ✅ Step 3: Create a consistent response object
+        const ownerProfile = await getAuth().getUser(uid);
+        const groupForClient = {
+            id,
+            name: newGroupForDb.name,
+            owner: newGroupForDb.owner,
+            members: [{ // Return members as an array of profiles
+                uid: ownerProfile.uid,
+                displayName: ownerProfile.displayName || null,
+                photoURL: ownerProfile.photoURL || null,
+            }],
+        };
+        
+        return c.json(groupForClient);
+
+    } catch (error) {
+        // This will now catch errors from RTDB, Auth, or Firestore.
+        console.error("❌ Failed to create group or send invitations:", error);
+        return c.json({ error: 'An error occurred during group creation.' }, 500);
+    }
+});
 
 export default route

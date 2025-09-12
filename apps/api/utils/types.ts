@@ -69,3 +69,13 @@ export interface Recipe {
   ingredients: Ingredient [];
   instructions: string[];
 }
+
+export interface GroupInvitation {
+  createdAt: string,
+  groupId: string,
+  groupName: string,
+  inviteeUid: string,
+  inviterName: string, 
+  inviterUid: string,
+  status: string
+}

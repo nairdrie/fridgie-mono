@@ -1,14 +1,22 @@
 import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
 import { adminRtdb, fs } from '@/utils/firebase';
+import type { GroupInvitation } from '@/utils/types';
 
 const route = new Hono();
 
 route.use('*', auth);
 
+// /invitation/accept/:id
 route.post('/', async (c) => {
   const uid = c.get('uid') as string;
-  const invitationId = c.req.param('invitationId');
+  const invitationId = c.req.param('id');
+
+  if(!invitationId) {
+    return c.json({ error: 'Missing invitationId' }, 400);
+  }
+
+  console.log(invitationId);
 
   try {
     const invitationRef = fs.collection('group_invitations').doc(invitationId);
@@ -18,7 +26,7 @@ route.post('/', async (c) => {
       return c.json({ error: 'Invitation not found' }, 404);
     }
 
-    const invitation = invitationDoc.data();
+    const invitation = invitationDoc.data() as GroupInvitation;
 
     if (invitation.inviteeUid !== uid) {
       return c.json({ error: 'Forbidden' }, 403);
@@ -39,7 +47,7 @@ route.post('/', async (c) => {
 
     const batch = fs.batch();
     notificationsSnapshot.docs.forEach(doc => {
-      batch.update(doc.ref, { read: true });
+      batch.delete(doc.ref);
     });
     await batch.commit();
 

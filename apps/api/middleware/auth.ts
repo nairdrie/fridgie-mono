@@ -6,6 +6,7 @@ export async function auth(c: Context, next: Next) {
   const authz = c.req.header('authorization') || ''
   const token = authz.replace(/^Bearer\s+/, '')
   if (!token) {
+    console.error("auth middleware: no token");
     return c.json({ error: 'Unauthorized' }, 401)
   }
   
@@ -15,6 +16,7 @@ export async function auth(c: Context, next: Next) {
     c.set('uid', decoded.uid)
     return await next()
   } catch {
+    console.error("auth middleware: invalid token");
     return c.json({ error: 'Unauthorized' }, 401)
   }
 }

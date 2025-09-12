@@ -36,7 +36,6 @@ route.get('/', async (c) => {
 
     // Filter the full user list in memory on the server
     const filteredUsers = listUsersResult.users.filter(user => {
-        console.log('user', user);
       const displayName = user.displayName?.toLowerCase() || '';
       const email = user.email?.toLowerCase() || '';
       const phoneNumber = user.phoneNumber || ''; // No normalization needed if searching raw digits
