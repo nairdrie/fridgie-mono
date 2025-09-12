@@ -1,6 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import { Group, UserProfile } from '@/types/types';
-import { createGroup, searchUsers, sendGroupInvitation } from '@/utils/api'; // NOTE: You will need to add API functions for updating/deleting groups
+import { ApiError, createGroup, deleteGroup, searchUsers, sendGroupInvitation, updateGroup } from '@/utils/api'; // NOTE: You will need to add API functions for updating/deleting groups
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -126,23 +126,25 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     const handleSaveChanges = async () => {
         setIsSaving(true);
         try {
-            // NOTE: Add your API call to update the group here
-            // await updateGroup(group.id, {
-            //     name: editedName,
-            // });
+            await updateGroup(group.id, {
+                name: editedName,
+                members: members.map(m => m.uid)
+            });
             console.log("Saving changes for group:", group.id);
             onGroupUpdated(); // Refresh the main list
             onToggleExpand(group); // Close the item
         } catch (error) {
-            Alert.alert("Error", "Could not save changes.");
+            if(error instanceof ApiError) {
+                Alert.alert("Error", error.message);
+            }
         } finally {
             setIsSaving(false);
         }
     };
     
-    const handleDeleteGroup = () => {
-        // NOTE: Add your API call to delete the group here
-        console.log("Deleting group", group.id);
+    const handleDeleteGroup = async (group: Group) => {
+        console.log("DELETING GROUP");
+        await deleteGroup(group.id);
         setIsConfirmingDelete(false);
         onGroupUpdated(); // Refresh the main list
     };
@@ -208,8 +210,8 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                                         <TouchableOpacity style={[styles.confirmButton, styles.cancelButton]} onPress={() => setIsConfirmingDelete(false)}>
                                             <Text style={styles.cancelButtonText}>Cancel</Text>
                                         </TouchableOpacity>
-                                        <TouchableOpacity style={[styles.confirmButton, styles.deleteConfirmButton]} onPress={handleDeleteGroup}>
-                                            <Text style={styles.deleteButtonText}>Delete</Text>
+                                        <TouchableOpacity style={[styles.confirmButton, styles.deleteConfirmButton]} onPress={() => handleDeleteGroup(group)}>
+                                            <Text style={styles.deleteConfirmButtonText}>Delete</Text>
                                         </TouchableOpacity>
                                     </View>
                                 </View>
@@ -491,5 +493,6 @@ const styles = StyleSheet.create({
     confirmButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20 },
     cancelButton: { backgroundColor: '#e9ecef' },
     cancelButtonText: { fontWeight: '600' },
-    deleteConfirmButton: { backgroundColor: '#c94444' },
+    deleteConfirmButton: { backgroundColor: '#c94444', color: 'white', marginLeft: 8 },
+    deleteConfirmButtonText: { color: 'white' }
 });

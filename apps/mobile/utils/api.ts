@@ -131,18 +131,21 @@ export async function getGroups(): Promise<Group[]> {
   return res.json()
 }
 
+
+
 // --- Group Management API ---
 export async function sendGroupInvitation(groupId: string, inviteeUid: string): Promise<void> {
-  await authorizedFetch(`${BASE_URL}/groups/${groupId}/invitations`, {
+  console.log("SENDING GROUP INVITE");
+  await authorizedFetch(`${BASE_URL}/group/invitation/${groupId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ inviteeUid }),
   });
 }
 
-export async function updateGroup(groupId: string, updates: { name?: string; removeMemberUid?: string }): Promise<void> {
+export async function updateGroup(groupId: string, updates: { name?: string; members?: string[] }): Promise<void> {
     // Placeholder for updating group name or removing a member
-    await authorizedFetch(`${BASE_URL}/groups/${groupId}`, {
+    await authorizedFetch(`${BASE_URL}/group/${groupId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -150,28 +153,29 @@ export async function updateGroup(groupId: string, updates: { name?: string; rem
 }
 
 export async function deleteGroup(groupId: string): Promise<void> {
-    await authorizedFetch(`${BASE_URL}/groups/${groupId}`, { method: 'DELETE' });
+  console.log("CALLING DELETE GROUP");
+  await authorizedFetch(`${BASE_URL}/group/${groupId}`, { method: 'DELETE' });
 }
 
 
 // --- Invitation Management API ---
 export async function getMyInvitations(): Promise<GroupInvitation[]> {
-  const res = await authorizedFetch(`${BASE_URL}/invitations`);
+  const res = await authorizedFetch(`${BASE_URL}/invitation`);
   return res.json();
 }
 
 export async function acceptGroupInvitation(invitationId: string): Promise<void> {
-  await authorizedFetch(`${BASE_URL}/invitations/${invitationId}/accept`, { method: 'POST' });
+  await authorizedFetch(`${BASE_URL}/invitation/accept/${invitationId}`, { method: 'POST' });
 }
 
 export async function declineGroupInvitation(invitationId: string): Promise<void> {
-  await authorizedFetch(`${BASE_URL}/invitations/${invitationId}/decline`, { method: 'POST' });
+  await authorizedFetch(`${BASE_URL}/invitation/decline/${invitationId}`, { method: 'POST' });
 }
 
 
 // --- Notification API ---
 export async function getMyNotifications(): Promise<any[]> { // Define a proper Notification type later
-    const res = await authorizedFetch(`${BASE_URL}/notifications`);
+    const res = await authorizedFetch(`${BASE_URL}/notification`);
     return res.json();
 }
 
