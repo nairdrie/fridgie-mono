@@ -12,7 +12,8 @@ import { toReadablePhone } from '@/utils/utils'; // Assuming this utility is sti
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { updateEmail, updateProfile } from 'firebase/auth';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -202,6 +203,16 @@ export default function UserProfile() {
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
     const [isCookbookLoading, setIsCookbookLoading] = useState(true);
 
+    const [isFocused, setIsFocused] = useState(false);
+        useFocusEffect(
+            useCallback(() => {
+                setIsFocused(true); // Screen is focused
+                return () => {
+                    setIsFocused(false); // Screen is unfocused
+                };
+            }, [])
+        );
+
      const router = useRouter(); 
 
     const fetchCookbook = useCallback(async () => {
@@ -299,6 +310,8 @@ export default function UserProfile() {
     }
 
     return (
+        <>
+        {isFocused && <StatusBar style="dark" />}
         <SafeAreaView style={styles.container}>
             <View style={styles.headerButtons}>
                 <NotificationBell
@@ -407,6 +420,7 @@ export default function UserProfile() {
                 onDecline={handleDecline}
             />
         </SafeAreaView>
+        </>
     );
 }
 

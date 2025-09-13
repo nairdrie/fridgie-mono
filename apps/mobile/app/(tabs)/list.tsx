@@ -61,6 +61,16 @@ export default function HomeScreen() {
 
     const [cookbookRecipeIds, setCookbookRecipeIds] = useState<Set<string>>(new Set());
 
+    const [isFocused, setIsFocused] = useState(false);
+    useFocusEffect(
+        useCallback(() => {
+            setIsFocused(true); // Screen is focused
+            return () => {
+                setIsFocused(false); // Screen is unfocused
+            };
+        }, [])
+    );
+
     useEffect(() => {
         // 1. Directly command the animation to close. This is the key fix.
         fabAnimation.value = withTiming(0, { duration: 150 });
@@ -439,7 +449,7 @@ export default function HomeScreen() {
 
     return (
         <>
-        <StatusBar style="dark" />
+        {isFocused && <StatusBar style="dark" />}
         <View style={{ flex: 1, backgroundColor: '#fff' }}>
             <KeyboardAvoidingView
                 style={styles.container}

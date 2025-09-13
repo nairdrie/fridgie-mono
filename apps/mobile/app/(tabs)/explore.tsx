@@ -1,15 +1,16 @@
-import Logo from '@/components/Logo'; // 1. Import your Logo component
+import Logo from '@/components/Logo';
+import ViewRecipeModal from '@/components/ViewRecipeModal'; // 1. Import the modal
 import { Recipe } from '@/types/types';
 import { getExploreContent } from '@/utils/api';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-
-// A reusable component for the horizontal carousels (no changes needed here)
-const RecipeCarousel = ({ title, recipes }: { title: string; recipes: Recipe[] }) => (
+// Updated RecipeCarousel to accept the onView handler
+const RecipeCarousel = ({ title, recipes, onView }: { title: string; recipes: Recipe[], onView: (recipeId: string) => void; }) => (
     <View style={styles.carouselContainer}>
         <Text style={styles.sectionTitle}>{title}</Text>
         <FlatList
@@ -18,7 +19,7 @@ const RecipeCarousel = ({ title, recipes }: { title: string; recipes: Recipe[] }
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-                <TouchableOpacity style={styles.recipeCard}>
+                <TouchableOpacity style={styles.recipeCard} onPress={() => onView(item.id)}>
                     <Image source={{ uri: item.photoURL }} style={styles.recipeImage} />
                     <Text style={styles.recipeName} numberOfLines={2}>{item.name}</Text>
                 </TouchableOpacity>
@@ -31,6 +32,18 @@ export default function ExploreScreen() {
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [exploreData, setExploreData] = useState<any>(null);
+    const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null); // 2. Add state for the modal
+
+    const [isFocused, setIsFocused] = useState(false);
+    useFocusEffect(
+        useCallback(() => {
+            setIsFocused(true); // Screen is focused
+            return () => {
+                setIsFocused(false); // Screen is unfocused
+            };
+        }, [])
+    );
+
 
     useEffect(() => {
         const fetchContent = async () => {
@@ -52,20 +65,23 @@ export default function ExploreScreen() {
         console.log(`Searching for: ${searchQuery}`);
     };
 
-    // 2. The JSX is restructured to create the new layout
+    // 3. Handler to open the recipe view modal
+    const handleViewRecipe = (recipeId: string) => {
+        setRecipeToViewId(recipeId);
+    };
+
     return (
         <>
-            <StatusBar style="light" />
+            {isFocused && <StatusBar style="light" />}
             <SafeAreaView style={{ flex: 1, backgroundColor: '#0b2215' }} edges={['top']}>
                 <View style={styles.pageContainer}>
-                    {/* Header section that sits on the dark background */}
                     <View style={styles.headerContent}>
                         <Logo variant="small" style={styles.logo} />
                         <View style={styles.searchContainer}>
                             <Ionicons name="search" size={20} color="#888" style={styles.searchIcon} />
                             <TextInput
                                 style={styles.searchInput}
-                                placeholder="Search recipes & users..."
+                                placeholder="Search people and recipes..."
                                 placeholderTextColor="#c4c4c4ff"
                                 value={searchQuery}
                                 onChangeText={setSearchQuery}
@@ -75,33 +91,44 @@ export default function ExploreScreen() {
                         </View>
                     </View>
 
-                    {/* White content card that holds the scrollable content */}
                     <View style={styles.contentCard}>
                         {isLoading ? (
                             <ActivityIndicator size="large" style={{ marginTop: 50 }} />
                         ) : (
                             <ScrollView showsVerticalScrollIndicator={false}>
                                 {exploreData?.featured?.length > 0 && (
-                                    <RecipeCarousel title="Featured Recipes" recipes={exploreData.featured} />
+                                    <RecipeCarousel title="Featured" recipes={exploreData.featured} onView={handleViewRecipe} />
                                 )}
                                 {exploreData?.trending?.length > 0 && (
-                                    <RecipeCarousel title="Trending Now" recipes={exploreData.trending} />
+                                    <RecipeCarousel title="Trending" recipes={exploreData.trending} onView={handleViewRecipe} />
                                 )}
                                 {exploreData?.newest?.length > 0 && (
-                                    <RecipeCarousel title="Recently Added" recipes={exploreData.newest} />
+                                    <RecipeCarousel title="Recent" recipes={exploreData.newest} onView={handleViewRecipe} />
                                 )}
                             </ScrollView>
                         )}
                     </View>
                 </View>
             </SafeAreaView>
+
+            {/* 4. Add the ViewRecipeModal component */}
+            <ViewRecipeModal
+                isVisible={!!recipeToViewId}
+                onClose={() => setRecipeToViewId(null)}
+                recipeId={recipeToViewId}
+                // These props are optional and depend on whether you want users
+                // to be able to edit/save recipes directly from the Explore page.
+                // For a view-only experience, you can omit them or pass dummy functions.
+                isInCookbook={false} // Or you can check this against the user's cookbook
+                onCookbookUpdate={() => { /* maybe refresh cookbook context */}}
+                onEdit={() => { /* TBD: decide if you want edit from here */}}
+            />
         </>
     );
 }
 
-// 3. The StyleSheet is updated with new and modified styles
+// Styles remain the same
 const styles = StyleSheet.create({
-    // --- New Styles for the Layout ---
     pageContainer: {
         flex: 1,
         backgroundColor: '#0b2215',
@@ -109,13 +136,11 @@ const styles = StyleSheet.create({
     headerContent: {
         flexDirection: 'row',
         alignItems: 'center',
-        // paddingHorizontal: 16,
         paddingVertical: 12,
     },
     logo: {
         width: 60,
         height: 60,
-        // marginRight: 12,
         margin: 0
     },
     contentCard: {
@@ -123,16 +148,14 @@ const styles = StyleSheet.create({
         backgroundColor: 'white',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        paddingTop: 16, // Add space between card edge and first carousel
+        paddingTop: 16,
     },
-
-    // --- Modified & Existing Styles ---
     searchContainer: {
-        flex: 1, // Take remaining space
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.15)', // A subtle transparent white looks good on green
-        borderRadius: 30, // Make it pill-shaped
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        borderRadius: 30,
         paddingHorizontal: 15,
         height: 44,
         marginLeft: 0,
@@ -143,7 +166,7 @@ const styles = StyleSheet.create({
         flex: 1,
         height: '100%',
         fontSize: 16,
-        color: '#fff', // White text for the dark background
+        color: '#fff',
     },
     sectionTitle: {
         fontSize: 22,
@@ -170,3 +193,4 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
 });
+
