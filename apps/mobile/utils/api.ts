@@ -348,6 +348,12 @@ export const getMealPreferences = async (): Promise<MealPreferences> => {
   return res.json()
 };
 
+export async function getExploreContent(): Promise<any> {
+  const res = await authorizedFetch(`${BASE_URL}/explore`);
+  return res.json();
+}
+
+
 // ─────── REAL-TIME UPDATES ──────────────────────────────────────────────────
 
 export async function listenToList(

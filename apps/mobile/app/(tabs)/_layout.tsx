@@ -39,6 +39,7 @@ export default function TabLayout() {
             name="explore"
             options={{
                 title: 'Explore',
+                headerShown: false,
                 tabBarIcon: ({ color }) => (
                     <IonIcons size={28} name="search" color={color} />
                 ),
@@ -71,7 +72,7 @@ export default function TabLayout() {
                     } else {
                         return (
                             <IonIcons size={28} name="person" color={color} />
-                        )               
+                        )
                     }
                 },
                 tabBarShowLabel: false
