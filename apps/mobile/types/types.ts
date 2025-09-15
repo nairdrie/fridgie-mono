@@ -70,6 +70,7 @@ export interface Recipe {
   ingredients: Ingredient[];
   instructions: string[];
   lastAte?: string;
+  tags?: string[]
 }
 
 export interface PendingInvitation {
