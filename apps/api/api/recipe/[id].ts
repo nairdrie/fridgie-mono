@@ -1,6 +1,6 @@
 // api/recipe/index.ts
 import { Hono } from 'hono'
-import { fs } from '@/utils/firebase' // Use Firestore admin
+import { adminAuth, fs } from '@/utils/firebase' // Use Firestore admin
 import { auth } from '@/middleware/auth'
 
 const route = new Hono()
@@ -22,7 +22,10 @@ route.get('/', async (c) => {
   }
 
   const recipeData = recipeDoc.data()
-  return c.json({ id: recipeDoc.id, ...recipeData })
+
+  const author = await adminAuth.getUser(recipeData?.createdBy);
+
+  return c.json({ id: recipeDoc.id, ...recipeData, authorName: author.displayName, authorUid: author.uid })
 })
 
 export default route

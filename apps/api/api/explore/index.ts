@@ -5,6 +5,19 @@ import { getAuth } from 'firebase-admin/auth';
 import OpenAI from 'openai';
 import { FieldPath } from 'firebase-admin/firestore';
 
+interface Creator {
+    uid: string;
+    displayName: string;
+    photoURL: string | null;
+    followers: number;
+    recipes: number;
+    featuredRecipe?: {
+        id: string;
+        name: string;
+        photoURL: string;
+    };
+}
+
 const route = new Hono();
 route.use('*', auth);
 
@@ -39,39 +52,46 @@ route.get('/', async (c) => {
 
 
         // --- 4. Fetch Top Users to Follow ---
-        // (For now, let's just grab a few recent users as an example)
-        const userRecords = await getAuth().listUsers(5);
-        const topUsers = userRecords.users.map(u => ({
-            uid: u.uid,
-            displayName: u.displayName,
-            photoURL: u.photoURL,
-        }));
-
-        // const completion = await openai.chat.completions.create({
-        //     model: 'gpt-4o-mini-search-preview-2025-03-11',
-        //     messages: [
-        //         { role: 'user', content: `Find the best deals in the nofrills flyer this week for postal code M6S5B3. Return the following JSON structure:
-        //             [{
-        //                 'name': 'eg. Bananas',
-        //                 'salePrice': 'eg. $4.00',
-        //                 'originalPrice': 'eg. $8.00',
-        //                 'source': 'eg. https://nofrills...'
-        //             }]
-        //         ` },
-        //     ],
-        //     response_format: { type: 'text' },
-        // });
-
-        // const content = completion.choices?.[0]?.message?.content;
-        // if (!content) throw new Error('AI returned empty content.');
+        const featuredUsersSnapshot = await fs.collection('users').where('featured', '==', true).limit(10).get();
         
-        // console.log(content);
-        
+        let featuredCreators: Creator[] = [];
+
+        if (!featuredUsersSnapshot.empty) {
+            const userDocs = featuredUsersSnapshot.docs;
+            const uidsToFetch = userDocs.map(doc => doc.id);
+
+            // Fetch all Auth user records in a single batch for efficiency
+            const authUsersResult = await getAuth().getUsers(
+                uidsToFetch.map(uid => ({ uid }))
+            );
+
+            // Create a lookup map for easy access (UID -> Auth User Record)
+            const authUsersMap = new Map(
+                authUsersResult.users.map(user => [user.uid, user])
+            );
+
+            // Combine Firestore data with Auth data
+            featuredCreators = userDocs.map(doc => {
+                const userData = doc.data();
+                const authUser = authUsersMap.get(doc.id);
+
+                return {
+                    uid: doc.id,
+                    displayName: authUser?.displayName || 'Anonymous User',
+                    photoURL: authUser?.photoURL || null,
+                    followers: userData.followerCount || 0,
+                    recipes: userData.publicRecipesCount || 0,
+                    featuredRecipe: userData.featuredRecipe
+                };
+            });
+        }
+
+
         // --- 5. Assemble the payload for the client ---
         const exploreData = {
             trending,
             newest,
-            topUsers
+            featuredCreators
         };
 
         return c.json(exploreData);
@@ -85,11 +105,11 @@ async function getRandomRecipes(n: number) {
     // 1. Generate a random 20-character key to act as a starting point.
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let randomKey = '';
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < 20; i++) { // Always generate a full-length key for better distribution
         randomKey += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    // 2. Query for the next 10 documents starting from the random key.
+    // 2. Query for the next n documents starting from the random key.
     const query = await fs.collection('recipes')
         .where(FieldPath.documentId(), '>=', randomKey)
         .limit(n)
@@ -97,7 +117,7 @@ async function getRandomRecipes(n: number) {
 
     let recipes = query.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-    // 3. (Wrap-around) If we got fewer than 10, fetch more from the beginning.
+    // 3. (Wrap-around) If we got fewer than n, fetch more from the beginning.
     if (recipes.length < n) {
         const remainingLimit = n - recipes.length;
         const wrapAroundQuery = await fs.collection('recipes')

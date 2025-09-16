@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
 import  { algoliasearch } from 'algoliasearch';
+import { decodeStream } from 'cheerio';
 
 // --- ⚙️ Configuration ---
 const algoliaAppId = Bun.env.ALGOLIA_APP_ID;
@@ -51,7 +52,12 @@ route.get('/', async (c) => {
         const results: any = res.results
         // Structure the final response
         const response = {
-            recipes: results[0].hits,
+            recipes: results[0].hits.map((hit: any) => ({
+                id: hit.objectID,
+                name: hit.name,
+                description: hit.description,
+                photoURL: hit.photoURL
+            })),
             users: results[1].hits
         };
 

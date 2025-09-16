@@ -89,16 +89,18 @@ route.post('/', async (c) => {
         // Ignore errors if the body is empty or not valid JSON
     }
     
-    // Fetch user's meal preferences from Firestore
-    const prefRef = fs.collection('userPreferences').doc(uid);
-    const prefDoc = await prefRef.get();
+    // Fetch user's meal preferences from their document in the 'users' collection
+    const userRef = fs.collection('users').doc(uid);
+    const userDoc = await userRef.get();
+    const userData = userDoc.data();
 
-    if (!prefDoc.exists) {
+    // Check if the user document or the preferences field exists
+    if (!userDoc.exists || !userData?.preferences) {
         return c.json({ error: 'Meal preferences not set.', action: 'redirect_to_preferences' }, 404);
     }
 
-    // Construct the prompt for the AI based on user preferences
-    const preferences = prefDoc.data() as MealPreferences;
+    // Construct the prompt for the AI based on the nested preferences object
+    const preferences = userData.preferences as MealPreferences;
     const userPromptParts: string[] = ['Generate recipes based on these preferences:'];
 
     if (preferences.dietaryNeeds?.length) userPromptParts.push(`- Dietary Needs: ${preferences.dietaryNeeds.join(', ')}.`);
@@ -130,10 +132,11 @@ route.post('/', async (c) => {
         let recipes: Omit<Recipe, 'id'>[] = [];
         const parsedContent = JSON.parse(content);
 
+        // This logic handles cases where the AI might return an object with a 'recipes' key
+        // instead of a raw array, making parsing more robust.
         if (Array.isArray(parsedContent)) {
             recipes = parsedContent;
         } else if (typeof parsedContent === 'object' && parsedContent !== null) {
-            // Handle cases where the AI might wrap the array in an object
             const key = Object.keys(parsedContent).find(k => Array.isArray(parsedContent[k]));
             if (key) recipes = parsedContent[key];
         }

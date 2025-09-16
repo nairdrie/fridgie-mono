@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import { FieldValue } from 'firebase-admin/firestore'
-import { adminRtdb, fs } from '@/utils/firebase'
+import { adminAuth, adminRtdb, fs } from '@/utils/firebase'
 import { auth } from '@/middleware/auth'
 import type { Group, Meal } from '@/utils/types'
+import { getAuth } from 'firebase-admin/auth'
 
 const route = new Hono()
 
@@ -142,17 +143,48 @@ route.get('/', async (c) => {
     }
 
     // --- Step 4: Fetch full recipe documents from Firestore and merge `lastAte` data ---
-    const recipesSnapshot = await fs.collection('recipes').where('__name__', 'in', recipeIds).get()
-    
-    const recipes = recipesSnapshot.docs.map(doc => {
-      const recipeData = doc.data();
-      const lastAteDate = lastAteMap.get(doc.id);
+    const recipesSnapshot = await fs.collection('recipes').where('__name__', 'in', recipeIds).get();
 
-      return {
-        id: doc.id,
-        ...recipeData,
-        lastAte: lastAteDate ? lastAteDate.toISOString() : null,
-      };
+    // 2. Get a list of *unique* author UIDs using a Set
+    const uniqueAuthorUids = [...new Set(recipesSnapshot.docs.map(doc => doc.data().createdBy))];
+
+    // 3. Batch-fetch all unique authors in parallel
+    const authorPromises = uniqueAuthorUids.map(uid => 
+        getAuth().getUser(uid).catch(error => {
+            // If a user is not found or another error occurs, return null
+            // This prevents one failed lookup from crashing the entire Promise.all
+            console.error(`Could not fetch author for UID: ${uid}`, error.code);
+            return null;
+        })
+    );
+    const authorResults = await Promise.all(authorPromises);
+
+    // 4. Create an easy-to-use map of { uid: displayName } for quick lookups
+    const authorMap = new Map();
+    authorResults.forEach(userRecord => {
+        // Only add to the map if the user was successfully fetched
+        if (userRecord) {
+            authorMap.set(userRecord.uid, userRecord.displayName || 'Unknown Author');
+        }
+    });
+
+    // 5. Finally, map the recipes and attach the author's name from your lookup map
+    const recipes = recipesSnapshot.docs.map(doc => {
+        const recipeData = doc.data();
+        const authorUid = recipeData.createdBy;
+        
+        // This lookup is instant and requires no new API calls
+        const authorName = authorMap.get(authorUid) || 'Unknown Author';
+
+        // (Your existing logic for lastAteDate)
+        // const lastAteDate = lastAteMap.get(doc.id);
+
+        return {
+            id: doc.id,
+            ...recipeData,
+            // lastAte: lastAteDate ? lastAteDate.toISOString() : null,
+            author: authorName,
+        };
     });
 
     return c.json(recipes)
