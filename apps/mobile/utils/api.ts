@@ -9,7 +9,7 @@ import {
   User
 } from "firebase/auth";
 import { Platform } from 'react-native';
-import { Group, Item, Meal, MealPreferences, PendingInvitation, Recipe } from "../types/types";
+import { Group, Item, Meal, MealPreferences, PendingInvitation, Recipe, UserSearchResult } from "../types/types";
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
@@ -301,6 +301,12 @@ export async function saveRecipe(recipe: Recipe): Promise<Recipe> {
   });
   return res.json();
 }
+
+export async function searchAll(query: string): Promise<{ recipes: Recipe[], users: UserSearchResult[] }> {
+  const res = await authorizedFetch(`${BASE_URL}/explore/search?q=${encodeURIComponent(query)}`);
+  return res.json();
+}
+
 
 export async function getRecipe(recipeId: string): Promise<Recipe> {
   const res = await authorizedFetch(`${BASE_URL}/recipe/${recipeId}`);

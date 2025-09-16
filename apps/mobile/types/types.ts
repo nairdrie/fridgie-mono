@@ -80,3 +80,11 @@ export interface PendingInvitation {
     inviterName: string;
     invitee: UserProfile; // Enriched with invitee details for the frontend
 }
+
+export interface UserSearchResult {
+  objectID: string; // From Algolia
+  displayName: string;
+  photoURL: string;
+  email: string;
+  // Add other fields you indexed, like email
+}

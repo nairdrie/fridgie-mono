@@ -1,7 +1,8 @@
 import Logo from '@/components/Logo';
+import RecipeCard from '@/components/RecipeCard';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
-import { Recipe } from '@/types/types';
-import { getExploreContent } from '@/utils/api';
+import { Recipe, UserSearchResult } from '@/types/types';
+import { getExploreContent, searchAll } from '@/utils/api';
 import { getCardStyleFromTags } from '@/utils/recipeStyling';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
@@ -112,6 +113,8 @@ export default function ExploreScreen() {
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     const [isFocused, setIsFocused] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [searchResults, setSearchResults] = useState<{ recipes: Recipe[]; users: UserSearchResult[] }>({ recipes: [], users: [] });
+    const [isSearching, setIsSearching] = useState(false);
 
     useFocusEffect(
         useCallback(() => {
@@ -139,6 +142,30 @@ export default function ExploreScreen() {
         };
         initialLoad();
     }, [fetchContent]);
+
+     useEffect(() => {
+        if (searchQuery.trim() === '') {
+            setSearchResults({ recipes: [], users: [] });
+            setIsSearching(false);
+            return;
+        }
+
+        setIsSearching(true);
+        const timer = setTimeout(async () => {
+            try {
+                // Use the new searchAll function
+                const results = await searchAll(searchQuery);
+                setSearchResults(results);
+            } catch (error) {
+                console.error("Search failed:", error);
+                setSearchResults({ recipes: [], users: [] });
+            } finally {
+                setIsSearching(false);
+            }
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
     
     const onRefresh = useCallback(async () => {
         setIsRefreshing(true);
@@ -146,13 +173,61 @@ export default function ExploreScreen() {
         setIsRefreshing(false);
     }, [fetchContent]);
 
-    const handleSearch = () => {
-        if (!searchQuery) return;
-        console.log(`Searching for: ${searchQuery}`);
-    };
-
     const handleViewRecipe = (recipeId: string) => {
         setRecipeToViewId(recipeId);
+    };
+
+    const renderSearchResults = () => {
+        const hasNoResults = searchResults.recipes.length === 0 && searchResults.users.length === 0;
+
+        if (isSearching) {
+            return <ActivityIndicator size="large" style={{ marginTop: 50 }} />;
+        }
+
+        if (hasNoResults) {
+            return <Text style={styles.noResultsText}>No results found for "{searchQuery}"</Text>;
+        }
+
+        return (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+                {/* Users Section */}
+                {searchResults.users.length > 0 && (
+                    <View>
+                        <Text style={styles.sectionTitle}>People</Text>
+                        {searchResults.users.map(user => (
+                            <View key={user.objectID} style={styles.searchResultUserContainer}>
+                                {/* The UserCard component here is the one you defined above */}
+                                <UserCard creator={{ 
+                                    uid: user.objectID,
+                                    displayName: user.displayName,
+                                    photoURL: user.photoURL,
+                                    // Add dummy data for fields not in search result
+                                    followers: 0, 
+                                    recipeCount: 0,
+                                    popularRecipe: { name: '', photoURL: '' }
+                                }} />
+                            </View>
+                        ))}
+                    </View>
+                )}
+
+                {/* Recipes Section */}
+                {searchResults.recipes.length > 0 && (
+                    <View>
+                        <Text style={styles.sectionTitle}>Recipes</Text>
+                        {searchResults.recipes.map(recipe => (
+                             <View key={recipe.id} style={styles.searchResultItemContainer}>
+                                <RecipeCard
+                                    recipe={recipe}
+                                    onView={handleViewRecipe}
+                                    onAddToMealPlan={() => {}}
+                                />
+                            </View>
+                        ))}
+                    </View>
+                )}
+            </ScrollView>
+        );
     };
 
     return (
@@ -170,7 +245,6 @@ export default function ExploreScreen() {
                                 placeholderTextColor="#c4c4c4ff"
                                 value={searchQuery}
                                 onChangeText={setSearchQuery}
-                                onSubmitEditing={handleSearch}
                                 returnKeyType="search"
                             />
                         </View>
@@ -180,26 +254,30 @@ export default function ExploreScreen() {
                         {isLoading ? (
                             <ActivityIndicator size="large" style={{ marginTop: 50 }} />
                         ) : (
-                            <ScrollView 
-                                showsVerticalScrollIndicator={false}
-                                refreshControl={
-                                    <RefreshControl
-                                        refreshing={isRefreshing}
-                                        onRefresh={onRefresh}
-                                        tintColor="#333"
-                                    />
-                                }
-                            >
-                                {exploreData?.trending?.length > 0 && (
-                                    <RecipeCarousel title="For You" recipes={exploreData.trending} onView={handleViewRecipe} />
-                                )}
-                                {exploreData?.featuredCreators?.length > 0 && (
-                                    <CreatorCarousel title="Featured Creators" creators={exploreData.featuredCreators} />
-                                )}
-                                {exploreData?.newest?.length > 0 && (
-                                    <RecipeCarousel title="Recent" recipes={exploreData.newest} onView={handleViewRecipe} />
-                                )}
-                            </ScrollView>
+                            searchQuery.trim().length > 0 ? (
+                                renderSearchResults()
+                            ) : (
+                                <ScrollView 
+                                    showsVerticalScrollIndicator={false}
+                                    refreshControl={
+                                        <RefreshControl
+                                            refreshing={isRefreshing}
+                                            onRefresh={onRefresh}
+                                            tintColor="#333"
+                                        />
+                                    }
+                                >
+                                    {exploreData?.trending?.length > 0 && (
+                                        <RecipeCarousel title="For You" recipes={exploreData.trending} onView={handleViewRecipe} />
+                                    )}
+                                    {exploreData?.featuredCreators?.length > 0 && (
+                                        <CreatorCarousel title="Featured Creators" creators={exploreData.featuredCreators} />
+                                    )}
+                                    {exploreData?.newest?.length > 0 && (
+                                        <RecipeCarousel title="Recent" recipes={exploreData.newest} onView={handleViewRecipe} />
+                                    )}
+                                </ScrollView>
+                            )
                         )}
                     </View>
                 </View>
@@ -231,6 +309,12 @@ const styles = StyleSheet.create({
         width: 60,
         height: 60,
         margin: 0
+    },
+    noResultsText: {
+        textAlign: 'center',
+        marginTop: 50,
+        fontSize: 16,
+        color: '#6c757d',
     },
     contentCard: {
         flex: 1,
@@ -347,6 +431,13 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    searchResultItemContainer: {
+        paddingHorizontal: 16,
+    },
+    searchResultUserContainer: {
+        paddingHorizontal: 16,
+        marginBottom: 16,
     },
 });
 
