@@ -11,7 +11,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// TODO: clickables on recipe search result
 // TODO: clickable users in search result (go to profile)
 // TODO: make like 20 chefs minimum with recipes
 
@@ -21,20 +20,13 @@ interface Creator {
     displayName: string;
     photoURL: string;
     followers: number;
-    recipeCount: number;
-    popularRecipe: {
+    recipes: number;
+    featuredRecipe?: {
+        id: string;
         name: string;
         photoURL: string;
     };
 }
-
-// --- MOCK DATA for Featured Creators ---
-// Moved outside the component to prevent re-creation on every render, which caused the infinite loop.
-const featuredCreators: Creator[] = [
-    { uid: '1', displayName: 'J. Kenji López-Alt', photoURL: 'https://i.pravatar.cc/150?u=1', followers: 125000, recipeCount: 84, popularRecipe: { name: 'Crispy Smashed Potatoes', photoURL: 'https://images.unsplash.com/photo-1615995219758-c8de1594a111?w=400' } },
-    { uid: '2', displayName: 'Yotam Ottolenghi', photoURL: 'https://i.pravatar.cc/150?u=2', followers: 210000, recipeCount: 112, popularRecipe: { name: 'Roasted Eggplant with Tahini', photoURL: 'https://images.unsplash.com/photo-1620117654382-efe99965b833?w=400' } },
-    { uid: '3', displayName: 'Alison Roman', photoURL: 'https://i.pravatar.cc/150?u=3', followers: 98000, recipeCount: 65, popularRecipe: { name: 'The Stew', photoURL: 'https://images.unsplash.com/photo-1548943487-a2e4e43b4853?w=400' } },
-];
 
 // Reusable component for the horizontal recipe carousels
 const RecipeCarousel = ({ title, recipes, onView }: { title: string; recipes: Recipe[], onView: (recipeId:string) => void; }) => {
@@ -64,7 +56,7 @@ const RecipeCarousel = ({ title, recipes, onView }: { title: string; recipes: Re
                 data={recipes}
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item) => `${title}-${item.id}`}
                 contentContainerStyle={{ paddingRight: 16 }}
                 renderItem={renderRecipeItem} // 👈 Use the new render function
             />
@@ -82,14 +74,14 @@ const UserCard = ({ creator, fullWidth }: { creator: Creator, fullWidth?: boolea
                 <View style={styles.userStats}>
                     <Text style={styles.userStatText}>{creator.followers.toLocaleString()} followers</Text>
                     <Text style={styles.userStatSeparator}>•</Text>
-                    <Text style={styles.userStatText}>{creator.recipeCount} recipes</Text>
+                    <Text style={styles.userStatText}>{creator.recipes} recipes</Text>
                 </View>
             </View>
         </View>
-        { !fullWidth &&
+        { (!fullWidth && creator.featuredRecipe) &&
             <View style={styles.popularRecipe}>
-                <Image source={{ uri: creator.popularRecipe.photoURL }} style={styles.popularRecipeImage} />
-                <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.popularRecipe.name}</Text>
+                <Image source={{ uri: creator.featuredRecipe.photoURL }} style={styles.popularRecipeImage} />
+                <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.featuredRecipe.name}</Text>
             </View>
         }
     </TouchableOpacity>
@@ -133,7 +125,7 @@ export default function ExploreScreen() {
         try {
             const content = await getExploreContent();
             // We are adding our mock data to the fetched content for now
-            setExploreData({ ...content, featuredCreators });
+            setExploreData({ ...content });
         } catch (error) {
             console.error(error);
         }
@@ -180,6 +172,7 @@ export default function ExploreScreen() {
     }, [fetchContent]);
 
     const handleViewRecipe = (recipeId: string) => {
+        console.log("CLICKED VIEW RECIPE", recipeId)
         setRecipeToViewId(recipeId);
     };
 
@@ -209,8 +202,8 @@ export default function ExploreScreen() {
                                     photoURL: user.photoURL,
                                     // Add dummy data for fields not in search result
                                     followers: 0, 
-                                    recipeCount: 0,
-                                    popularRecipe: { name: '', photoURL: '' }
+                                    recipes: 0,
+                                    featuredRecipe: { id: '',name: '', photoURL: '' }
                                 }} />
                             </View>
                         ))}

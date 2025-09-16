@@ -5,6 +5,8 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useMemo, useState } from "react";
 import { Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
+// TODO: fractional conversions eg. 3 1/2 cup
+
 const UNITS = ['g', 'oz', 'ml', 'cups', 'tbsp'];
 const CONVERSIONS: { [key: string]: { toBase: (v: number) => number; fromBase: (b: number) => number; unit: string, variations: RegExp } } = {
     g:     { toBase: v => v,            fromBase: b => b,            unit: 'g',    variations: /^g(rams?)?$/i },

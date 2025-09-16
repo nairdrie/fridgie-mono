@@ -2,7 +2,6 @@
 
 import { Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { format } from 'date-fns';
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -40,11 +39,18 @@ export default function RecipeCard({ recipe, onAddToMealPlan, onView }: RecipeCa
                         </Text>
                     </View>
                 )}
+                {recipe.authorName && 
+                    <View>
+                        <Text style={styles.dateLabelText}>
+                            {recipe.authorName}
+                        </Text>
+                    </View>
+                }
                 <Text style={styles.cardDescription} numberOfLines={2}>{recipe.description}</Text>
             </View>
-            <TouchableOpacity style={styles.addButton} onPress={() => onAddToMealPlan(recipe)}>
+            {/* <TouchableOpacity style={styles.addButton} onPress={() => onAddToMealPlan(recipe)}>
                 <Ionicons name="add-circle" size={36} color={primary} />
-            </TouchableOpacity>
+            </TouchableOpacity> */}
         </TouchableOpacity>
     );
 }
@@ -69,6 +75,7 @@ const styles = StyleSheet.create({
     },
     dateLabelText: {
         // marginHorizontal: 5,
+        marginBottom: 3,
         color: primary,
         fontWeight: '500',
         fontSize: 12,
