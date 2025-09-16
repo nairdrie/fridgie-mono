@@ -54,9 +54,19 @@ You MUST return a raw JSON array with exactly 3 recipe objects, matching this st
             "Step 1...",
             "Step 2...",
             "Step 3..."
+        ],
+        "tags": [
+            "Tag 1",
+            "Tag 2"
         ]
     }
 ]
+
+Add some relevant tags to the recipe in the "tags" array. Use the following tags and add them as applicable to the recipe:
+'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 
+'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 
+'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese', 
+(or other cuisine type if it doesn't fit in one of these)
 
 DO NOT include markdown, code fences, or any text outside of the JSON array.
 `;

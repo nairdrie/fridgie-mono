@@ -22,8 +22,19 @@ You MUST return a single raw JSON object matching this exact structure. Do not i
   "instructions": [
     "Step 1...",
     "Step 2..."
-  ]
+  ],
+  "tags": [
+    "Tag 1",
+    "Tag 2"
+  ],
+  photoURL: "the photo URL of the recipe, if available"
 }
+
+Add some relevant tags to the recipe in the "tags" array. Use the following tags and add them as applicable to the recipe:
+'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 
+'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 
+'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese', 
+(or other cuisine type if it doesn't fit in one of these)
 
 DO NOT include markdown, code fences, or any text outside of the JSON object.
 
@@ -31,6 +42,8 @@ Separate preparation methods from ingredient names. For example, if you find "1 
 
 If an ingredient's quantity is listed with multiple units (e.g., '200g / 7 oz'), you must only use the first value and unit listed. The output for the example should be '200g'.
 `;
+
+// TODO: remove photo stealing
 
 route.use('*', auth);
 

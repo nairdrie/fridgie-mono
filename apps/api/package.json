@@ -11,6 +11,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "algoliasearch": "^5.37.0",
     "axios": "^1.11.0",
     "cheerio": "^1.1.2",
     "cookie": "^1.0.2",
