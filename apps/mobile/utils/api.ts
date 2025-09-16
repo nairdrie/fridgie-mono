@@ -269,7 +269,7 @@ import { storage } from './firebase';
 
 export async function uploadImage(uri: string, path: string): Promise<string> {
   if(!auth.currentUser) throw new Error("User not found");
-  if(!uri.startsWith('file://')) {
+  if(!uri.startsWith('file://') && !uri.startsWith('data:image')) {
     return uri;
   }
   const response = await fetch(uri);

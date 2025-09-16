@@ -14,6 +14,13 @@ interface ViewRecipeModalProps {
   onCookbookUpdate: () => void;
 }
 
+// TODO: add to meal plan beside add to cookbook (from explore esp.)
+// TODO: remove edit button if not owner 
+// TODO: ensure forking is working. (if I add to meal plan or cookbook, we dont need to. unless i want to edit)
+// TODO: author, likes, comments 
+// TODO: report recipe (for image or inappropriate content)
+
+
 export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, isInCookbook, onCookbookUpdate }: ViewRecipeModalProps) {
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [isFetching, setIsFetching] = useState(false);

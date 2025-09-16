@@ -11,6 +11,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+// TODO: clickables on recipe search result
+// TODO: clickable users in search result (go to profile)
+// TODO: make like 20 chefs minimum with recipes
+
 // --- Types for our new Creator section ---
 interface Creator {
     uid: string;
@@ -34,7 +38,6 @@ const featuredCreators: Creator[] = [
 
 // Reusable component for the horizontal recipe carousels
 const RecipeCarousel = ({ title, recipes, onView }: { title: string; recipes: Recipe[], onView: (recipeId:string) => void; }) => {
-    
     const renderRecipeItem = ({ item }: { item: Recipe }) => {
         // Get the dynamic style based on tags
         const cardStyle = getCardStyleFromTags(item.tags);
@@ -70,8 +73,8 @@ const RecipeCarousel = ({ title, recipes, onView }: { title: string; recipes: Re
 };
 
 // --- New Component for the User Card ---
-const UserCard = ({ creator }: { creator: Creator }) => (
-    <TouchableOpacity style={styles.userCard}>
+const UserCard = ({ creator, fullWidth }: { creator: Creator, fullWidth?: boolean }) => (
+    <TouchableOpacity style={[styles.userCard, fullWidth && styles.fullWidthUserCard]}>
         <View style={styles.userCardHeader}>
             <Image source={{ uri: creator.photoURL }} style={styles.userAvatar} />
             <View style={styles.userInfo}>
@@ -83,12 +86,15 @@ const UserCard = ({ creator }: { creator: Creator }) => (
                 </View>
             </View>
         </View>
-        <View style={styles.popularRecipe}>
-            <Image source={{ uri: creator.popularRecipe.photoURL }} style={styles.popularRecipeImage} />
-            <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.popularRecipe.name}</Text>
-        </View>
+        { !fullWidth &&
+            <View style={styles.popularRecipe}>
+                <Image source={{ uri: creator.popularRecipe.photoURL }} style={styles.popularRecipeImage} />
+                <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.popularRecipe.name}</Text>
+            </View>
+        }
     </TouchableOpacity>
 );
+
 
 // --- New Component for the Creator Carousel ---
 const CreatorCarousel = ({ title, creators }: { title: string; creators: Creator[] }) => (
@@ -197,7 +203,7 @@ export default function ExploreScreen() {
                         {searchResults.users.map(user => (
                             <View key={user.objectID} style={styles.searchResultUserContainer}>
                                 {/* The UserCard component here is the one you defined above */}
-                                <UserCard creator={{ 
+                                <UserCard fullWidth={true} creator={{ 
                                     uid: user.objectID,
                                     displayName: user.displayName,
                                     photoURL: user.photoURL,
@@ -367,6 +373,7 @@ const styles = StyleSheet.create({
     },
     // --- New Styles for User Card ---
     userCard: {
+        justifyContent: 'center',
         width: 280,
         marginLeft: 16,
         backgroundColor: '#f8f9fa',
@@ -375,10 +382,13 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#e9ecef'
     },
+    fullWidthUserCard: {
+        width: '100%',
+        marginLeft: 0
+    }, 
     userCardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 10,
     },
     userAvatar: {
         width: 44,
@@ -412,6 +422,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'white',
         borderRadius: 8,
         padding: 8,
+        marginTop: 10
     },
     popularRecipeImage: {
         width: 32,

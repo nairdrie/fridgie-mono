@@ -19,6 +19,10 @@ import {
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
+// TODO: if its already in cookbook, dont show add to cookbook buttons 
+// TODO: dont show if they add date in the past immediately. only on app open. 
+// TODO: push notifications
+
 // A helper function to mark a meal as rated to prevent re-prompting
 const markMealAsRated = async (mealId: string) => {
     try {
