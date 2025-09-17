@@ -14,8 +14,9 @@ import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
 // your API root
-const BASE_URL = "http://192.168.2.193:3000/api" // LOCAL
+// const BASE_URL = "http://192.168.2.193:3000/api" // LOCAL
 // const BASE_URL = "http://35.182.135.90:3000/api" // AWS
+const BASE_URL = "https://api.fridgie.ca/api" // PROD
 
 export interface GroupInvitation {
   id: string;
