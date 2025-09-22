@@ -4,7 +4,7 @@ import { serve } from 'bun'
 import fg from 'fast-glob'
 import { cors } from 'hono/cors'
 import { ref, onValue } from 'firebase/database'
-import { adminAuth, adminRtdb, clientRtdb } from './utils/firebase'      // adjust if needed
+import { adminAuth, adminRtdb, clientRtdb } from './utils/firebase'
 import type { ServerWebSocket } from 'bun'
 import type { DataSnapshot } from 'firebase-admin/database'
 

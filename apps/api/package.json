@@ -4,8 +4,7 @@
   "type": "module",
   "private": true,
   "devDependencies": {
-    "@types/bun": "latest",
-    "fast-glob": "^3.3.3"
+    "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -20,7 +19,8 @@
     "firebase-admin": "^13.4.0",
     "hono": "4.7.10",
     "lexorank": "^1.0.5",
-    "openai": "^4.100.0"
+    "openai": "^4.100.0",
+    "fast-glob": "^3.3.3"
   },
   "scripts": {
     "dev": "bun --watch index.ts",

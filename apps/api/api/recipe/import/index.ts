@@ -5,7 +5,10 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 const route = new Hono();
-const openai = new OpenAI({ apiKey: Bun.env.OPENAI_API_KEY });
+
+const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
+
+const openai = new OpenAI({ apiKey });
 
 // ✅ 1. Updated prompt to tell the AI it's receiving HTML.
 const parsingSystemPrompt = `

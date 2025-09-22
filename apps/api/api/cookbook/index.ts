@@ -183,6 +183,8 @@ route.get('/', async (c) => {
             id: doc.id,
             ...recipeData,
             // lastAte: lastAteDate ? lastAteDate.toISOString() : null,
+            authorName: authorName,
+            authorUid: authorUid,
             author: authorName,
         };
     });

@@ -24,8 +24,12 @@ COPY . .
 # copy production dependencies and source code into final image
 FROM base AS release
 COPY --from=install /temp/prod/node_modules node_modules
-COPY --from=prerelease /usr/src/app/index.ts .
 COPY --from=prerelease /usr/src/app/package.json .
+COPY --from=prerelease /usr/src/app/tsconfig.json . 
+COPY --from=prerelease /usr/src/app/index.ts .
+COPY --from=prerelease /usr/src/app/utils ./utils
+COPY --from=prerelease /usr/src/app/middleware ./middleware
+COPY --from=prerelease /usr/src/app/api ./api
 
 # run the app
 USER bun

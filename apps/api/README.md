@@ -16,6 +16,6 @@ To container:
 
 ```bash
 rm -rf node_modules bun.lock
-bun install --production
+bun install
 docker build -t fridgie:0.x .
 ```

@@ -4,8 +4,8 @@ import  { algoliasearch } from 'algoliasearch';
 import { decodeStream } from 'cheerio';
 
 // --- ⚙️ Configuration ---
-const algoliaAppId = Bun.env.ALGOLIA_APP_ID;
-const algoliaAdminKey = Bun.env.ALGOLIA_READ_KEY; // Use ADMIN key on the backend
+const algoliaAppId = process.env.ALGOLIA_APP_ID || Bun.env.ALGOLIA_APP_ID;
+const algoliaAdminKey = process.env.ALGOLIA_READ_KEY || Bun.env.ALGOLIA_READ_KEY; // Use ADMIN key on the backend
 
 if (!algoliaAppId || !algoliaAdminKey) {
     throw new Error("Missing Algolia App ID or Admin Key in environment variables.");
