@@ -357,7 +357,6 @@ export default function UserProfile() {
                 </View>
             </View>
             <View style={styles.feedContainer}>
-                <Text style={styles.sectionTitle}>My Cookbook</Text>
                 <Cookbook
                     recipes={cookbook}
                     isLoading={isCookbookLoading}
@@ -518,7 +517,8 @@ const styles = StyleSheet.create({
     },
     feedContainer: {
         paddingHorizontal: 16,
-        flex: 1
+        flex: 1,
+        paddingTop: 16
     },
     sectionTitle: {
         fontSize: 22,

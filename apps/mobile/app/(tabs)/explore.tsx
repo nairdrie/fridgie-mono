@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 // TODO: clickable users in search result (go to profile)
 // TODO: make like 20 chefs minimum with recipes
+// TODO: when adding a recipe to meal plan from viewrecipemodal its not there right away. 
 
 // --- Types for our new Creator section ---
 interface Creator {

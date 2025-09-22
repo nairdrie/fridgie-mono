@@ -27,7 +27,6 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="fridgie"/>
         <data android:scheme="exp+fridgie"/>
-        <data android:scheme="com.nairdrie.fridgie"/>
       </intent-filter>
     </activity>
   </application>

@@ -2,7 +2,6 @@
 
 import { Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
-import { format } from 'date-fns';
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -32,20 +31,13 @@ export default function RecipeCard({ recipe, onAddToMealPlan, onView }: RecipeCa
             )}
             <View style={styles.cardContent}>
                 <Text style={styles.cardTitle} numberOfLines={1}>{recipe.name}</Text>
-                {recipe.lastAte && (
+                {recipe.authorName && (
                     <View style={styles.dateLabel}>
-                        <Text style={styles.dateLabelText}>
-                            {format(new Date(recipe.lastAte), 'MMM d, yyyy')}
-                        </Text>
-                    </View>
-                )}
-                {recipe.authorName && 
-                    <View>
                         <Text style={styles.dateLabelText}>
                             {recipe.authorName}
                         </Text>
                     </View>
-                }
+                )}
                 <Text style={styles.cardDescription} numberOfLines={2}>{recipe.description}</Text>
             </View>
             {/* <TouchableOpacity style={styles.addButton} onPress={() => onAddToMealPlan(recipe)}>
@@ -71,7 +63,7 @@ const styles = StyleSheet.create({
         // paddingHorizontal: 8,
         // backgroundColor: '#eefff2ff',
         borderRadius: 12,
-        marginBottom: 8,
+        // marginBottom: 8,
     },
     dateLabelText: {
         // marginHorizontal: 5,

@@ -10,6 +10,9 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-na
 import uuid from 'react-native-uuid';
 import { parseQuantityAndText } from "./QuantityEditorModal";
 
+
+// TODO: delete button on ingredient broken from here. also from list its maybe a little small
+
 const DAYS: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 interface MealCardProps {

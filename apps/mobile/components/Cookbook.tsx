@@ -1,4 +1,5 @@
 // components/Cookbook.tsx
+import { useAuth } from '@/context/AuthContext';
 import { Item, Meal, Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -34,6 +35,8 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
     // State for view/edit modals
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
+
+    const { user } = useAuth();
 
     const handleRefresh = useCallback(async () => {
         setIsRefreshing(true);
@@ -109,11 +112,23 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
                 data={filteredRecipes}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
-                    <RecipeCard
-                        recipe={item}
-                        onAddToMealPlan={handleAddToMealPlan}
-                        onView={handleViewRecipe}
-                    />
+                    <>
+                        {/* {
+                            item.authorUid != user?.uid && (
+                                 <View style={styles.repostRow}>
+                                    <View style={styles.repostContainer}>
+                                        <Ionicons name="repeat" size={16} color="black" />
+                                        <Text style={styles.repostAuthor}>{item.authorName}</Text>
+                                    </View>
+                                 </View>
+                            )
+                        } */}
+                        <RecipeCard
+                            recipe={item}
+                            onAddToMealPlan={handleAddToMealPlan}
+                            onView={handleViewRecipe}
+                        />
+                    </>
                 )}
                 contentContainerStyle={{ paddingBottom: 20 }}
                 ListEmptyComponent={<Text style={styles.emptyText}>No recipes match your search.</Text>}
@@ -161,4 +176,23 @@ const styles = StyleSheet.create({
     emptyText: { textAlign: 'center', marginTop: 20, color: '#6c757d' },
     feedPlaceholder: { alignItems: 'center', justifyContent: 'center', padding: 40, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e9ecef' },
     feedPlaceholderText: { marginTop: 16, fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 20 },
+    repostRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-start'
+    },
+    repostContainer: {
+        marginLeft: 10,
+        backgroundColor: '#d0f1ccff',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 2,
+        borderTopLeftRadius: 8,
+        borderTopRightRadius: 8
+    },
+    repostAuthor: {
+        color: 'black',
+        fontSize: 12,
+        marginLeft: 5
+    }
 });

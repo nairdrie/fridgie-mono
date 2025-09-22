@@ -7,6 +7,8 @@ import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal,
 import uuid from 'react-native-uuid';
 import { getRecipe, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 
+// TODO: import from tiktok. have this work as a share option on apps so we dont have to use the link
+
 interface AddEditRecipeModalProps {
   isVisible: boolean;
   onClose: () => void;
