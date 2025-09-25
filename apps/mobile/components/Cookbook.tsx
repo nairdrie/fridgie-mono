@@ -101,7 +101,7 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
                 <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
                 <TextInput
                     style={styles.searchInput}
-                    placeholder="Search recipes in your cookbook..."
+                    placeholder="Search for recipes..."
                     value={searchTerm}
                     placeholderTextColor={'#999'}
                     onChangeText={setSearchTerm}
