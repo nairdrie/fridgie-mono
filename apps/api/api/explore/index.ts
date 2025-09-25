@@ -4,6 +4,7 @@ import { fs } from '@/utils/firebase'; // Assuming you use Firestore for recipes
 import { getAuth } from 'firebase-admin/auth';
 import OpenAI from 'openai';
 import { FieldPath } from 'firebase-admin/firestore';
+import type { Recipe } from '@/utils/types';
 
 interface Creator {
     uid: string;
@@ -40,7 +41,8 @@ route.get('/', async (c) => {
 
         if(trending.length < 20) {
             const randomRecipes = await getRandomRecipes(20 - trending.length);
-            trending.push(...randomRecipes);
+            
+            trending.push(...randomRecipes.filter(r => !trending.map((tr: Recipe) => tr.id).includes(r.id)));
         }
 
         // --- 2. Fetch New Recipes ---

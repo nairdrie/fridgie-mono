@@ -28,10 +28,12 @@ Add some relevant tags to the recipe in the "tags" array. Use the following tags
 DO NOT include markdown, code fences, or any text outside of the JSON object.
 Separate preparation methods from ingredient names. For example, if you find "1 cup butter, melted", the ingredient name should be just "butter", and you must create a new first step in the instructions array, eg: "Melt the butter."
 If an ingredient's quantity is listed with multiple units (e.g., '200g / 7 oz'), you must only use the first value and unit listed. The output for the example should be '200g'.
+
+If the webpage does not contain a culinary recipe, return only string "RECIPE_NOT_FOUND".
 `;
 
 const transcriptParsingSystemPrompt = `
-You are an expert recipe parsing assistant. Your task is to analyze the provided transcript from a cooking video and extract the recipe details.
+You are an expert recipe parsing assistant. Your task is to analyze the provided transcript and video description from a cooking video and extract the recipe details.
 The transcript will be unstructured text. You must infer the ingredients, quantities, and instructions from the spoken words.
 You MUST return a single raw JSON object matching this exact structure. Do not include any other text, markdown, or code fences.
 {
@@ -45,6 +47,8 @@ You MUST return a single raw JSON object matching this exact structure. Do not i
 Add some relevant tags to the recipe in the "tags" array. Use the following tags and add them as applicable to the recipe:
 'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese', (or other cuisine type if it doesn't fit in one of these)
 DO NOT include markdown, code fences, or any text outside of the JSON object. The video won't have a photo, so always set photoURL to null.
+
+If the transcript or description do not contain a culinary recipe, return only string "RECIPE_NOT_FOUND".
 `;
 
 
@@ -144,6 +148,9 @@ route.post('/', async (c) => {
     }
 
     const recipe = JSON.parse(content);
+    if(recipe.name == 'RECIPE_NOT_FOUND') {
+      throw new Error('No recipe found in the provided content.')
+    }
     return c.json(recipe);
   } catch (error) {
     console.error('Recipe import failed:', error);
