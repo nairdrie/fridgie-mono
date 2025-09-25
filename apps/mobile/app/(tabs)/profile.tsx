@@ -10,7 +10,6 @@ import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
 import { toReadablePhone } from '@/utils/utils';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -24,8 +23,10 @@ import {
     Modal,
     NativeScrollEvent,
     NativeSyntheticEvent,
+    Platform,
     RefreshControl,
     SafeAreaView,
+    StatusBar as SB,
     ScrollView,
     SectionList,
     StyleSheet,
@@ -160,9 +161,15 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
     );
 };
 
-const ProfileHeader = ({ authUser, cookbook, openPhotoModal }: {authUser: User, cookbook: Recipe[], openPhotoModal: any}) => (
+const ProfileHeader = ({ authUser, cookbook, openPhotoModal, setNotificationsVisible, setSettingsModalVisible }: {authUser: User, cookbook: Recipe[], openPhotoModal: any, setNotificationsVisible: any, setSettingsModalVisible: any}) => (
     <>
         <View style={styles.profileContainer}>
+            <View style={styles.headerButtons}>
+                <NotificationBell onPress={() => setNotificationsVisible(true)} />
+                <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
+                    <Ionicons name="settings-outline" size={28} color="#000" />
+                </TouchableOpacity>
+            </View>
             <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
                 {authUser?.photoURL ? (
                     <Image source={{ uri: authUser.photoURL }} style={styles.profileImage} />
@@ -321,12 +328,6 @@ export default function UserProfile() {
         <>
             {isFocused && <StatusBar style="dark" />}
             <SafeAreaView style={styles.container}>
-                <View style={styles.headerButtons}>
-                    <NotificationBell onPress={() => setNotificationsVisible(true)} />
-                    <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
-                        <Ionicons name="settings-outline" size={28} color="#000" />
-                    </TouchableOpacity>
-                </View>
 
                 <SectionList
                     sections={[{
@@ -342,6 +343,8 @@ export default function UserProfile() {
                             authUser={authUser}
                             cookbook={cookbook}
                             openPhotoModal={openPhotoModal}
+                            setNotificationsVisible={setNotificationsVisible}
+                            setSettingsModalVisible={setSettingsModalVisible}
                         />
                     }
                     refreshControl={
@@ -356,6 +359,7 @@ export default function UserProfile() {
                                     placeholder="Search your cookbook..."
                                     value={searchTerm}
                                     onChangeText={setSearchTerm}
+                                    placeholderTextColor={'#999'}
                                 />
                             </View>
                         </View>
@@ -428,19 +432,20 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#f8f9fa',
+        paddingTop: Platform.OS === 'android' ? SB.currentHeight : 0,
     },
     headerButtons: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
-        paddingHorizontal: 10,
         alignItems: 'center',
         position: 'absolute',
-        top: Constants.statusBarHeight + 10,
-        right: 10,
+        top:0,
+        right: 0,
         zIndex: 10,
     },
     settingsButton: {
-        padding: 5,
+        paddingLeft: 15,
+        paddingRight: 9
     },
     profileContainer: {
         alignItems: 'center',
