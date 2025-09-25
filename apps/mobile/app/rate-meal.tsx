@@ -1,5 +1,5 @@
 import { Recipe } from '@/types/types';
-import { addUserCookbookRecipe, getRecipe, submitRecipeFeedback } from '@/utils/api';
+import { addUserCookbookRecipe, getRecipe, getUserCookbook, submitRecipeFeedback } from '@/utils/api';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,8 +19,8 @@ import {
 } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
-// TODO: if its already in cookbook, dont show add to cookbook buttons 
-// TODO: dont show if they add date in the past immediately. only on app open. 
+// TODO: FIXED? if its already in cookbook, dont show add to cookbook buttons
+// TODO: FIXED? dont show if they add date in the past immediately. only on app open.
 // TODO: push notifications
 
 // A helper function to mark a meal as rated to prevent re-prompting
@@ -39,7 +39,7 @@ const markMealAsRated = async (mealId: string) => {
 export default function RateMealScreen() {
     const router = useRouter();
     const { recipeId, mealId } = useLocalSearchParams<{ recipeId: string; mealId?: string }>();
-    
+
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [feedback, setFeedback] = useState('');
@@ -47,6 +47,7 @@ export default function RateMealScreen() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showAddedToCookbook, setShowAddedToCookbook] = useState(false);
     const animatedValue = useRef(new Animated.Value(0)).current;
+    const [isInCookbook, setIsInCookbook] = useState(false);
 
     useEffect(() => {
         if (!recipeId) {
@@ -54,21 +55,26 @@ export default function RateMealScreen() {
             return;
         }
 
-        const fetchRecipe = async () => {
+        const fetchRecipeAndCookbook = async () => {
             try {
                 const fetchedRecipe = await getRecipe(recipeId);
                 setRecipe(fetchedRecipe);
+
+                const cookbook = await getUserCookbook();
+                const isRecipeInCookbook = cookbook.some(r => r.id === recipeId);
+                setIsInCookbook(isRecipeInCookbook);
+
             } catch (error) {
-                console.error("Failed to fetch recipe for rating:", error);
+                console.error("Failed to fetch recipe or cookbook for rating:", error);
                 Alert.alert("Error", "Could not load the recipe details.", [{ text: 'OK', onPress: () => router.back() }]);
             } finally {
                 setIsLoading(false);
             }
         };
 
-        fetchRecipe();
+        fetchRecipeAndCookbook();
     }, [recipeId]);
-    
+
     const handleDislike = () => {
         setStep('feedback');
     };
@@ -80,7 +86,11 @@ export default function RateMealScreen() {
             if (mealId) {
                 await markMealAsRated(mealId);
             }
-            setStep('liked');
+            if (isInCookbook) {
+                router.replace('/list');
+            } else {
+                setStep('liked');
+            }
         } catch (error) {
             console.error("Failed to submit 'like' feedback:", error);
             Alert.alert("Error", "Could not save your rating. Please try again.");
@@ -88,7 +98,7 @@ export default function RateMealScreen() {
             setIsSubmitting(false);
         }
     };
-    
+
     const handleSubmitFeedback = async () => {
         if (!feedback.trim()) {
             Alert.alert("Please provide some feedback before submitting.");
@@ -112,7 +122,7 @@ export default function RateMealScreen() {
 
     const handleAddToCookbook = async () => {
         setIsSubmitting(true);
-        try { 
+        try {
             await addUserCookbookRecipe(recipe!.id);
             setShowAddedToCookbook(true);
             Animated.timing(animatedValue, {
@@ -155,7 +165,7 @@ export default function RateMealScreen() {
 
         if (!result.canceled) {
             const photoUri = result.assets[0].uri;
-            
+
             // [FIX] Update the recipe state to immediately display the new photo
             // instead of showing an alert.
             setRecipe(prevRecipe => {
@@ -166,12 +176,12 @@ export default function RateMealScreen() {
                 };
             });
 
-            // In a real app, you would now trigger an async upload of this photoUri 
+            // In a real app, you would now trigger an async upload of this photoUri
             // to your backend and update the permanent recipe photoURL.
         }
     };
 
-    
+
     // This would navigate to the screen that presents the AddEditRecipeModal
     const handleEditRecipe = () => {
         // The implementation depends on your navigation setup.
@@ -274,13 +284,17 @@ export default function RateMealScreen() {
                                         </TouchableOpacity>
                                     </View>
                                 )}
-                                <Text style={styles.subtitle}>Would you like to add it to your personal cookbook for next time?</Text>
-                                <TouchableOpacity style={[styles.primaryButton, isSubmitting && styles.disabledButton]} onPress={handleAddToCookbook} disabled={isSubmitting}>
-                                    {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Yes, Add to Cookbook</Text>}
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.secondaryButton} onPress={handleSkipAddToCookbook}>
-                                    <Text style={styles.secondaryButtonText}>No, Thanks</Text>
-                                </TouchableOpacity>
+                                {!isInCookbook && (
+                                    <>
+                                        <Text style={styles.subtitle}>Would you like to add it to your personal cookbook for next time?</Text>
+                                        <TouchableOpacity style={[styles.primaryButton, isSubmitting && styles.disabledButton]} onPress={handleAddToCookbook} disabled={isSubmitting}>
+                                            {isSubmitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Yes, Add to Cookbook</Text>}
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={handleSkipAddToCookbook}>
+                                            <Text style={styles.secondaryButtonText}>No, Thanks</Text>
+                                        </TouchableOpacity>
+                                    </>
+                                )}
                             </>
                         )}
 
@@ -297,7 +311,6 @@ export default function RateMealScreen() {
         </KeyboardAwareScrollView>
     );
 }
-
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: '#fff' },
     container: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },

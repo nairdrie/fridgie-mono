@@ -3,10 +3,10 @@
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import {
-  getAuth,
-  getIdToken,
-  signInAnonymously,
-  User
+    getAuth,
+    getIdToken,
+    signInAnonymously,
+    User
 } from "firebase/auth";
 import { Platform } from 'react-native';
 import { Group, Item, Meal, MealPreferences, PendingInvitation, Recipe, UserSearchResult } from "../types/types";
@@ -129,6 +129,11 @@ export async function categorizeList(
 
 export async function getGroups(): Promise<Group[]> {
   const res = await authorizedFetch(`${BASE_URL}/group`)
+  return res.json()
+}
+
+export async function getUserProfile(uid: string): Promise<User> {
+  const res = await authorizedFetch(`${BASE_URL}/user/${uid}`)
   return res.json()
 }
 
@@ -477,8 +482,9 @@ export async function removeUserCookbookRecipe(recipeId: string): Promise<void> 
 /**
  * Retrieves the current user's personal cookbook (a list of recipes).
  */
-export async function getUserCookbook(): Promise<Recipe[]> {
-  const res = await authorizedFetch(`${BASE_URL}/cookbook`);
+export async function getUserCookbook(uid: string): Promise<Recipe[]> {
+  console.log("getting cookbook for uid", uid);
+  const res = await authorizedFetch(`${BASE_URL}/cookbook/${uid}`);
   return res.json();
 }
 

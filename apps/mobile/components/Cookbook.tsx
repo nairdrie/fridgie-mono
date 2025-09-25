@@ -90,7 +90,7 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
         return (
             <View style={styles.feedPlaceholder}>
                 <Ionicons name="receipt-outline" size={48} color="#ccc" />
-                <Text style={styles.feedPlaceholderText}>Your saved recipes will appear here.</Text>
+                <Text style={styles.feedPlaceholderText}>Nothing to see here.</Text>
             </View>
         );
     }

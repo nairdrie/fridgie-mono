@@ -61,6 +61,8 @@ export default function HomeScreen() {
 
     const [cookbookRecipeIds, setCookbookRecipeIds] = useState<Set<string>>(new Set());
 
+    const hasCheckedForUnratedMeals = useRef(false);
+
     const [isFocused, setIsFocused] = useState(false);
     useFocusEffect(
         useCallback(() => {
@@ -392,13 +394,23 @@ export default function HomeScreen() {
 
     useFocusEffect(
         useCallback(() => {
+            // Immediately return if the check has already been done for this session
+            if (hasCheckedForUnratedMeals.current) {
+                return;
+            }
+
             const checkForPastUnratedMeals = async () => {
                 if (!meals.length || !selectedList) return;
+
+                // Mark that the check is being performed
+                hasCheckedForUnratedMeals.current = true;
+
                 try {
                     const ratedMealsRaw = await AsyncStorage.getItem('ratedMeals');
                     const ratedMealIds = ratedMealsRaw ? JSON.parse(ratedMealsRaw) : {};
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
+
                     const unratedPastMeals = meals.filter(meal => {
                         if (!meal.dayOfWeek || !meal.recipeId || ratedMealIds[meal.id]) return false;
                         const weekStartDate = new Date(selectedList.weekStart);
@@ -407,7 +419,7 @@ export default function HomeScreen() {
                         mealDate.setDate(weekStartDate.getDate() + dayIndex);
                         return mealDate < today;
                     });
-                    // const unratedPastMeals = meals;
+
                     if (unratedPastMeals.length > 0) {
                         const mealToRate = unratedPastMeals.sort((a, b) => {
                             const dateA = new Date(selectedList.weekStart);
@@ -416,16 +428,23 @@ export default function HomeScreen() {
                             dateB.setDate(dateB.getDate() + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(b.dayOfWeek!));
                             return dateB.getTime() - dateA.getTime();
                         })[0];
+
                         router.push({
                             pathname: '/rate-meal',
                             params: { recipeId: mealToRate.recipeId, mealId: mealToRate.id },
                         });
                     }
-                } catch (error) { console.error("Failed to check for unrated meals:", error); }
+                } catch (error) {
+                    console.error("Failed to check for unrated meals:", error);
+                }
             };
+
+            // Delay the check slightly to ensure data is stable
             const timer = setTimeout(checkForPastUnratedMeals, 1000);
+
+            // Cleanup the timer
             return () => clearTimeout(timer);
-        }, [meals, selectedList, router])
+        }, [meals, selectedList, router]) // Dependencies are still needed to get the correct values
     );
 
     const onToggleMealCollapse = async (mealId: string) => {

@@ -5,14 +5,12 @@ import { Recipe, UserSearchResult } from '@/types/types';
 import { getExploreContent, searchAll } from '@/utils/api';
 import { getCardStyleFromTags } from '@/utils/recipeStyling';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// TODO: clickable users in search result (go to profile)
-// TODO: make like 20 chefs minimum with recipes
 // TODO: when adding a recipe to meal plan from viewrecipemodal its not there right away. 
 
 // --- Types for our new Creator section ---
@@ -66,27 +64,39 @@ const RecipeCarousel = ({ title, recipes, onView }: { title: string; recipes: Re
 };
 
 // --- New Component for the User Card ---
-const UserCard = ({ creator, fullWidth }: { creator: Creator, fullWidth?: boolean }) => (
-    <TouchableOpacity style={[styles.userCard, fullWidth && styles.fullWidthUserCard]}>
-        <View style={styles.userCardHeader}>
-            <Image source={{ uri: creator.photoURL }} style={styles.userAvatar} />
-            <View style={styles.userInfo}>
-                <Text style={styles.userName} numberOfLines={1}>{creator.displayName}</Text>
-                <View style={styles.userStats}>
-                    <Text style={styles.userStatText}>{creator.followers.toLocaleString()} followers</Text>
-                    <Text style={styles.userStatSeparator}>•</Text>
-                    <Text style={styles.userStatText}>{creator.recipes} recipes</Text>
+const UserCard = ({ creator, fullWidth }: { creator: Creator, fullWidth?: boolean }) => {
+    const router = useRouter();
+
+    const handlePress = () => {
+        // Navigate to the profile page, passing the creator's UID as a query parameter
+        router.push(`/profile?uid=${creator.uid}`);
+    };
+
+    return (
+        <TouchableOpacity
+            style={[styles.userCard, fullWidth && styles.fullWidthUserCard]}
+            onPress={handlePress} // Add the onPress handler here
+        >
+            <View style={styles.userCardHeader}>
+                <Image source={{ uri: creator.photoURL }} style={styles.userAvatar} />
+                <View style={styles.userInfo}>
+                    <Text style={styles.userName} numberOfLines={1}>{creator.displayName}</Text>
+                    <View style={styles.userStats}>
+                        <Text style={styles.userStatText}>{creator.followers.toLocaleString()} followers</Text>
+                        <Text style={styles.userStatSeparator}>•</Text>
+                        <Text style={styles.userStatText}>{creator.recipes} recipes</Text>
+                    </View>
                 </View>
             </View>
-        </View>
-        { (!fullWidth && creator.featuredRecipe) &&
-            <View style={styles.popularRecipe}>
-                <Image source={{ uri: creator.featuredRecipe.photoURL }} style={styles.popularRecipeImage} />
-                <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.featuredRecipe.name}</Text>
-            </View>
-        }
-    </TouchableOpacity>
-);
+            {(!fullWidth && creator.featuredRecipe) &&
+                <View style={styles.popularRecipe}>
+                    <Image source={{ uri: creator.featuredRecipe.photoURL }} style={styles.popularRecipeImage} />
+                    <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.featuredRecipe.name}</Text>
+                </View>
+            }
+        </TouchableOpacity>
+    );
+}
 
 
 // --- New Component for the Creator Carousel ---

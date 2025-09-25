@@ -3,16 +3,16 @@ import NotificationBell from '@/components/NotificationBell';
 import NotificationsModal from '@/components/NotificationsModal';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
-import { Recipe } from '@/types/types';
-import { getUserCookbook, uploadUserPhoto } from '@/utils/api';
+import { Recipe, UserProfile as UserProfileType } from '@/types/types';
+import { getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
-import { toReadablePhone } from '@/utils/utils'; // Assuming this utility is still needed for the settings modal
+import { toReadablePhone } from '@/utils/utils';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { updateEmail, updateProfile } from 'firebase/auth';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -33,13 +33,7 @@ import {
     View
 } from 'react-native';
 
-// TODO: 3rd person profile
-// TODO: private/public recipes in cookbook
-// TODO: followers/following
-// TODO: terms & conditions (fair use of image content, AI)
-
-
-// Reusable component for editable text fields, now only used in SettingsModal
+// --- (EditableInfoRow and SettingsModal components remain the same) ---
 const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bold = false, editable = true, placeholder = "" }: { placeholder?: string, editable?: boolean, label: string; value: string; showLabel?: boolean; onSave: (newValue: string) => Promise<void>, size?: number, bold?: boolean }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [text, setText] = useState(value);
@@ -89,8 +83,6 @@ const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bo
         </View>
     );
 };
-
-// New Settings Modal Component
 const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: () => void }) => {
     const router = useRouter();
     const { user, refreshAuthUser } = useAuth();
@@ -176,65 +168,96 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
 
 
 export default function UserProfile() {
-    const { user, refreshAuthUser } = useAuth();
-    const [loading, setLoading] = useState(false);
+    const { user: authUser, refreshAuthUser } = useAuth();
+    const { uid: routeUid } = useLocalSearchParams<{ uid?: string }>();
+    const router = useRouter();
+
+    const [viewedUser, setViewedUser] = useState<UserProfileType | null>(null);
+    const [isMe, setIsMe] = useState(false);
+    const [loading, setLoading] = useState(true);
+
     const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
-    const [newPhotoUri, setNewPhotoUri] = useState(user?.photoURL || null);
-    const { notifications, isLoading, acceptInvitation, declineInvitation, fetchNotifications } = useNotifications();
-
+    const [newPhotoUri, setNewPhotoUri] = useState<string | null>(null);
+    const { notifications, isLoading: isNotificationsLoading, acceptInvitation, declineInvitation } = useNotifications();
     const [isNotificationsVisible, setNotificationsVisible] = useState(false);
 
-    const handleAccept = async (invitationId: string) => {
-        acceptInvitation(invitationId, () => {
-            // Optional: You might want to refresh groups after accepting
-            refreshAuthUser();
-            setNotificationsVisible(false); // Close modal on success
-            router.navigate('/groups');
-        });
-    };
-
-    const handleDecline = async (invitationId: string) => {
-        declineInvitation(invitationId);
-    };
-
-    // --- Carousel State and Logic ---
     const flatListRef = useRef<FlatList | null>(null);
     const [isAtStart, setIsAtStart] = useState(true);
     const [isAtEnd, setIsAtEnd] = useState(false);
     const carouselData = [...defaultAvatars, 'upload'];
-
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
     const [isCookbookLoading, setIsCookbookLoading] = useState(true);
-
+    
     const [isFocused, setIsFocused] = useState(false);
-        useFocusEffect(
-            useCallback(() => {
-                setIsFocused(true); // Screen is focused
-                return () => {
-                    setIsFocused(false); // Screen is unfocused
-                };
-            }, [])
-        );
+    useFocusEffect(
+        useCallback(() => {
+            setIsFocused(true);
+            return () => setIsFocused(false);
+        }, [])
+    );
 
-     const router = useRouter(); 
+    useEffect(() => {
+        const targetUid = routeUid || authUser?.uid;
+
+        // If there's no target user and the auth user is anonymous, do nothing.
+        if (!targetUid && authUser?.isAnonymous) {
+            setLoading(false);
+            return;
+        }
+        
+        // Determine if the profile being viewed is the authenticated user's profile
+        setIsMe(!routeUid || routeUid === authUser?.uid);
+
+        const fetchUserData = async () => {
+            if (!targetUid) return;
+            try {
+                setLoading(true);
+                // If it's my profile, use the data from AuthContext. Otherwise, fetch it.
+                const profileData = isMe ? authUser : await getUserProfile(targetUid);
+                
+                setViewedUser(profileData as UserProfileType);
+                setNewPhotoUri(profileData?.photoURL || null);
+                
+                // Fetch the cookbook for the viewed user
+                const userCookbook = await getUserCookbook(targetUid);
+                setCookbook(userCookbook);
+
+            } catch (error) {
+                console.error("Failed to fetch user data:", error);
+                Alert.alert("Error", "Could not load user profile.");
+            } finally {
+                setLoading(false);
+                setIsCookbookLoading(false);
+            }
+        };
+
+        fetchUserData();
+    }, [routeUid, authUser]); // Rerun when the route or auth user changes
 
     const fetchCookbook = useCallback(async () => {
+        const targetUid = routeUid || authUser?.uid;
+        if (!targetUid) return;
         try {
             setIsCookbookLoading(true);
-            const userCookbook = await getUserCookbook();
+            const userCookbook = await getUserCookbook(targetUid);
             setCookbook(userCookbook);
         } catch (error) {
             console.error("Failed to fetch cookbook:", error);
-            Alert.alert("Error", "Could not load your recipes.");
         } finally {
             setIsCookbookLoading(false);
         }
-    }, []); // Empty dependency array means this function is created only once.
+    }, [routeUid, authUser]);
 
-    useEffect(() => {
-        fetchCookbook();
-    }, [fetchCookbook]);
+    const handleAccept = (invitationId: string) => {
+        acceptInvitation(invitationId, () => {
+            refreshAuthUser();
+            setNotificationsVisible(false);
+            router.navigate('/groups');
+        });
+    };
+
+    const handleDecline = (invitationId: string) => declineInvitation(invitationId);
 
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
@@ -248,12 +271,13 @@ export default function UserProfile() {
     };
 
     const handlePhotoSave = async () => {
-        if (!newPhotoUri) return;
+        if (!newPhotoUri || !isMe) return;
         setLoading(true);
         try {
             const url = await uploadUserPhoto(newPhotoUri);
             await updateProfile(auth.currentUser!, { photoURL: url });
             refreshAuthUser();
+            setViewedUser(prev => prev ? { ...prev, photoURL: url } : null);
         } catch (err) {
             Alert.alert("Error", "Could not update profile picture.");
         } finally {
@@ -274,17 +298,21 @@ export default function UserProfile() {
             aspect: [1, 1],
             quality: 0.5,
         });
-        if (!result.canceled) {
-            setNewPhotoUri(result.assets[0].uri);
-        }
+        if (!result.canceled) setNewPhotoUri(result.assets[0].uri);
     };
 
     const openPhotoModal = () => {
-        setNewPhotoUri(user?.photoURL || null);
+        if (!isMe) return; // Don't open modal if not my profile
+        setNewPhotoUri(viewedUser?.photoURL || null);
         setEditPhotoModalVisible(true);
     };
-
-    if (!user || user.isAnonymous) {
+    
+    if (loading) {
+        return <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" /></View>;
+    }
+    
+    // If the user is anonymous, show the sign-up CTA
+    if (!viewedUser && authUser?.isAnonymous) {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.ctaContainer}>
@@ -312,35 +340,50 @@ export default function UserProfile() {
             </SafeAreaView>
         );
     }
+    
+    // If no user could be found, show an error
+    if (!viewedUser) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <Text>User not found.</Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
 
     return (
         <>
         {isFocused && <StatusBar style="dark" />}
         <SafeAreaView style={styles.container}>
-            <View style={styles.headerButtons}>
-                <NotificationBell
-                    onPress={() => {
-                        // The bell now just opens the modal. 
-                        // The context keeps the data fresh automatically.
-                        setNotificationsVisible(true);
-                    }}
-                />
-                <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
-                    <Ionicons name="settings-outline" size={28} color="#000" />
-                </TouchableOpacity>
-            </View>
+            {/* Show header buttons only if it's the current user's profile */}
+            {isMe && (
+                <View style={styles.headerButtons}>
+                    <NotificationBell onPress={() => setNotificationsVisible(true)} />
+                    <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
+                        <Ionicons name="settings-outline" size={28} color="#000" />
+                    </TouchableOpacity>
+                </View>
+            )}
             <View style={styles.profileContainer}>
-                <TouchableOpacity onPress={openPhotoModal} style={styles.profileImageContainer}>
-                    {user?.photoURL && (
-                        <Image source={{ uri: user.photoURL }} style={styles.profileImage} />
+                <TouchableOpacity onPress={openPhotoModal} disabled={!isMe} style={styles.profileImageContainer}>
+                    {viewedUser?.photoURL ? (
+                        <Image source={{ uri: viewedUser.photoURL }} style={styles.profileImage} />
+                    ) : (
+                        <View style={[styles.profileImage, styles.placeholderImage]}>
+                            <Ionicons name="person" size={60} color="#ccc" />
+                        </View>
                     )}
-                    <View style={styles.editIconContainer}>
-                        <Ionicons name="pencil" size={16} color="#fff" />
-                    </View>
+                    {/* Show edit pencil only if it's the current user's profile */}
+                    {isMe && (
+                        <View style={styles.editIconContainer}>
+                            <Ionicons name="pencil" size={16} color="#fff" />
+                        </View>
+                    )}
                 </TouchableOpacity>
 
-                <Text style={styles.displayName}>{user?.displayName || 'Set Your Name'}</Text>
-                {user?.email && <Text style={styles.usernameText}>@{user.email.split('@')[0]}</Text>}
+                <Text style={styles.displayName}>{viewedUser?.displayName || 'Fridgie User'}</Text>
+                {viewedUser?.email && <Text style={styles.usernameText}>@{viewedUser.email.split('@')[0]}</Text>}
             </View>
             <View style={styles.statsContainer}>
                 <View style={styles.statItem}>
@@ -363,65 +406,69 @@ export default function UserProfile() {
                     onRefresh={fetchCookbook}
                 />
             </View>
-            <Modal visible={editPhotoModalVisible} animationType="slide" transparent={true}>
-                <View style={styles.modalContainer}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Update Profile Photo</Text>
-                        {newPhotoUri && <Image source={{ uri: newPhotoUri }} style={styles.modalMainAvatar} />}
-                        <View style={styles.carouselContainer}>
-                            <TouchableOpacity style={[styles.arrowButton, isAtStart && styles.transparentButton]} onPress={() => scrollTo('left')}>
-                                <Ionicons name="chevron-back" size={24} color="#666" />
-                            </TouchableOpacity>
-                            <FlatList
-                                ref={flatListRef}
-                                data={carouselData}
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                keyExtractor={(item) => item}
-                                onScroll={handleScroll}
-                                scrollEventThrottle={16}
-                                contentContainerStyle={styles.flatListContent}
-                                renderItem={({ item }) => {
-                                    if (item === 'upload') {
-                                        return (
-                                            <TouchableOpacity style={styles.uploadButton} onPress={handlePickImage}>
-                                                <Ionicons name="camera-outline" size={24} color="#666" />
-                                            </TouchableOpacity>
-                                        );
-                                    }
-                                    return (
-                                        <TouchableOpacity onPress={() => setNewPhotoUri(item)}>
-                                            <Image source={{ uri: item }} style={[styles.gridAvatar, newPhotoUri === item && styles.selectedAvatar]} />
-                                        </TouchableOpacity>
-                                    );
-                                }}
-                            />
-                            <TouchableOpacity style={[styles.arrowButton, isAtEnd && styles.transparentButton]} onPress={() => scrollTo('right')}>
-                                <Ionicons name="chevron-forward" size={24} color="#666" />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => setEditPhotoModalVisible(false)}>
-                                <Text style={styles.secondaryButtonText}>Cancel</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.modalButton, styles.primaryButton]} onPress={handlePhotoSave} disabled={loading}>
-                                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Save</Text>}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-            {/* Settings Modal */}
-            <SettingsModal isVisible={settingsModalVisible} onClose={() => setSettingsModalVisible(false)} />
 
-            <NotificationsModal
-                isVisible={isNotificationsVisible}
-                onClose={() => setNotificationsVisible(false)}
-                notifications={notifications} // from context
-                isLoading={isLoading}       // from context
-                onAccept={handleAccept}
-                onDecline={handleDecline}
-            />
+            {/* Modals are only available on the current user's profile */}
+            {isMe && (
+                <>
+                    <Modal visible={editPhotoModalVisible} animationType="slide" transparent={true}>
+                        <View style={styles.modalContainer}>
+                            <View style={styles.modalContent}>
+                                <Text style={styles.modalTitle}>Update Profile Photo</Text>
+                                {newPhotoUri && <Image source={{ uri: newPhotoUri }} style={styles.modalMainAvatar} />}
+                                <View style={styles.carouselContainer}>
+                                    <TouchableOpacity style={[styles.arrowButton, isAtStart && styles.transparentButton]} onPress={() => scrollTo('left')}>
+                                        <Ionicons name="chevron-back" size={24} color="#666" />
+                                    </TouchableOpacity>
+                                    <FlatList
+                                        ref={flatListRef}
+                                        data={carouselData}
+                                        horizontal
+                                        showsHorizontalScrollIndicator={false}
+                                        keyExtractor={(item) => item}
+                                        onScroll={handleScroll}
+                                        scrollEventThrottle={16}
+                                        contentContainerStyle={styles.flatListContent}
+                                        renderItem={({ item }) => {
+                                            if (item === 'upload') {
+                                                return (
+                                                    <TouchableOpacity style={styles.uploadButton} onPress={handlePickImage}>
+                                                        <Ionicons name="camera-outline" size={24} color="#666" />
+                                                    </TouchableOpacity>
+                                                );
+                                            }
+                                            return (
+                                                <TouchableOpacity onPress={() => setNewPhotoUri(item)}>
+                                                    <Image source={{ uri: item }} style={[styles.gridAvatar, newPhotoUri === item && styles.selectedAvatar]} />
+                                                </TouchableOpacity>
+                                            );
+                                        }}
+                                    />
+                                    <TouchableOpacity style={[styles.arrowButton, isAtEnd && styles.transparentButton]} onPress={() => scrollTo('right')}>
+                                        <Ionicons name="chevron-forward" size={24} color="#666" />
+                                    </TouchableOpacity>
+                                </View>
+                                <View style={styles.modalButtons}>
+                                    <TouchableOpacity style={[styles.modalButton, styles.secondaryButton]} onPress={() => setEditPhotoModalVisible(false)}>
+                                        <Text style={styles.secondaryButtonText}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.modalButton, styles.primaryButton]} onPress={handlePhotoSave} disabled={loading}>
+                                        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Save</Text>}
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+                    <SettingsModal isVisible={settingsModalVisible} onClose={() => setSettingsModalVisible(false)} />
+                    <NotificationsModal
+                        isVisible={isNotificationsVisible}
+                        onClose={() => setNotificationsVisible(false)}
+                        notifications={notifications}
+                        isLoading={isNotificationsLoading}
+                        onAccept={handleAccept}
+                        onDecline={handleDecline}
+                    />
+                </>
+            )}
         </SafeAreaView>
         </>
     );
@@ -439,18 +486,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         alignItems: 'center',
     },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'flex-end', // Center title
-        paddingTop:20,
-        paddingRight:20
-    },
-    headerTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        flex: 2, // Allow title to take more space
-        textAlign: 'center',
-    },
     settingsButton: {
         padding: 5,
     },
@@ -467,11 +502,11 @@ const styles = StyleSheet.create({
         borderRadius: 60,
         borderWidth: 3,
         borderColor: '#fff',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-        elevation: 5,
+    },
+    placeholderImage: {
+        backgroundColor: '#e9ecef',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     editIconContainer: {
         position: 'absolute',
@@ -492,7 +527,7 @@ const styles = StyleSheet.create({
     usernameText: {
         fontSize: 16,
         color: '#6c757d',
-        marginBottom: 16, // Space before stats
+        marginBottom: 16,
     },
     statsContainer: {
         flexDirection: 'row',
@@ -520,27 +555,6 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingTop: 16
     },
-    sectionTitle: {
-        fontSize: 22,
-        fontWeight: 'bold',
-        marginVertical: 16,
-        color: '#333',
-    },
-    feedPlaceholder: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 40,
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#e9ecef',
-    },
-    feedPlaceholderText: {
-        marginTop: 16,
-        fontSize: 16,
-        color: '#6c757d',
-        textAlign: 'center'
-    },
     primaryButton: {
         backgroundColor: primary,
         paddingVertical: 12,
@@ -558,7 +572,6 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
     },
-    // Styles for EditableInfoRow within SettingsModal
     infoRow: {
         paddingVertical: 10,
         borderBottomWidth: 1,
@@ -606,8 +619,6 @@ const styles = StyleSheet.create({
         color: '#666',
         fontWeight: '500'
     },
-
-    // --- Photo Edit Modal & Carousel Styles (mostly unchanged) ---
     modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' },
     modalContent: { backgroundColor: 'white', padding: 20, borderRadius: 10, width: '90%', alignItems: 'center' },
     modalTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, alignSelf: 'center' },
@@ -637,8 +648,6 @@ const styles = StyleSheet.create({
     gridAvatar: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#eee' },
     selectedAvatar: { borderWidth: 3, borderColor: primary },
     uploadButton: { width: 60, height: 60, borderRadius: 30, margin: 5, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
-
-    // --- Settings Modal specific styles ---
     modalViewContainer: {
         flex: 1,
         backgroundColor: '#f8f9fa',
@@ -663,6 +672,12 @@ const styles = StyleSheet.create({
     },
     modalScrollView: {
         paddingHorizontal: 16,
+    },
+    sectionTitle: {
+        fontSize: 22,
+        fontWeight: 'bold',
+        marginVertical: 16,
+        color: '#333',
     },
     editMealPreferences: {
         flexDirection: 'row',
@@ -730,6 +745,6 @@ const styles = StyleSheet.create({
         fontSize: 16,
         marginLeft: 15,
         color: '#495057',
-        flex: 1, // Allow text to wrap
+        flex: 1,
     },
 });
