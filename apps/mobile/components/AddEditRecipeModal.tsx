@@ -20,6 +20,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   const [isImporting, setIsImporting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [creationMode, setCreationMode] = useState<'initial' | 'automatic' | 'manual'>('initial');
+  const [isSaveDisabled, setIsSaveDisabled] = useState(true);
 
   const createBlankRecipe = (): Recipe => ({
     id: uuid.v4() as string,
@@ -29,6 +30,18 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     instructions: [''],
   });
   
+  useEffect(() => {
+    // Enable the save button only if the user is in the manual editing
+    // mode and the recipe has a name.
+    if (creationMode === 'manual' && editingRecipe?.name?.trim()) {
+      setIsSaveDisabled(false);
+    } else {
+      // Otherwise, keep it disabled.
+      setIsSaveDisabled(true);
+    }
+    // Rerun this logic whenever the recipe data or the creation mode changes.
+  }, [editingRecipe, creationMode]);
+
   useEffect(() => {
     if (!isVisible || !mealForRecipe) {
       setEditingRecipe(null);
@@ -184,36 +197,39 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     return null;
   };
 
-  return (
+    return (
     <Modal animationType="slide" visible={isVisible} onRequestClose={onClose} transparent={true}>
-      {/* ✅ 2. New structure for a content-sized modal */}
       <View style={styles.modalOverlay}>
         <SafeAreaView style={styles.modalSafeArea}>
             <KeyboardAvoidingView style={styles.modalContentContainer} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
               <View style={styles.modalHeader}>
-                {/* ✅ 3. Conditionally render the Back button */}
+                {/* Header content remains the same */}
                 {(creationMode === 'automatic' || creationMode === 'manual') && !mealForRecipe?.recipeId ? (
                   <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
                     <Ionicons name="chevron-back" size={28} color="#aaa" />
                   </TouchableOpacity>
-                ) : <View style={styles.backButton} /> /* Placeholder to keep title centered */}
-                
+                ) : <View style={styles.backButton} /> }
                 <Text style={styles.modalTitle}>{mealForRecipe?.recipeId ? 'Edit' : 'Add'} Recipe</Text>
-                
                 <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                   <Ionicons name="close-circle" size={28} color="#aaa" />
                 </TouchableOpacity>
               </View>
+              
+              {/* ✅ 1. The ScrollView now ONLY wraps the main, scrollable content */}
               <ScrollView style={styles.modalScrollView} contentContainerStyle={styles.modalScrollViewContent} keyboardShouldPersistTaps="handled">
                 {renderContent()}
+              </ScrollView>
 
+              {/* ✅ 2. The Footer is moved OUTSIDE and AFTER the ScrollView */}
               {(creationMode === 'automatic' || creationMode === 'manual') && (
                 <View style={styles.modalFooter}>
                   <TouchableOpacity style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Cancel</Text></TouchableOpacity>
-                  <TouchableOpacity style={styles.primaryButton} onPress={handleSaveRecipe}><Text style={styles.primaryButtonText}>Save Recipe</Text></TouchableOpacity>
+                  {/* ✅ 3. Re-added the disabled logic to the Save button */}
+                  <TouchableOpacity style={[styles.primaryButton, isSaveDisabled && styles.disabledButton]} onPress={handleSaveRecipe} disabled={isSaveDisabled}>
+                    <Text style={styles.primaryButtonText}>Save Recipe</Text>
+                  </TouchableOpacity>
                 </View>
               )}
-              </ScrollView>
             </KeyboardAvoidingView>
         </SafeAreaView>
       </View>
@@ -254,7 +270,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center'},
   backButton: { width: 30, alignItems: 'flex-start' },
   closeButton: { width: 30, alignItems: 'flex-end' },
-  modalScrollView: { maxHeight: '100%' }, // This prevents the ScrollView from growing infinitely
+  modalScrollView: { flexShrink: 1 }, // This prevents the ScrollView from growing infinitely
   modalScrollViewContent: { paddingTop: 16 },
   formSectionContainer: { backgroundColor: '#FFFFFF', borderRadius: 12, margin: 16, padding: 16, marginTop: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
   formSectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
