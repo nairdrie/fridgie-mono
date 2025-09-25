@@ -1,9 +1,12 @@
+import AddEditRecipeModal from '@/components/AddEditRecipeModal';
+import AddToMealPlanModal from '@/components/AddToMealPlanModal';
 import NotificationBell from '@/components/NotificationBell';
 import NotificationsModal from '@/components/NotificationsModal';
 import RecipeCard from '@/components/RecipeCard';
+import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
-import { Recipe } from '@/types/types';
+import { Item, Meal, Recipe } from '@/types/types';
 import { getUserCookbook, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
@@ -215,6 +218,12 @@ export default function UserProfile() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
     const [isCookbookLoading, setIsCookbookLoading] = useState(true);
+
+    const [isMealPlanModalVisible, setIsMealPlanModalVisible] = useState(false);
+    const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+    const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
+
+    const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     
     const [isFocused, setIsFocused] = useState(false);
     useFocusEffect(
@@ -252,8 +261,26 @@ export default function UserProfile() {
         );
     }, [cookbook, searchTerm]);
 
-    const handleAccept = (invitationId: string) => { /* ... same as before ... */ };
-    const handleDecline = (invitationId: string) => { /* ... same as before ... */ };
+    const handleAccept = (invitationId: string) => {
+        acceptInvitation(invitationId, () => {
+            refreshAuthUser();
+            setNotificationsVisible(false);
+            router.navigate('/groups');
+        });
+    };
+
+    const handleDecline = (invitationId: string) => declineInvitation(invitationId);
+
+    const handleEditRecipe = (recipe: Recipe) => {
+        const mealFromRecipe: Meal = {
+            id: recipe.id,
+            listId: 'cookbook-context',
+            name: recipe.name,
+            recipeId: recipe.id,
+        };
+        setRecipeToViewId(null);
+        setMealForRecipeEdit(mealFromRecipe);
+    };
 
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
@@ -264,6 +291,15 @@ export default function UserProfile() {
     const scrollTo = (direction: 'left' | 'right') => {
         const index = direction === 'left' ? 0 : carouselData.length - 1;
         flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    };
+
+    const handleAddToMealPlan = (recipe: Recipe) => {
+            setSelectedRecipe(recipe);
+            setIsMealPlanModalVisible(true);
+    };
+
+    const handleViewRecipe = (recipeId: string) => {
+        setRecipeToViewId(recipeId);
     };
 
     const handlePhotoSave = async () => {
@@ -294,6 +330,11 @@ export default function UserProfile() {
         if (!result.canceled) setNewPhotoUri(result.assets[0].uri);
     };
     
+    const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
+        setMealForRecipeEdit(null);
+        fetchCookbook();
+    };
+
     const openPhotoModal = () => {
         setNewPhotoUri(authUser?.photoURL || null);
         setEditPhotoModalVisible(true);
@@ -367,8 +408,8 @@ export default function UserProfile() {
                     renderItem={({ item }) => (
                         <RecipeCard
                             recipe={item}
-                            onAddToMealPlan={() => {}} // Add your handlers here
-                            onView={() => {}}          // Add your handlers here
+                            onAddToMealPlan={handleAddToMealPlan}
+                            onView={handleViewRecipe}
                         />
                     )}
                     ListEmptyComponent={
@@ -421,6 +462,27 @@ export default function UserProfile() {
                     isLoading={isNotificationsLoading}
                     onAccept={handleAccept}
                     onDecline={handleDecline}
+                />
+                <AddToMealPlanModal
+                    isVisible={isMealPlanModalVisible}
+                    onClose={() => setIsMealPlanModalVisible(false)}
+                    recipe={selectedRecipe}
+                />
+                
+                <ViewRecipeModal
+                    isVisible={!!recipeToViewId}
+                    onClose={() => setRecipeToViewId(null)}
+                    recipeId={recipeToViewId}
+                    onEdit={handleEditRecipe}
+                    isInCookbook={cookbook.some(r => r.id === recipeToViewId)}
+                    onCookbookUpdate={fetchCookbook}
+                />
+                
+                <AddEditRecipeModal
+                    isVisible={!!mealForRecipeEdit}
+                    onClose={() => setMealForRecipeEdit(null)}
+                    mealForRecipe={mealForRecipeEdit}
+                    onRecipeSave={handleRecipeSaved}
                 />
             </SafeAreaView>
         </>

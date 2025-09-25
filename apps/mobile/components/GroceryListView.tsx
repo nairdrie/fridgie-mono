@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
  editInput: { fontSize: 16, flex: 1, paddingVertical: 2, color: 'black' },
  checked: { textDecorationLine: 'line-through', color: '#999' },
  clearButton: { paddingHorizontal: 8, paddingVertical: 4, width: 35, alignItems: 'center' },
- clearText: { fontSize: 16, color: '#999' },
+ clearText: { fontSize: 16, color: '#999', paddingRight: 5 },
  sectionText: { fontWeight: 'bold', fontSize: 18, marginLeft: 10, color: '#333' },
  quantityLabel: { backgroundColor: '#ebebebff', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginRight: 6 },
  quantityChecked: { backgroundColor: '#eeeeee' },

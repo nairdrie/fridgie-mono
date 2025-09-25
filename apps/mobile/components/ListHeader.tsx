@@ -77,7 +77,7 @@ export default function ListHeader() {
     const color = interpolateColor(
       progress.value,
       [0, 1], // Input Range
-      ['#FFFFFF', '#043308ff'] // Output Color (Active -> Inactive)
+      ['#FFFFFF', '#000000'] // Output Color (Active -> Inactive)
     );
     return {
       color: color,
@@ -88,7 +88,7 @@ export default function ListHeader() {
     const color = interpolateColor(
       progress.value,
       [0, 1], // Input Range
-      ['#043308ff', '#FFFFFF'] // Output Color (Inactive -> Active)
+      ['#000000', '#FFFFFF'] // Output Color (Inactive -> Active)
     );
     return {
       color: color,
@@ -221,7 +221,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    marginBottom: 8
+    marginBottom: 12
   },
   backNav: {
     flexDirection: 'row',

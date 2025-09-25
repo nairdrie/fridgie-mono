@@ -37,7 +37,7 @@ import { addUserCookbookRecipe, categorizeList, getUserCookbook, listenToList, r
 
 export default function HomeScreen() {
     const router = useRouter();
-    const { selectedList, isLoading, selectedGroup, selectedView } = useLists();
+    const { selectedList, isLoading, selectedGroup, selectedView, allLists } = useLists();
     const { user } = useAuth();
     
     const [meals, setMeals] = useState<Meal[]>([]);
@@ -470,7 +470,7 @@ export default function HomeScreen() {
     return (
         <>
         {isFocused && <StatusBar style="dark" />}
-        <View style={{ flex: 1, backgroundColor: '#fff' }}>
+        <View style={{ paddingTop: 12, paddingBottom: 12, flex: 1, backgroundColor: '#fff' }}>
             <KeyboardAvoidingView
                 style={styles.container}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

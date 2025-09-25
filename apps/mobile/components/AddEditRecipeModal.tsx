@@ -23,6 +23,9 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   const [isSaveDisabled, setIsSaveDisabled] = useState(true);
   const { height, width } = useWindowDimensions();
 
+  // ✅ 1. State for the animated loading message
+  const [importingMessage, setImportingMessage] = useState('Fetching your recipe...');
+
   const createBlankRecipe = (): Recipe => ({
     id: uuid.v4() as string,
     name: mealForRecipe?.name || '',
@@ -42,6 +45,37 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     }
     // Rerun this logic whenever the recipe data or the creation mode changes.
   }, [editingRecipe, creationMode]);
+
+  // ✅ 2. useEffect to cycle through loading messages
+  useEffect(() => {
+    let interval: number | undefined = undefined;
+
+    if (isImporting) {
+        const messages = [
+            'Fetching your recipe...',
+            'Analyzing ingredients...',
+            'Extracting steps...',
+            'Just a moment longer...'
+        ];
+        let messageIndex = 0;
+        setImportingMessage(messages[messageIndex]); // Set initial message
+        
+        interval = setInterval(() => {
+            messageIndex = messageIndex + 1;
+            if(messageIndex >= messages.length) {
+              messageIndex = messages.length - 1;
+            }
+            setImportingMessage(messages[messageIndex]);
+        }, 3000); // Change message every 3 seconds
+    }
+
+    // Cleanup function to clear the interval
+    return () => {
+        if (interval) {
+            clearInterval(interval);
+        }
+    };
+  }, [isImporting]);
 
   useEffect(() => {
     if (!isVisible || !mealForRecipe) {
@@ -90,7 +124,6 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     }
   };
   
-  // ✅ 1. New handler for the back button
   const handleBackPress = () => {
     // Go back to the initial selection from any other state
     if (creationMode === 'automatic' || creationMode === 'manual') {
@@ -156,11 +189,20 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     }
     
     if (creationMode === 'automatic') {
+      // ✅ 3. If importing, show the animated loading screen. Otherwise, show the URL input.
+      if (isImporting) {
+        return (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={primary} />
+            <Text style={styles.loadingText}>{importingMessage}</Text>
+          </View>
+        );
+      }
       return (
         <View style={styles.formSectionContainer}>
           <TextInput style={styles.formInput} placeholder="Paste a recipe link..." placeholderTextColor="#999" value={importUrl} onChangeText={setImportUrl} autoCapitalize="none" keyboardType="url" />
-          <TouchableOpacity style={[styles.primaryButton, isImporting && styles.disabledButton]} onPress={handleImportRecipe} disabled={isImporting}>
-            {isImporting ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Import</Text>}
+          <TouchableOpacity style={styles.primaryButton} onPress={handleImportRecipe}>
+            <Text style={styles.primaryButtonText}>Import</Text>
           </TouchableOpacity>
         </View>
       );
@@ -216,7 +258,6 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                 </TouchableOpacity>
               </View>
               
-              {/* ✅ 1. The ScrollView now ONLY wraps the main, scrollable content */}
               <ScrollView 
                 style={[
                   styles.modalScrollView, 
@@ -228,11 +269,10 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                 {renderContent()}
               </ScrollView>
 
-              {/* ✅ 2. The Footer is moved OUTSIDE and AFTER the ScrollView */}
-              {(creationMode === 'automatic' || creationMode === 'manual') && (
+              {/* ✅ 4. Hide footer during initial selection and while importing */}
+              {!isImporting && (creationMode === 'manual') && (
                 <View style={styles.modalFooter}>
                   <TouchableOpacity style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Cancel</Text></TouchableOpacity>
-                  {/* ✅ 3. Re-added the disabled logic to the Save button */}
                   <TouchableOpacity style={[styles.primaryButton, isSaveDisabled && styles.disabledButton]} onPress={handleSaveRecipe} disabled={isSaveDisabled}>
                     <Text style={styles.primaryButtonText}>Save Recipe</Text>
                   </TouchableOpacity>
@@ -246,13 +286,12 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 }
 
 const styles = StyleSheet.create({
-  // ✅ 1. Align the overlay content to the bottom
+  // Align the overlay content to the bottom
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    justifyContent: 'flex-end', // Changed from 'center'
+    justifyContent: 'flex-end',
   },
-  // ✅ 2. Remove top padding, as it's no longer needed for centering
   modalSafeArea: {
     width: '100%',
   },
@@ -260,11 +299,10 @@ const styles = StyleSheet.create({
 
   },
   modalScrollViewContent: { paddingTop: 16 },
-  // ✅ 3. Round only the top corners for a "bottom sheet" appearance
   modalContentContainer: {
     backgroundColor: '#F7F7F7',
-    borderTopLeftRadius: 20,  // Changed from borderRadius
-    borderTopRightRadius: 20, // Changed from borderRadius
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     overflow: 'hidden',
   },
   modalHeader: { 
@@ -293,9 +331,6 @@ const styles = StyleSheet.create({
   addFieldButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 8 },
   addFieldButtonText: { color: primary, fontSize: 16, fontWeight: '600', marginLeft: 4 },
   modalFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderTopWidth: 1, borderTopColor: '#EFEFEF', backgroundColor: '#FFFFFF' },
-  invisibleFooter: {
-    opacity: 0
-  },
   primaryButton: { backgroundColor: primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 50 },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   secondaryButton: { backgroundColor: '#EFEFEF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, marginRight: 10 },
@@ -311,7 +346,6 @@ const styles = StyleSheet.create({
     padding: 24,
     margin: 16,
     marginTop: 0,
-    // width: '100%',
     alignItems: 'center',
     marginBottom: 20,
     shadowColor: '#000',
@@ -323,4 +357,18 @@ const styles = StyleSheet.create({
   selectionButtonTitle: { fontSize: 20, fontWeight: 'bold', color: primary, marginTop: 12, marginBottom: 6 },
   selectionButtonDescription: { fontSize: 14, color: '#666', textAlign: 'center' },
   iconRow: { flexDirection: 'row', gap: 16 },
+  // ✅ 5. New styles for the loading screen
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    minHeight: 250,
+  },
+  loadingText: {
+    marginTop: 20,
+    fontSize: 18,
+    color: '#666',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
 });
