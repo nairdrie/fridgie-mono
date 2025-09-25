@@ -255,8 +255,8 @@ const styles = StyleSheet.create({
   backButton: { width: 30, alignItems: 'flex-start' },
   closeButton: { width: 30, alignItems: 'flex-end' },
   modalScrollView: { maxHeight: '100%' }, // This prevents the ScrollView from growing infinitely
-  modalScrollViewContent: {  },
-  formSectionContainer: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+  modalScrollViewContent: { paddingTop: 16 },
+  formSectionContainer: { backgroundColor: '#FFFFFF', borderRadius: 12, margin: 16, padding: 16, marginTop: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
   formSectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
   formInput: { color: '#222222', borderWidth: 1, borderColor: '#EFEFEF', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 12 },
   recipeNameInput: { fontSize: 24, fontWeight: 'bold', marginBottom: 8, borderBottomWidth: 1, borderColor: '#EFEFEF', paddingBottom: 8, color: '#222222' },
