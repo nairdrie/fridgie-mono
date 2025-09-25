@@ -72,7 +72,7 @@ route.post('/login', async (c) => {
     return c.json({ status: 'success' })
   } catch (err) {
     console.error('auth/login error:', err)
-    return c.json({ error: 'Unauthorized' }, 401)
+    return c.json({ error: 'Unauthorized 3' }, 401)
   }
 })
 

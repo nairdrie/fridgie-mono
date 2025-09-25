@@ -10,6 +10,8 @@ const route = new Hono()
 
 route.use('*', auth, groupAuth)
 
+// TODO: we are somehow still making duplicate lists. or wrong day of week start causing dupe. 
+
 // --- Reusable Helper Function for Creating Lists ---
 // This function creates a new list with a blank item but only returns its metadata.
 async function createListForWeek(groupId: string, weekStartDate: Date) {

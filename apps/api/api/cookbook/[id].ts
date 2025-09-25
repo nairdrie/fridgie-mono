@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { FieldValue } from 'firebase-admin/firestore'
 import { fs } from '@/utils/firebase'
 import { auth } from '@/middleware/auth'
+import { getCookbook } from '@/api/cookbook'
+
 
 const route = new Hono()
 
@@ -40,5 +42,19 @@ route.delete('/', async (c) => {
     return c.json({ error: 'Could not remove from cookbook', details: error.message }, 500)
   }
 })
+
+route.get('/', async (c) => {
+  const uid = c.req.param('id');
+  try {
+    if(!uid) {
+      throw Error('No uid');
+    }
+    const res = await getCookbook(uid);
+    return c.json(res);
+  } catch(error: any) {
+    console.error('Error fetching cookbook:', error)
+    return c.json({ error: 'Could not fetch cookbook', details: error.message }, 500)
+  }
+});
 
 export default route

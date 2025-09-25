@@ -72,19 +72,13 @@ route.post('/', async (c) => {
   }
 })
 
-/**
- * GET /api/cookbook
- * Retrieves all recipes in the user's cookbook.
- */
-route.get('/', async (c) => {
-  const uid = c.get('uid')
+export async function getCookbook(uid: string) {
 
-  try {
     // --- Step 1: Get user's cookbook recipe IDs from Firestore ---
     const cookbookSnapshot = await fs.collection('users').doc(uid).collection('cookbook').orderBy('addedAt', 'desc').get()
     
     if (cookbookSnapshot.empty) {
-      return c.json([])
+      return [];
     }
     const recipeIds = cookbookSnapshot.docs.map(doc => doc.id)
 
@@ -112,7 +106,7 @@ route.get('/', async (c) => {
         ...doc.data(),
         lastAte: null, // No groups, so lastAte is null
       }));
-      return c.json(recipes);
+      return recipes;
     }
 
     // --- Step 3: Scan RTDB lists for all meals across all user's groups ---
@@ -189,7 +183,20 @@ route.get('/', async (c) => {
         };
     });
 
-    return c.json(recipes)
+    return recipes;
+  
+}
+
+
+/**
+ * GET /api/cookbook
+ * Retrieves all recipes in the user's cookbook.
+ */
+route.get('/', async (c) => {
+  const uid = c.get('uid');
+  try {
+    const res = await getCookbook(uid);
+    return c.json(res);
   } catch (error: any) {
     console.error('Error fetching cookbook:', error)
     return c.json({ error: 'Could not fetch cookbook', details: error.message }, 500)
