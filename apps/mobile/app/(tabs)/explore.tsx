@@ -69,7 +69,10 @@ const UserCard = ({ creator, fullWidth }: { creator: Creator, fullWidth?: boolea
 
     const handlePress = () => {
         // Navigate to the profile page, passing the creator's UID as a query parameter
-        router.push(`/profile?uid=${creator.uid}`);
+        router.push({
+            pathname: '/profile/[uid]', // The actual file path of your dynamic route
+            params: { uid: creator.uid }, // The parameters to fill in
+        });
     };
 
     return (

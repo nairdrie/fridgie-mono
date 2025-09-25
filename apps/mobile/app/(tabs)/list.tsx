@@ -217,7 +217,8 @@ export default function HomeScreen() {
         useCallback(() => {
             const fetchCookbook = async () => {
                 try {
-                    const cookbookRecipes = await getUserCookbook();
+                    if(!user) return;
+                    const cookbookRecipes = await getUserCookbook(user.uid);
                     const recipeIds = new Set(cookbookRecipes.map(r => r.id));
                     setCookbookRecipeIds(recipeIds);
                 } catch (error) {

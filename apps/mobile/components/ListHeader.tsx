@@ -3,7 +3,7 @@ import { List, ListView } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -18,7 +18,7 @@ import {
   View
 } from 'react-native';
 import Modal from 'react-native-modal';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import Animated, { interpolate, interpolateColor, useAnimatedStyle, useDerivedValue, withTiming } from 'react-native-reanimated';
 import { getWeekLabel } from '../utils/date';
 import GroupIndicator from './GroupIndicator';
 
@@ -33,11 +33,11 @@ export default function ListHeader() {
  // State to hold the width of a single segment for the animation
   const [segmentWidth, setSegmentWidth] = useState(0);
 
-  const [activeView, setActiveView] = useState(selectedView);
+  // const [activeView, setActiveView] = useState(selectedView);
 
-  useEffect(() => {
-    setActiveView(selectedView);
-  }, [selectedView]);
+  // useEffect(() => {
+  //   setActiveView(selectedView);
+  // }, [selectedView]);
   
 
   const handleSelectList = (list: List) => {
@@ -50,17 +50,48 @@ export default function ListHeader() {
     const { width } = event.nativeEvent.layout;
     setSegmentWidth(width / 2);
   };
-  
-  // Animated style for the sliding background
+
+
+  // ✅ 1. Add the dependency array to useDerivedValue.
+  // This tells the hook to re-create the animation value whenever `selectedView` changes.
+  const progress = useDerivedValue(() => {
+    return withTiming(selectedView === ListView.GroceryList ? 0 : 1, { duration: 250 });
+  }, [selectedView]); // <--- THE FIX IS HERE
+
+  // ✅ 2. Drive the background animation from the `progress` value for perfect sync.
+  // This is more efficient and reliable than using a separate React state variable.
   const animatedStyle = useAnimatedStyle(() => {
+    // Interpolate maps the progress (0 to 1) to the pixel translation (0 to segmentWidth)
+    const translateX = interpolate(
+      progress.value,
+      [0, 1],
+      [2, segmentWidth - 2] // Using a small margin for better centering
+    );
+
     return {
-      transform: [
-        {
-          translateX: withTiming(activeView === ListView.GroceryList ? 0 : segmentWidth-4, {
-            duration: 250, // Animation speed
-          }),
-        },
-      ],
+      transform: [{ translateX }],
+    };
+  });
+
+   const listTextStyle = useAnimatedStyle(() => {
+    const color = interpolateColor(
+      progress.value,
+      [0, 1], // Input Range
+      ['#FFFFFF', '#043308ff'] // Output Color (Active -> Inactive)
+    );
+    return {
+      color: color,
+    };
+  });
+
+  const mealsTextStyle = useAnimatedStyle(() => {
+    const color = interpolateColor(
+      progress.value,
+      [0, 1], // Input Range
+      ['#043308ff', '#FFFFFF'] // Output Color (Inactive -> Active)
+    );
+    return {
+      color: color,
     };
   });
 
@@ -71,18 +102,23 @@ export default function ListHeader() {
     <>
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
-          <View style={styles.headerLeft}>
-            {/* WEEK SELECTOR */}
-            <View style={styles.weekSelector}>
-              <Pressable onPress={() => setModalVisible(true)} style={styles.weekSelectorInner}>
-                <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
-                <Text style={styles.subtitle}>
-                  {new Date(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(new Date(selectedList.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                </Text>
-              </Pressable>
-            </View>
+          <View style={styles.headerUpper}>
+              {/* WEEK SELECTOR */}
+              <View style={styles.weekSelector}>
+                <Pressable onPress={() => setModalVisible(true)} style={styles.weekSelectorInner}>
+                  <Ionicons size={30} color={primary} name="calendar-outline"></Ionicons>
+                  <View style={styles.weekSelectorText}>
+                    <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
+                    <Text style={styles.subtitle}>
+                      {new Date(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(new Date(selectedList.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </Text>
+                  </View>
+                  
+                </Pressable>
+              </View>
+              <GroupIndicator />
           </View>
-          <View style={styles.headerCenter}>
+          <View style={styles.headerLower}>
               {/* VIEW SELECTOR */}
             <View style={styles.viewSelector} onLayout={onSelectorLayout}>
               {segmentWidth > 0 && (
@@ -92,20 +128,21 @@ export default function ListHeader() {
                 style={styles.segment}
                 onPress={() => selectView(ListView.GroceryList)}
               >
-                <Text style={[styles.segmentText, activeView === ListView.GroceryList && styles.segmentTextActive]}>List</Text>
+                <Animated.Text style={[styles.segmentText, listTextStyle]}>
+                  &nbsp;&nbsp;Grocery List
+                </Animated.Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.segment}
                 onPress={() => selectView(ListView.MealPlan)}
               >
-                <Text style={[styles.segmentText, activeView === ListView.MealPlan && styles.segmentTextActive]}>Meals</Text>
-              </TouchableOpacity>
-            </View>
+                  <Animated.Text style={[styles.segmentText, mealsTextStyle]}>
+                  Meal Plan
+                </Animated.Text>
+                </TouchableOpacity>
+              </View>
           </View>
-          <View style={styles.headerRight}>
-            <GroupIndicator />
-          </View>
-      </View>
+        </View>
       </SafeAreaView>
       <View>
           <Modal
@@ -169,12 +206,22 @@ const styles = StyleSheet.create({
   safeArea: {
     backgroundColor: '#fff', // Match your header background
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2, // Shadow moves downwards
+    },
+    shadowOpacity: 0.1, // Shadow is 10% opaque
+    shadowRadius: 3, // Blurs the shadow
+    // Android shadow prop
+    elevation: 5,
   },
   container: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
+    marginBottom: 8
   },
   backNav: {
     flexDirection: 'row',
@@ -186,30 +233,25 @@ const styles = StyleSheet.create({
     color: primary,
     fontSize: 16
   },
-  headerLeft: {
-    width:'33.33%'
+  headerUpper: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
   },
-  headerCenter: {
-    width:'33.33%'
-  },
-  headerRight: {
-    width:'33.33%'
+  headerLower: {
+    flexDirection: 'row'
   },
   weekSelector: {
-
-  },
-  viewSelector: {
-    flexDirection: 'row',
-    backgroundColor: '#f0f0f0', // Lighter background
-    borderRadius: 10, // More rounded
-    height: 36,
-    position: 'relative',
-    justifyContent: 'flex-start',
-    width:'100%'
+    
   },
   weekSelectorInner: {
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 16,
+    flexDirection: 'row'
+  },
+  weekSelectorText: {
+    marginLeft: 8
   },
   weekSelectRow: {
     flexDirection: 'row',
@@ -221,10 +263,20 @@ const styles = StyleSheet.create({
     fontSize: 22, // Bigger title
     fontWeight: 'bold',
     paddingTop: 4,
+    marginBottom:-4
   },
   subtitle: {
     fontSize: 14,
     color: primary, // Subtler color
+  },
+    viewSelector: {
+    flexDirection: 'row',
+    // backgroundColor: '#f0f0f0', // Lighter background
+    borderRadius: 10, // More rounded
+    height: 36,
+    position: 'relative',
+    justifyContent: 'flex-start',
+    width:'100%'
   },
   segment: {
     flex: 1,
@@ -234,15 +286,15 @@ const styles = StyleSheet.create({
   segmentText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#8e8e93', // Grayer unselected text
+    // color: '#043308ff', // Grayer unselected text
   },
   segmentTextActive: {
-    color: '#000', // Black selected text
+    // color: 'white', // Black selected text
   },
   activeSegmentBackground: {
     position: 'absolute',
-    backgroundColor: '#fff', // White active background
-    borderRadius: 8,
+    backgroundColor: primary, // White active background
+    borderRadius: 20,
     margin: 2,
     height: 32,
     shadowColor: '#000',

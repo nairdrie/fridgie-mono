@@ -82,6 +82,13 @@ export default function RootLayout() {
                       headerShown: false
                     }}
                   />
+                  <Stack.Screen
+                      name="profile/[uid]"
+                      options={{
+                        title: 'Profile',
+                        headerShown: false
+                      }}
+                  />
                 </Stack>
               </RootView>
             </ListProvider>

@@ -97,12 +97,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        height: 40, // Set fixed height
+        height: 50, // Set fixed height
     },
     photo: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 45,
+        height: 45,
+        borderRadius: 25,
         borderWidth: 2,
         borderColor: '#fff',
     },

@@ -75,8 +75,17 @@ export default function TabLayout() {
                         )
                     }
                 },
-                tabBarShowLabel: false
+                tabBarShowLabel: false,
             }}
+            listeners={({ navigation }) => ({
+                tabPress: (e) => {
+                    // Prevent the default action
+                    e.preventDefault();
+                    
+                    // Navigate to the root of the profile tab, without any params
+                    navigation.navigate('profile', { uid: undefined });
+                },
+            })}
         />
     </Tabs>
   );

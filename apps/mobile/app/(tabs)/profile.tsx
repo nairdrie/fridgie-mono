@@ -3,8 +3,8 @@ import NotificationBell from '@/components/NotificationBell';
 import NotificationsModal from '@/components/NotificationsModal';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
-import { Recipe, UserProfile as UserProfileType } from '@/types/types';
-import { getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
+import { Recipe } from '@/types/types';
+import { getUserCookbook, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -12,7 +12,7 @@ import { toReadablePhone } from '@/utils/utils';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { updateEmail, updateProfile } from 'firebase/auth';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -169,11 +169,8 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
 
 export default function UserProfile() {
     const { user: authUser, refreshAuthUser } = useAuth();
-    const { uid: routeUid } = useLocalSearchParams<{ uid?: string }>();
     const router = useRouter();
 
-    const [viewedUser, setViewedUser] = useState<UserProfileType | null>(null);
-    const [isMe, setIsMe] = useState(false);
     const [loading, setLoading] = useState(true);
 
     const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
@@ -197,57 +194,27 @@ export default function UserProfile() {
         }, [])
     );
 
-    useEffect(() => {
-        const targetUid = routeUid || authUser?.uid;
-
-        // If there's no target user and the auth user is anonymous, do nothing.
-        if (!targetUid && authUser?.isAnonymous) {
-            setLoading(false);
-            return;
-        }
-        
-        // Determine if the profile being viewed is the authenticated user's profile
-        setIsMe(!routeUid || routeUid === authUser?.uid);
-
-        const fetchUserData = async () => {
-            if (!targetUid) return;
-            try {
-                setLoading(true);
-                // If it's my profile, use the data from AuthContext. Otherwise, fetch it.
-                const profileData = isMe ? authUser : await getUserProfile(targetUid);
-                
-                setViewedUser(profileData as UserProfileType);
-                setNewPhotoUri(profileData?.photoURL || null);
-                
-                // Fetch the cookbook for the viewed user
-                const userCookbook = await getUserCookbook(targetUid);
-                setCookbook(userCookbook);
-
-            } catch (error) {
-                console.error("Failed to fetch user data:", error);
-                Alert.alert("Error", "Could not load user profile.");
-            } finally {
-                setLoading(false);
-                setIsCookbookLoading(false);
-            }
-        };
-
-        fetchUserData();
-    }, [routeUid, authUser]); // Rerun when the route or auth user changes
-
     const fetchCookbook = useCallback(async () => {
-        const targetUid = routeUid || authUser?.uid;
-        if (!targetUid) return;
+        if (!authUser || authUser.isAnonymous) {
+            setIsCookbookLoading(false);
+            return;
+        };
         try {
             setIsCookbookLoading(true);
-            const userCookbook = await getUserCookbook(targetUid);
+            const userCookbook = await getUserCookbook(authUser.uid);
             setCookbook(userCookbook);
         } catch (error) {
             console.error("Failed to fetch cookbook:", error);
         } finally {
             setIsCookbookLoading(false);
         }
-    }, [routeUid, authUser]);
+    }, [authUser]);
+
+    useEffect(() => {
+        // Fetch data whenever the authenticated user changes
+        setLoading(false); // Auth context handles its own loading state
+        fetchCookbook();
+    }, [authUser, fetchCookbook]);
 
     const handleAccept = (invitationId: string) => {
         acceptInvitation(invitationId, () => {
@@ -271,13 +238,12 @@ export default function UserProfile() {
     };
 
     const handlePhotoSave = async () => {
-        if (!newPhotoUri || !isMe) return;
+        if (!newPhotoUri) return;
         setLoading(true);
         try {
             const url = await uploadUserPhoto(newPhotoUri);
             await updateProfile(auth.currentUser!, { photoURL: url });
             refreshAuthUser();
-            setViewedUser(prev => prev ? { ...prev, photoURL: url } : null);
         } catch (err) {
             Alert.alert("Error", "Could not update profile picture.");
         } finally {
@@ -302,8 +268,7 @@ export default function UserProfile() {
     };
 
     const openPhotoModal = () => {
-        if (!isMe) return; // Don't open modal if not my profile
-        setNewPhotoUri(viewedUser?.photoURL || null);
+        setNewPhotoUri(authUser?.photoURL || null);
         setEditPhotoModalVisible(true);
     };
     
@@ -312,7 +277,7 @@ export default function UserProfile() {
     }
     
     // If the user is anonymous, show the sign-up CTA
-    if (!viewedUser && authUser?.isAnonymous) {
+    if (authUser?.isAnonymous) {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.ctaContainer}>
@@ -340,50 +305,38 @@ export default function UserProfile() {
             </SafeAreaView>
         );
     }
-    
-    // If no user could be found, show an error
-    if (!viewedUser) {
-        return (
-            <SafeAreaView style={styles.container}>
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text>User not found.</Text>
-                </View>
-            </SafeAreaView>
-        );
-    }
 
     return (
         <>
         {isFocused && <StatusBar style="dark" />}
         <SafeAreaView style={styles.container}>
             {/* Show header buttons only if it's the current user's profile */}
-            {isMe && (
-                <View style={styles.headerButtons}>
-                    <NotificationBell onPress={() => setNotificationsVisible(true)} />
-                    <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
-                        <Ionicons name="settings-outline" size={28} color="#000" />
-                    </TouchableOpacity>
-                </View>
-            )}
+
+            <View style={styles.headerButtons}>
+                <NotificationBell onPress={() => setNotificationsVisible(true)} />
+                <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
+                    <Ionicons name="settings-outline" size={28} color="#000" />
+                </TouchableOpacity>
+            </View>
+
             <View style={styles.profileContainer}>
-                <TouchableOpacity onPress={openPhotoModal} disabled={!isMe} style={styles.profileImageContainer}>
-                    {viewedUser?.photoURL ? (
-                        <Image source={{ uri: viewedUser.photoURL }} style={styles.profileImage} />
+                <TouchableOpacity onPress={openPhotoModal}  style={styles.profileImageContainer}>
+                    {authUser?.photoURL ? (
+                        <Image source={{ uri: authUser.photoURL }} style={styles.profileImage} />
                     ) : (
                         <View style={[styles.profileImage, styles.placeholderImage]}>
                             <Ionicons name="person" size={60} color="#ccc" />
                         </View>
                     )}
                     {/* Show edit pencil only if it's the current user's profile */}
-                    {isMe && (
-                        <View style={styles.editIconContainer}>
-                            <Ionicons name="pencil" size={16} color="#fff" />
-                        </View>
-                    )}
+                    <View style={styles.editIconContainer}>
+                        <Ionicons name="pencil" size={16} color="#fff" />
+                    </View>
+   
                 </TouchableOpacity>
 
-                <Text style={styles.displayName}>{viewedUser?.displayName || 'Fridgie User'}</Text>
-                {viewedUser?.email && <Text style={styles.usernameText}>@{viewedUser.email.split('@')[0]}</Text>}
+                <Text style={styles.displayName}>{authUser?.displayName || 'Fridgie User'}</Text>
+                {authUser?.email && <Text style={styles.usernameText}>@{authUser.email.split('@')[0]}</Text>}
             </View>
             <View style={styles.statsContainer}>
                 <View style={styles.statItem}>
@@ -408,8 +361,7 @@ export default function UserProfile() {
             </View>
 
             {/* Modals are only available on the current user's profile */}
-            {isMe && (
-                <>
+
                     <Modal visible={editPhotoModalVisible} animationType="slide" transparent={true}>
                         <View style={styles.modalContainer}>
                             <View style={styles.modalContent}>
@@ -467,8 +419,8 @@ export default function UserProfile() {
                         onAccept={handleAccept}
                         onDecline={handleDecline}
                     />
-                </>
-            )}
+
+
         </SafeAreaView>
         </>
     );

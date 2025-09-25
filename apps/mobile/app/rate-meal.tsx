@@ -1,3 +1,4 @@
+import { useAuth } from '@/context/AuthContext';
 import { Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getRecipe, getUserCookbook, submitRecipeFeedback } from '@/utils/api';
 import { primary } from '@/utils/styles';
@@ -48,6 +49,7 @@ export default function RateMealScreen() {
     const [showAddedToCookbook, setShowAddedToCookbook] = useState(false);
     const animatedValue = useRef(new Animated.Value(0)).current;
     const [isInCookbook, setIsInCookbook] = useState(false);
+    const { user } = useAuth();
 
     useEffect(() => {
         if (!recipeId) {
@@ -59,8 +61,10 @@ export default function RateMealScreen() {
             try {
                 const fetchedRecipe = await getRecipe(recipeId);
                 setRecipe(fetchedRecipe);
-
-                const cookbook = await getUserCookbook();
+                if(!user) {
+                    return;
+                }
+                const cookbook = await getUserCookbook(user.uid);
                 const isRecipeInCookbook = cookbook.some(r => r.id === recipeId);
                 setIsInCookbook(isRecipeInCookbook);
 
