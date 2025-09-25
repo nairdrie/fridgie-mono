@@ -3,7 +3,7 @@ import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import uuid from 'react-native-uuid';
 import { getRecipe, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 
@@ -21,6 +21,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   const [isLoading, setIsLoading] = useState(false);
   const [creationMode, setCreationMode] = useState<'initial' | 'automatic' | 'manual'>('initial');
   const [isSaveDisabled, setIsSaveDisabled] = useState(true);
+  const { height, width } = useWindowDimensions();
 
   const createBlankRecipe = (): Recipe => ({
     id: uuid.v4() as string,
@@ -139,7 +140,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     
     if (creationMode === 'initial') {
       return (
-        <View style={styles.selectionContainer}>
+        <>
           <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('automatic')}>
             <View style={styles.iconRow}><Ionicons name="globe-outline" size={32} color={primary} /><Ionicons name="logo-tiktok" size={32} color={primary} /></View>
             <Text style={styles.selectionButtonTitle}>Automatic Import</Text>
@@ -150,7 +151,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             <Text style={styles.selectionButtonTitle}>Manual Entry</Text>
             <Text style={styles.selectionButtonDescription}>Enter the recipe details yourself, step-by-step.</Text>
           </TouchableOpacity>
-        </View>
+        </>
       );
     }
     
@@ -216,7 +217,14 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
               </View>
               
               {/* ✅ 1. The ScrollView now ONLY wraps the main, scrollable content */}
-              <ScrollView style={styles.modalScrollView} contentContainerStyle={styles.modalScrollViewContent} keyboardShouldPersistTaps="handled">
+              <ScrollView 
+                style={[
+                  styles.modalScrollView, 
+                  creationMode === 'manual' ? { height: height * 0.7 } : null
+                ]} 
+                contentContainerStyle={styles.modalScrollViewContent} 
+                keyboardShouldPersistTaps="handled"
+              >
                 {renderContent()}
               </ScrollView>
 
@@ -247,9 +255,11 @@ const styles = StyleSheet.create({
   // ✅ 2. Remove top padding, as it's no longer needed for centering
   modalSafeArea: {
     width: '100%',
-    maxHeight: '90%',
-    // paddingTop: 40, // Removed this line
   },
+  modalScrollView: {
+
+  },
+  modalScrollViewContent: { paddingTop: 16 },
   // ✅ 3. Round only the top corners for a "bottom sheet" appearance
   modalContentContainer: {
     backgroundColor: '#F7F7F7',
@@ -270,8 +280,6 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center'},
   backButton: { width: 30, alignItems: 'flex-start' },
   closeButton: { width: 30, alignItems: 'flex-end' },
-  modalScrollView: { flexShrink: 1 }, // This prevents the ScrollView from growing infinitely
-  modalScrollViewContent: { paddingTop: 16 },
   formSectionContainer: { backgroundColor: '#FFFFFF', borderRadius: 12, margin: 16, padding: 16, marginTop: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
   formSectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
   formInput: { color: '#222222', borderWidth: 1, borderColor: '#EFEFEF', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 12 },
@@ -285,6 +293,9 @@ const styles = StyleSheet.create({
   addFieldButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 8 },
   addFieldButtonText: { color: primary, fontSize: 16, fontWeight: '600', marginLeft: 4 },
   modalFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderTopWidth: 1, borderTopColor: '#EFEFEF', backgroundColor: '#FFFFFF' },
+  invisibleFooter: {
+    opacity: 0
+  },
   primaryButton: { backgroundColor: primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 50 },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   secondaryButton: { backgroundColor: '#EFEFEF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, marginRight: 10 },
@@ -294,16 +305,13 @@ const styles = StyleSheet.create({
   addImageButton: { justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#e0e0e0', borderStyle: 'dashed' },
   addImageButtonText: { marginTop: 8, color: primary, fontWeight: '600' },
   imageEditIcon: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, borderRadius: 16 },
-  selectionContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
   selectionButton: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 24,
-    width: '100%',
+    margin: 16,
+    marginTop: 0,
+    // width: '100%',
     alignItems: 'center',
     marginBottom: 20,
     shadowColor: '#000',
