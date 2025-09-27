@@ -236,24 +236,47 @@ export default function HomeScreen() {
 
     const handleAddRecipe = (meal: Meal) => setRecipeToEdit(meal);
 
-    const handleAddMealsFromSuggestion = (newMeals: Meal[], newItemsFromModal: Item[]) => {
-        setMeals(prev => [...prev, ...newMeals]);
-        setItems(currentItems => {
-            let lastRank = currentItems.length > 0 && currentItems[currentItems.length - 1].text !== ''
-                    ? LexoRank.parse(currentItems[currentItems.length - 1].listOrder)
-                    : LexoRank.middle();
-            const rankedNewItems = newItemsFromModal.map(item => {
-                lastRank = lastRank.genNext();
-                return { ...item, listOrder: lastRank.toString() };
-            });
-            const isSingleEmpty = currentItems.length === 1 && (currentItems[0].text ?? '') === '' && !currentItems[0].isSection;
-            return isSingleEmpty ? rankedNewItems : [...currentItems, ...rankedNewItems];
+    const handleAddMealsFromSuggestion = async (newMeals: Meal[], newItemsFromModal: Item[]) => {
+        // 1. Prepare the new state variables
+        const updatedMeals = [...meals, ...newMeals];
+
+        let lastRank =
+            items.length > 0 && items[items.length - 1].text !== ''
+                ? LexoRank.parse(items[items.length - 1].listOrder)
+                : LexoRank.middle();
+
+        const rankedNewItems = newItemsFromModal.map(item => {
+            lastRank = lastRank.genNext();
+            return { ...item, listOrder: lastRank.toString() };
         });
-        markDirty();
-        if(sort == 'category') {
-            setTimeout(async () => {
-                await handleAutoCategorize();
-            }, 100);
+
+        const isSingleEmpty = items.length === 1 && (items[0].text ?? '') === '' && !items[0].isSection;
+        const finalNewItems = isSingleEmpty ? rankedNewItems : [...items, ...rankedNewItems];
+
+        // 2. Perform the optimistic UI update
+        setMeals(updatedMeals);
+        setItems(finalNewItems);
+        markDirty(); // Keep the dirty flag to prevent immediate listener overwrites
+
+        try {
+            // 3. Explicitly save the new, UNCATEGORIZED items to Firestore
+            if (selectedGroup && selectedList) {
+                await updateList(selectedGroup.id, selectedList.id, {
+                    items: finalNewItems,
+                    meals: updatedMeals,
+                    sort: sort,
+                });
+            }
+
+            // 4. AFTER saving is successful, categorize if needed
+            if (sort === 'category') {
+                // Now we call handleAutoCategorize with the items we know are saved
+                await handleAutoCategorize(finalNewItems);
+            }
+        } catch (error) {
+            console.error("Failed to add/categorize suggested meals:", error);
+            // Optional: Implement logic to revert the optimistic update on error
+            Alert.alert("Error", "Could not save new meals. Please try again.");
         }
     };
 
@@ -291,12 +314,16 @@ export default function HomeScreen() {
         markDirty();
     };
 
-    const handleAutoCategorize = async () => {
+    const handleAutoCategorize = async (itemsToCategorize?: Item[]) => {
         if (!selectedGroup || !selectedList?.id) return;
         setIsCategorizing(true);
         markDirty();
+        
+        // Use the passed-in items, or fall back to the component's state
+        const currentItems = itemsToCategorize || items;
+
         try {
-            const newItems = await categorizeList(selectedGroup.id, selectedList.id, items);
+            const newItems = await categorizeList(selectedGroup.id, selectedList.id, currentItems);
             setItems(newItems);
             setSort('category'); // Set sort mode to category
             setEditingId('');

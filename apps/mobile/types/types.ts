@@ -47,6 +47,9 @@ export interface UserProfile {
   phoneNumber: string | null;
   photoURL: string | null;
   displayName?: string | null;
+  followerCount?: number;
+  followingCount?: number;
+  isFollowing?: boolean;
   // Add other properties from your user document here
 }
 
@@ -89,5 +92,7 @@ export interface UserSearchResult {
   displayName: string;
   photoURL: string;
   email: string;
+  followerCount?: number;
+  recipeCount?: number;
   // Add other fields you indexed, like email
 }

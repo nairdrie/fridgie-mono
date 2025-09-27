@@ -119,6 +119,7 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
         }
     };
 
+    // TODO: reroll state breaks ui
     const handleRerollSuggestions = async () => {
         if (isSuggesting) return;
 

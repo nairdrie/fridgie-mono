@@ -7,7 +7,7 @@ import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { Item, Meal, Recipe } from '@/types/types';
-import { getUserCookbook, uploadUserPhoto } from '@/utils/api';
+import { getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -164,7 +164,23 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
     );
 };
 
-const ProfileHeader = ({ authUser, cookbook, openPhotoModal, setNotificationsVisible, setSettingsModalVisible }: {authUser: User, cookbook: Recipe[], openPhotoModal: any, setNotificationsVisible: any, setSettingsModalVisible: any}) => (
+const ProfileHeader = ({ 
+    authUser, 
+    cookbook, 
+    openPhotoModal, 
+    setNotificationsVisible, 
+    setSettingsModalVisible,
+    followerCount,
+    followingCount
+ }: {
+    authUser: User, 
+    cookbook: Recipe[], 
+    openPhotoModal: any, 
+    setNotificationsVisible: any, 
+    setSettingsModalVisible: any,
+    followerCount: number,
+    followingCount: number,
+}) => (
     <>
         <View style={styles.profileContainer}>
             <View style={styles.headerButtons}>
@@ -189,8 +205,8 @@ const ProfileHeader = ({ authUser, cookbook, openPhotoModal, setNotificationsVis
             {authUser?.email && <Text style={styles.usernameText}>@{authUser.email.split('@')[0]}</Text>}
         </View>
         <View style={styles.statsContainer}>
-            <View style={styles.statItem}><Text style={styles.statNumber}>0</Text><Text style={styles.statLabel}>Following</Text></View>
-            <View style={styles.statItem}><Text style={styles.statNumber}>0</Text><Text style={styles.statLabel}>Followers</Text></View>
+            <View style={styles.statItem}><Text style={styles.statNumber}>{followingCount || 0}</Text><Text style={styles.statLabel}>Following</Text></View>
+            <View style={styles.statItem}><Text style={styles.statNumber}>{followerCount || 0}</Text><Text style={styles.statLabel}>Followers</Text></View>
             <View style={styles.statItem}><Text style={styles.statNumber}>{cookbook.length || 0}</Text><Text style={styles.statLabel}>Recipes</Text></View>
         </View>
     </>
@@ -209,6 +225,8 @@ export default function UserProfile() {
     const { notifications, isLoading: isNotificationsLoading, acceptInvitation, declineInvitation } = useNotifications();
     const [isNotificationsVisible, setNotificationsVisible] = useState(false);
 
+    const [profileData, setProfileData] = useState<{ followerCount: number, followingCount: number } | null>(null);
+
     const flatListRef = useRef<FlatList | null>(null);
     const [isAtStart, setIsAtStart] = useState(true);
     const [isAtEnd, setIsAtEnd] = useState(false);
@@ -218,6 +236,8 @@ export default function UserProfile() {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
     const [isCookbookLoading, setIsCookbookLoading] = useState(true);
+
+    const [isDataLoading, setIsDataLoading] = useState(true);
 
     const [isMealPlanModalVisible, setIsMealPlanModalVisible] = useState(false);
     const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
@@ -233,26 +253,46 @@ export default function UserProfile() {
         }, [])
     );
 
-    const fetchCookbook = useCallback(async () => {
+    const fetchProfileData = useCallback(async () => {
         if (!authUser || authUser.isAnonymous) {
-            setIsCookbookLoading(false);
+            setIsDataLoading(false);
             return;
         };
-        setIsRefreshing(true);
+        
         try {
-            const userCookbook = await getUserCookbook(authUser.uid);
+            // Fetch profile info and cookbook in parallel for speed
+            const [userProfile, userCookbook] = await Promise.all([
+                getUserProfile(authUser.uid),
+                getUserCookbook(authUser.uid)
+            ]);
+
+            setProfileData(userProfile as any);
             setCookbook(userCookbook);
         } catch (error) {
-            console.error("Failed to fetch cookbook:", error);
-        } finally {
-            setIsCookbookLoading(false);
-            setIsRefreshing(false);
+            console.error("Failed to fetch profile data:", error);
+            Alert.alert("Error", "Could not load your profile information.");
         }
     }, [authUser]);
 
+    const loadData = useCallback(async (isRefresh = false) => {
+        if (isRefresh) {
+            setIsRefreshing(true);
+        } else {
+            setIsDataLoading(true);
+        }
+        
+        await fetchProfileData();
+
+        if (isRefresh) {
+            setIsRefreshing(false);
+        } else {
+            setIsDataLoading(false);
+        }
+    }, [fetchProfileData]);
+
     useEffect(() => {
-        fetchCookbook();
-    }, [authUser, fetchCookbook]);
+        loadData();
+    }, [loadData]);
 
     const filteredRecipes = useMemo(() => {
         if (!searchTerm) return cookbook;
@@ -332,7 +372,7 @@ export default function UserProfile() {
     
     const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
         setMealForRecipeEdit(null);
-        fetchCookbook();
+        fetchProfileData();
     };
 
     const openPhotoModal = () => {
@@ -340,7 +380,7 @@ export default function UserProfile() {
         setEditPhotoModalVisible(true);
     };
     
-    if (isCookbookLoading && cookbook.length === 0) {
+    if (isDataLoading && cookbook.length == 0) {
         return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
     }
     
@@ -386,10 +426,12 @@ export default function UserProfile() {
                             openPhotoModal={openPhotoModal}
                             setNotificationsVisible={setNotificationsVisible}
                             setSettingsModalVisible={setSettingsModalVisible}
+                            followingCount={profileData?.followingCount || 0}
+                            followerCount={profileData?.followerCount || 0}
                         />
                     }
                     refreshControl={
-                        <RefreshControl refreshing={isRefreshing} onRefresh={fetchCookbook} tintColor={primary}/>
+                        <RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} tintColor={primary}/>
                     }
                     renderSectionHeader={() => (
                         <View style={styles.stickyHeaderContainer}>
@@ -475,7 +517,7 @@ export default function UserProfile() {
                     recipeId={recipeToViewId}
                     onEdit={handleEditRecipe}
                     isInCookbook={cookbook.some(r => r.id === recipeToViewId)}
-                    onCookbookUpdate={fetchCookbook}
+                    onCookbookUpdate={fetchProfileData}
                 />
                 
                 <AddEditRecipeModal

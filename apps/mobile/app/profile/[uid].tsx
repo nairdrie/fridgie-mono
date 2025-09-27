@@ -1,8 +1,9 @@
 // File: app/(main)/profile/[uid].tsx
 
 import Cookbook from '@/components/Cookbook';
+import { useAuth } from '@/context/AuthContext';
 import { Recipe, UserProfile as UserProfileType } from '@/types/types';
-import { getUserCookbook, getUserProfile } from '@/utils/api';
+import { followUser, getUserCookbook, getUserProfile, unfollowUser } from '@/utils/api';
 import { primary } from '@/utils/styles'; // Assuming you have a primary color exported
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams, useRouter } from 'expo-router'; // ✅ 1. Import useRouter
@@ -25,20 +26,25 @@ import {
 
 export default function OtherUserProfileScreen() {
     const { uid } = useLocalSearchParams<{ uid: string }>();
-    const router = useRouter(); // ✅ 3. Get the router instance
+    const router = useRouter();
+    const { user: currentUser } = useAuth(); // Get the currently logged-in user
+
     const [viewedUser, setViewedUser] = useState<UserProfileType | null>(null);
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
     const [loading, setLoading] = useState(true);
     const [isCookbookLoading, setIsCookbookLoading] = useState(true);
+
+    const isOwnProfile = currentUser?.uid === uid;
 
     useEffect(() => {
         if (!uid) return;
         const fetchUserData = async () => {
             try {
                 setLoading(true);
-                setIsCookbookLoading(true);
-                const profileData = await getUserProfile(uid);
-                const userCookbook = await getUserCookbook(uid);
+                const [profileData, userCookbook] = await Promise.all([
+                    getUserProfile(uid),
+                    getUserCookbook(uid)
+                ]);
                 setViewedUser(profileData as UserProfileType);
                 setCookbook(userCookbook);
             } catch (error) {
@@ -51,6 +57,34 @@ export default function OtherUserProfileScreen() {
         };
         fetchUserData();
     }, [uid]);
+
+    const handleFollowToggle = async () => {
+        if (!viewedUser) return;
+
+        // Optimistic UI update for instant feedback
+        const originalUser = viewedUser;
+        setViewedUser(prev => {
+            if (!prev) return null;
+            const isFollowing = !prev.isFollowing;
+            const followerCount = isFollowing
+                ? (prev.followerCount || 0) + 1
+                : (prev.followerCount || 0) - 1;
+            return { ...prev, isFollowing, followerCount };
+        });
+
+        try {
+            if (originalUser.isFollowing) {
+                await unfollowUser(uid!);
+            } else {
+                await followUser(uid!);
+            }
+        } catch (error) {
+            console.error("Follow/unfollow failed:", error);
+            // Revert state on failure
+            setViewedUser(originalUser);
+            Alert.alert("Error", "An error occurred. Please try again.");
+        }
+    };
 
     const fetchCookbook = async () => {
         if (!uid) return;
@@ -102,10 +136,32 @@ export default function OtherUserProfileScreen() {
                         {viewedUser?.email && <Text style={styles.usernameText}>@{viewedUser.email.split('@')[0]}</Text>}
                     </View>
 
-                    <View style={styles.statsContainer}>
-                        <View style={styles.statItem}><Text style={styles.statNumber}>0</Text><Text style={styles.statLabel}>Following</Text></View>
-                        <View style={styles.statItem}><Text style={styles.statNumber}>0</Text><Text style={styles.statLabel}>Followers</Text></View>
-                        <View style={styles.statItem}><Text style={styles.statNumber}>{cookbook.length || 0}</Text><Text style={styles.statLabel}>Recipes</Text></View>
+                     {!isOwnProfile && (
+                        <View style={styles.actionContainer}>
+                            <TouchableOpacity
+                                style={[styles.followButton, viewedUser.isFollowing && styles.followingButton]}
+                                onPress={handleFollowToggle}
+                            >
+                                <Text style={[styles.followButtonText, viewedUser.isFollowing && styles.followingButtonText]}>
+                                    {viewedUser.isFollowing ? 'Following' : 'Follow'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                     <View style={styles.statsContainer}>
+                        <View style={styles.statItem}>
+                            <Text style={styles.statNumber}>{viewedUser.followingCount || 0}</Text>
+                            <Text style={styles.statLabel}>Following</Text>
+                        </View>
+                        <View style={styles.statItem}>
+                            <Text style={styles.statNumber}>{viewedUser.followerCount || 0}</Text>
+                            <Text style={styles.statLabel}>Followers</Text>
+                        </View>
+                        <View style={styles.statItem}>
+                            <Text style={styles.statNumber}>{cookbook.length || 0}</Text>
+                            <Text style={styles.statLabel}>Recipes</Text>
+                        </View>
                     </View>
 
                     <View style={styles.feedContainer}>
@@ -207,5 +263,29 @@ const styles = StyleSheet.create({
         // The flex: 1 is no longer needed here as ScrollView handles the layout
         paddingTop: 16,
         paddingBottom: 32, // Add padding at the bottom
+    },
+    actionContainer: {
+        paddingHorizontal: 16,
+        paddingBottom: 20,
+    },
+    followButton: {
+        backgroundColor: primary,
+        paddingVertical: 12,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    followButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    followingButton: {
+        backgroundColor: '#e9ecef',
+        borderWidth: 1,
+        borderColor: '#dee2e6',
+    },
+    followingButtonText: {
+        color: '#495057',
     },
 });

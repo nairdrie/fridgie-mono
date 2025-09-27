@@ -18,8 +18,8 @@ interface Creator {
     uid: string;
     displayName: string;
     photoURL: string;
-    followers: number;
-    recipes: number;
+    followerCount: number;
+    recipeCount: number;
     featuredRecipe?: {
         id: string;
         name: string;
@@ -64,42 +64,47 @@ const RecipeCarousel = ({ title, recipes, onView }: { title: string; recipes: Re
 };
 
 // --- New Component for the User Card ---
-const UserCard = ({ creator, fullWidth }: { creator: Creator, fullWidth?: boolean }) => {
+const UserCard = ({ creator, isSearchResult }: { creator: Creator, isSearchResult?: boolean }) => {
     const router = useRouter();
 
     const handlePress = () => {
-        // Navigate to the profile page, passing the creator's UID as a query parameter
         router.push({
-            pathname: '/profile/[uid]', // The actual file path of your dynamic route
-            params: { uid: creator.uid }, // The parameters to fill in
+            pathname: '/profile/[uid]',
+            params: { uid: creator.uid },
         });
     };
 
     return (
         <TouchableOpacity
-            style={[styles.userCard, fullWidth && styles.fullWidthUserCard]}
-            onPress={handlePress} // Add the onPress handler here
+            // Apply the base style, and conditionally add the search result style
+            style={[styles.userCard, isSearchResult && styles.searchResultUserCard]}
+            onPress={handlePress}
         >
             <View style={styles.userCardHeader}>
                 <Image source={{ uri: creator.photoURL }} style={styles.userAvatar} />
                 <View style={styles.userInfo}>
                     <Text style={styles.userName} numberOfLines={1}>{creator.displayName}</Text>
                     <View style={styles.userStats}>
-                        <Text style={styles.userStatText}>{creator.followers.toLocaleString()} followers</Text>
+                        <Ionicons name="person-outline" size={14} color="#495057" />
+                        <Text style={styles.userStatText}>{creator.followerCount} followers</Text>
                         <Text style={styles.userStatSeparator}>•</Text>
-                        <Text style={styles.userStatText}>{creator.recipes} recipes</Text>
+                        <Ionicons name="restaurant-outline" size={14} color="#495057" />
+                        <Text style={styles.userStatText}>{creator.recipeCount} recipes</Text>
                     </View>
                 </View>
             </View>
-            {(!fullWidth && creator.featuredRecipe) &&
+            {/* Only show the featured recipe if it's NOT a search result */}
+            {!isSearchResult && creator.featuredRecipe && (
                 <View style={styles.popularRecipe}>
-                    <Image source={{ uri: creator.featuredRecipe.photoURL }} style={styles.popularRecipeImage} />
-                    <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.featuredRecipe.name}</Text>
+                    <View style={styles.popularRecipeContent}>
+                        <Image source={{ uri: creator.featuredRecipe.photoURL }} style={styles.popularRecipeImage} />
+                        <Text style={styles.popularRecipeText} numberOfLines={1}>{creator.featuredRecipe.name}</Text>
+                    </View>
                 </View>
-            }
+            )}
         </TouchableOpacity>
     );
-}
+};
 
 
 // --- New Component for the Creator Carousel ---
@@ -210,14 +215,13 @@ export default function ExploreScreen() {
                         {searchResults.users.map(user => (
                             <View key={user.objectID} style={styles.searchResultUserContainer}>
                                 {/* The UserCard component here is the one you defined above */}
-                                <UserCard fullWidth={true} creator={{ 
+                                <UserCard isSearchResult={true} creator={{ 
                                     uid: user.objectID,
                                     displayName: user.displayName,
                                     photoURL: user.photoURL,
                                     // Add dummy data for fields not in search result
-                                    followers: 0, 
-                                    recipes: 0,
-                                    featuredRecipe: { id: '',name: '', photoURL: '' }
+                                    followerCount: user.followerCount || 0, 
+                                    recipeCount: user.recipeCount || 0,
                                 }} />
                             </View>
                         ))}
@@ -380,66 +384,111 @@ const styles = StyleSheet.create({
     },
     // --- New Styles for User Card ---
     userCard: {
-        justifyContent: 'center',
-        width: 280,
+        width: 300,
         marginLeft: 16,
-        backgroundColor: '#f8f9fa',
-        borderRadius: 12,
-        padding: 12,
+        backgroundColor: '#fdfdfd',
+        borderRadius: 16,
+        padding: 16,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 5,
+        marginTop: 6,
+        marginBottom: 6,
+    },
+
+    // ✨ REMOVED the old `fullWidthUserCard` style
+
+    // ✨ ADDED the new style for the search result variant
+    searchResultUserCard: {
+        width: '100%',
+        marginLeft: 0,
+        marginTop: 0,
+        marginBottom: 0,
+        // Make it flat
+        shadowOpacity: 0,
+        elevation: 0,
+        // Use a simple border instead of a shadow
         borderWidth: 1,
-        borderColor: '#e9ecef'
+        borderColor: '#e9ecef',
+        // Use a simpler background
+        backgroundColor: '#fff',
+        // Make it slightly more compact
+        padding: 12,
+    },
+    // ... (the rest of your styles remain the same)
+
+    searchResultUserContainer: {
+        paddingHorizontal: 16,
+        marginBottom: 12, // Reduced margin slightly for a tighter list
     },
     fullWidthUserCard: {
         width: '100%',
         marginLeft: 0
-    }, 
+    },
     userCardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
     },
     userAvatar: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        marginRight: 10,
+        width: 50, // ✨ Change: Larger avatar
+        height: 50, // ✨ Change: Larger avatar
+        borderRadius: 25, // ✨ Change: Keep it circular
+        marginRight: 12, // ✨ Change: Slightly more space
     },
     userInfo: {
         flex: 1,
     },
     userName: {
         fontWeight: 'bold',
-        fontSize: 16,
+        fontSize: 18, // ✨ Change: Larger name for better hierarchy
     },
     userStats: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 2,
+        marginTop: 4, // ✨ Change: More space below the name
     },
     userStatText: {
-        fontSize: 12,
-        color: '#6c757d',
+        fontSize: 13, // ✨ Change: Slightly larger and more readable
+        color: '#495057', // ✨ Change: Darker text for better contrast
+        marginLeft: 4, // ✨ Change: Space after the icon
     },
     userStatSeparator: {
-        marginHorizontal: 4,
-        color: '#6c757d',
+        marginHorizontal: 6, // ✨ Change: A bit more separation
+        color: '#adb5bd',
     },
     popularRecipe: {
+        // ✨ Change: This is now a container for the title and content
+        marginTop: 16,
+    },
+    popularRecipeTitle: {
+        // ✨ New: Style for the "Featured Recipe" title
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#6c757d',
+        textTransform: 'uppercase',
+        marginBottom: 8,
+    },
+    popularRecipeContent: {
+        // ✨ New: A wrapper for the actual recipe content
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: 'white',
-        borderRadius: 8,
+        borderRadius: 10,
         padding: 8,
-        marginTop: 10
+        borderWidth: 1,
+        borderColor: '#e2e5e7ff',
     },
     popularRecipeImage: {
-        width: 32,
-        height: 32,
-        borderRadius: 6,
-        marginRight: 8,
+        width: 36, // ✨ Change: Slightly larger image
+        height: 36, // ✨ Change: Slightly larger image
+        borderRadius: 8, // ✨ Change: More rounded
+        marginRight: 10,
     },
     popularRecipeText: {
         flex: 1,
-        fontSize: 13,
+        fontSize: 14, // ✨ Change: Larger for readability
         fontWeight: '500',
     },
     // --- 👇 Add this new style ---
@@ -452,10 +501,6 @@ const styles = StyleSheet.create({
     },
     searchResultItemContainer: {
         paddingHorizontal: 16,
-    },
-    searchResultUserContainer: {
-        paddingHorizontal: 16,
-        marginBottom: 16,
     },
 });
 

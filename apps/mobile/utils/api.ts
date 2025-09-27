@@ -119,6 +119,7 @@ export async function categorizeList(
   listId: string,
   items: Item[]
 ): Promise<Item[]> {
+  console.log("CATEGORIZING", items);
   const res = await authorizedFetch(
     `${BASE_URL}/list/categorize/${listId}?groupId=${groupId}`,
     { 
@@ -140,6 +141,14 @@ export async function getGroups(): Promise<Group[]> {
 export async function getUserProfile(uid: string): Promise<User> {
   const res = await authorizedFetch(`${BASE_URL}/user/${uid}`)
   return res.json()
+}
+
+export async function followUser(uid: string): Promise<void> {
+    await authorizedFetch(`${BASE_URL}/user/follow/${uid}`, { method: 'POST' });
+}
+
+export async function unfollowUser(uid: string): Promise<void> {
+    await authorizedFetch(`${BASE_URL}/user/follow/${uid}`, { method: 'DELETE' });
 }
 
 
