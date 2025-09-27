@@ -21,6 +21,8 @@ import {
     View
 } from 'react-native';
 
+// TODO: is cookbook clicks broken?
+
 export default function OtherUserProfileScreen() {
     const { uid } = useLocalSearchParams<{ uid: string }>();
     const router = useRouter(); // ✅ 3. Get the router instance

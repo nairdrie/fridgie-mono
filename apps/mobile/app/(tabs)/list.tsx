@@ -42,6 +42,7 @@ export default function HomeScreen() {
     
     const [meals, setMeals] = useState<Meal[]>([]);
     const [items, setItems] = useState<Item[]>([]);
+    const [sort, setSort] = useState<List['sort']>('custom');
 
     const [editingId, setEditingId] = useState<string>('');
     const [isCategorizing, setIsCategorizing] = useState(false);
@@ -106,86 +107,50 @@ export default function HomeScreen() {
 
     const fabStyle0 = secondaryFabStyle(0);
     const fabStyle1 = secondaryFabStyle(1);
-    const fabStyle2 = secondaryFabStyle(2);
 
 
     // Handles ALL incoming data (Initial Fetch + Real-time Updates)
     useEffect(() => {
-    if (!selectedList || !selectedGroup) {
-        setItems([]);
-        setMeals([]);
-        return;
-    }
+        if (!selectedList || !selectedGroup) {
+            setItems([]);
+            setMeals([]);
+            return;
+        }
 
-    // 1. Declare a variable to hold the real unsubscribe function later
-    let unsubscribe: () => void;
-
-    // 2. Create an async function inside the effect
-    const setupListener = async () => {
-        try {
-            // 3. Await the promise to get the actual unsubscribe function
-            unsubscribe = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
-                if (!list) {
-                    console.warn(`Received null data for list ${selectedList.id}, ignoring update.`);
-                    return;
-                }
-                if (Date.now() < dirtyUntilRef.current) return;
-
-                // --- ALL OF YOUR EXISTING LOGIC STAYS EXACTLY THE SAME ---
-                const rawItems = Array.isArray(list.items) ? list.items : [];
-                const withOrder = rawItems
-                    .map((item: Item) => ({ ...item, listOrder: item.listOrder ?? LexoRank.middle().toString() }))
-                    .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
-                
-                setItems(prev => {
-                    const sameLength = prev.length === withOrder.length;
-                    const sameAll = sameLength && prev.every((p, i) =>
-                        p.id === withOrder[i].id &&
-                        p.text === withOrder[i].text &&
-                        p.checked === withOrder[i].checked &&
-                        p.listOrder === withOrder[i].listOrder &&
-                        p.isSection === withOrder[i].isSection
-                    );
-                    if (sameAll) return prev;
-                    if (withOrder.length === 0) {
-                        return [{
-                            id: uuid.v4() as string,
-                            text: '',
-                            checked: false,
-                            listOrder: LexoRank.middle().toString(),
-                            isSection: false,
-                        }];
-                    }
-                    return withOrder;
+        let unsubscribe: () => void;
+        const setupListener = async () => {
+            try {
+                unsubscribe = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
+                    if (!list) return;
+                    if (Date.now() < dirtyUntilRef.current) return;
+                    
+                    const rawItems = Array.isArray(list.items) ? list.items : [];
+                    const withOrder = rawItems
+                        .map((item: Item) => ({ ...item, listOrder: item.listOrder ?? LexoRank.middle().toString() }))
+                        .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
+                    
+                    setItems(withOrder.length > 0 ? withOrder : [{ id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false }]);
+                    setMeals(Array.isArray(list.meals) ? list.meals : []);
+                    setSort(list.sort || 'custom'); // Update sort state
                 });
-                setMeals(Array.isArray(list.meals) ? list.meals : []);
-                // --- END OF YOUR EXISTING LOGIC ---
-            });
-        } catch (error) {
-            console.error("Failed to set up list listener:", error);
-        }
-    };
-
-    // Call the async setup function
-    setupListener();
-
-    // 4. The useEffect cleanup function is now correct
-    return () => {
-        // It checks if `unsubscribe` was successfully assigned before calling it
-        if (unsubscribe) {
-            unsubscribe();
-        }
-    };
-}, [selectedList, selectedGroup]);
+            } catch (error) {
+                console.error("Failed to set up list listener:", error);
+            }
+        };
+        setupListener();
+        return () => {
+            if (unsubscribe) unsubscribe();
+        };
+    }, [selectedList, selectedGroup]);
 
     // Handles ALL outgoing data (Debounced Saving)
-    useEffect(() => {
+     useEffect(() => {
         if (!selectedList?.id || !selectedGroup) return;
         const timeout = setTimeout(() => {
-            updateList(selectedGroup.id, selectedList.id, { items, meals: meals }).catch(console.error);
+            updateList(selectedGroup.id, selectedList.id, { items, meals, sort }).catch(console.error);
         }, 500);
         return () => clearTimeout(timeout);
-    }, [items, meals, selectedList?.id, selectedGroup]);
+    }, [items, meals, sort, selectedList?.id, selectedGroup]);
 
     const focusAtEnd = (id: string) => {
         const ref = inputRefs.current[id];
@@ -243,17 +208,21 @@ export default function HomeScreen() {
 
     const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
         setMeals(prevMeals => prevMeals.map(meal => (meal.id === updatedMeal.id ? updatedMeal : meal)));
+        
+        // Add new items to the list
         setItems(currentItems => {
             const base = currentItems.filter(item => item.mealId !== updatedMeal.id);
-            let lastRank = base.length > 0 ? LexoRank.parse(base[base.length - 1].listOrder) : LexoRank.middle();
-            const rankedNewItems = newItems.map(item => {
-                lastRank = lastRank.genNext();
-                return { ...item, listOrder: lastRank.toString() };
-            });
-            const isSingleEmpty = base.length === 1 && (base[0].text ?? '') === '' && !base[0].isSection;
-            return isSingleEmpty ? rankedNewItems : [...base, ...rankedNewItems];
+            const allNewItems = [...base, ...newItems].filter(i => (i.text ?? '').trim() !== '' || i.isSection);
+            return allNewItems;
         });
         markDirty();
+
+        // If the list is sorted by category, re-categorize after adding new items.
+        if (sort === 'category') {
+            setTimeout(async () => {
+                await handleAutoCategorize();
+            }, 100);
+        }
     };
 
     const handleViewRecipe = (meal: Meal) => {
@@ -263,6 +232,7 @@ export default function HomeScreen() {
         }
         setRecipeToViewId(meal.recipeId);
     };
+
 
     const handleAddRecipe = (meal: Meal) => setRecipeToEdit(meal);
 
@@ -280,6 +250,11 @@ export default function HomeScreen() {
             return isSingleEmpty ? rankedNewItems : [...currentItems, ...rankedNewItems];
         });
         markDirty();
+        if(sort == 'category') {
+            setTimeout(async () => {
+                await handleAutoCategorize();
+            }, 100);
+        }
     };
 
     const handleAddMeal = () => {
@@ -321,8 +296,9 @@ export default function HomeScreen() {
         setIsCategorizing(true);
         markDirty();
         try {
-            const newItems = await categorizeList(selectedGroup.id, selectedList.id);
+            const newItems = await categorizeList(selectedGroup.id, selectedList.id, items);
             setItems(newItems);
+            setSort('category'); // Set sort mode to category
             setEditingId('');
         } catch (err) {
             console.error('Auto-categorization failed', err);
@@ -368,15 +344,20 @@ export default function HomeScreen() {
     };
     
     const handleAddItem = (isSection = false) => {
-        if (!selectedList) return;
-        const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].listOrder) : LexoRank.middle();
-        const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: lastOrder.genNext().toString(), isSection: isSection };
-        const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
-        setItems(newItems);
-        setEditingId(newItem.id);
-        markDirty();
-        setTimeout(() => inputRefs.current[newItem.id]?.focus(), 50);
-    };
+    if (sort === 'alphabetical') {
+        // This case should no longer be reachable, but as a safeguard,
+        // we'll switch to custom before adding.
+        setSort('custom');
+    }
+
+    if (!selectedList) return;
+    const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].listOrder) : LexoRank.middle();
+    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: lastOrder.genNext().toString(), isSection: isSection };
+    const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
+    setItems(newItems);
+    setEditingId(newItem.id);
+    markDirty();
+};
 
     useFocusEffect(
         useCallback(() => {
@@ -470,7 +451,7 @@ export default function HomeScreen() {
     return (
         <>
         {isFocused && <StatusBar style="dark" />}
-        <View style={{ paddingTop: 12, paddingBottom: 12, flex: 1, backgroundColor: '#fff' }}>
+        <View style={{ paddingTop: 12, paddingBottom: 12,flex: 1, backgroundColor: '#fff' }}>
             <KeyboardAvoidingView
                 style={styles.container}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -483,6 +464,9 @@ export default function HomeScreen() {
                     <GroceryListView
                         items={items}
                         setItems={setItems}
+                        sort={sort}
+                        setSort={setSort}
+                        onCategorize={handleAutoCategorize}
                         editingId={editingId}
                         setEditingId={setEditingId}
                         inputRefs={inputRefs}
@@ -535,12 +519,6 @@ export default function HomeScreen() {
                             </>
                         ) : (
                             <>
-                                <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
-                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAutoCategorize(); setIsFabMenuOpen(false); }} disabled={isCategorizing}>
-                                        <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                        <Text style={styles.secondaryButtonText}>Categorize</Text>
-                                    </TouchableOpacity>
-                                </Animated.View>
                                 <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
                                     <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
                                         <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>

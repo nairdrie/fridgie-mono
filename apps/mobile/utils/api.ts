@@ -116,11 +116,16 @@ export async function updateList(
 
 export async function categorizeList(
   groupId: string,
-  listId: string
+  listId: string,
+  items: Item[]
 ): Promise<Item[]> {
   const res = await authorizedFetch(
     `${BASE_URL}/list/categorize/${listId}?groupId=${groupId}`,
-    { method: 'POST' }
+    { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(items)
+    }
   )
   return res.json()
 }

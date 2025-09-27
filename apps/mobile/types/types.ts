@@ -16,6 +16,7 @@ export type List = {
     hasContent?: boolean;
     items: Item[];
     meals: Meal[];
+    sort?: 'alphabetical' | 'category' | 'custom';
 };
 
 // types/types.ts
