@@ -92,13 +92,11 @@ route.post('/', async (c) => {
       });
 
       // Safely extract the description and subtitles from the response
-      const videoData = response.data?.data?.[0];
-      const description = videoData?.desc || '';
-      const subtitles = videoData?.subtitles || '';
+      const description = response.data?.data?.[0]?.data.desc || '';
+      const subtitles = response.data?.data?.[0]?.subtitles || '';
 
       // Combine both for better context, as the description might contain ingredients
       const combinedText = `Video Description: ${description}\n\nTranscript:\n${subtitles}`.trim();
-
       if (!combinedText) {
         throw new Error('Could not retrieve transcript or description from API.');
       }

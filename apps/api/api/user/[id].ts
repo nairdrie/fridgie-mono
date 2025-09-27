@@ -1,42 +1,47 @@
+// File: app/api/user/[id]/route.ts
+
 import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
 import admin from 'firebase-admin';
+import { fs } from '@/utils/firebase'; // Make sure you import your Firestore instance
 
 const route = new Hono();
-
-// Apply authentication middleware to all routes in this file
 route.use('*', auth);
 
-/**
- * GET /api/user/[id]
- * Fetches a user's public profile information by their UID.
- */
 route.get('/', async (c) => {
-    // Extract the user ID from the URL path parameter
-    const userId = c.req.param('id');
+    const currentUserId = c.get('uid'); // The user making the request
+    const profileUserId = c.req.param('id'); // The user being viewed
 
-    if (!userId) {
+    if (!profileUserId) {
         return c.json({ error: 'User ID is required' }, 400);
     }
 
     try {
-        // Use the Firebase Admin SDK to retrieve the user record
-        const userRecord = await admin.auth().getUser(userId);
+        // Get Auth and Firestore data in parallel for efficiency
+        const [userRecord, profileDoc, followDoc] = await Promise.all([
+            admin.auth().getUser(profileUserId),
+            fs.collection('users').doc(profileUserId).get(),
+            // Check if the current user is following the profile user
+            fs.collection('users').doc(currentUserId).collection('following').doc(profileUserId).get()
+        ]);
 
-        // Return a subset of the user's data that is safe to be public
+        const firestoreData = profileDoc.data() || {};
+        
         return c.json({
             uid: userRecord.uid,
             displayName: userRecord.displayName || null,
             photoURL: userRecord.photoURL || null,
-            email: userRecord.email || null, // Be mindful of privacy; only return if necessary for your app's features
+            email: userRecord.email || null,
+            // Add new data from Firestore
+            followerCount: firestoreData.followerCount || 0,
+            followingCount: firestoreData.followingCount || 0,
+            isFollowing: followDoc.exists, // True if the follow document exists
         });
     } catch (error: any) {
-        // Handle cases where the user is not found
         if (error.code === 'auth/user-not-found') {
             return c.json({ error: 'User not found' }, 404);
         }
-        // Handle other potential errors
-        console.error(`Failed to fetch user ${userId}:`, error);
+        console.error(`Failed to fetch user ${profileUserId}:`, error);
         return c.json({ error: 'Failed to retrieve user profile.' }, 500);
     }
 });

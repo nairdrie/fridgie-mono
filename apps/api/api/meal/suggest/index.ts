@@ -1,3 +1,6 @@
+// TODO: inject random themes into the prompt to introduce variability.
+// TODO: check the users cookbook to get more personalized results. 
+
 import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';

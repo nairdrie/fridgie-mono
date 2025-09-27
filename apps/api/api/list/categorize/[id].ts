@@ -27,59 +27,69 @@ route.post('/', async (c) => {
   const groupId = c.req.query('groupId');
   if (!id) return c.text('Missing list ID', 400);
 
-  // Fetch the current list
-  const snap = await adminRtdb.ref(`lists/${groupId}/${id}`).once('value');
-  const list = snap.val();
-  if (!list) return c.text('List not found', 404);
+  let originalItems: any[];
 
-  // ✅ 1. Get the FULL original items to preserve their data (id, checked, mealId, etc.)
-  const originalItems = Array.isArray(list.items)
-    ? list.items.filter((i: any) => !i.isSection)
-    : [];
-  
-  const itemTextsForAI = originalItems.map((i: any) => i.text);
+  // ✅ 1. Try to get items from the request body first to avoid race conditions.
+  try {
+    const body = await c.req.json();
+    if (body && Array.isArray(body.items)) {
+      // If items are provided in the body, use them as the source of truth.
+      originalItems = body.items.filter((i: any) => !i.isSection);
+    }
+  } catch (e) {
+    // This will catch errors if the body is empty or not valid JSON.
+    // We'll proceed to fetch from the database in the 'else' block below.
+  }
 
-  // If there are no items to categorize, return the original list
-  if (itemTextsForAI.length === 0) {
-    return c.json(list.items || []);
+  // ✅ 2. If items were not in the body, fall back to fetching from the database.
+  // @ts-ignore - This check is valid as originalItems would be unassigned.
+  if (!originalItems) {
+    const snap = await adminRtdb.ref(`lists/${groupId}/${id}`).once('value');
+    const list = snap.val();
+    if (!list) return c.text('List not found', 404);
+    originalItems = Array.isArray(list.items)
+      ? list.items.filter((i: any) => !i.isSection)
+      : [];
   }
   
-  // ✅ 2. Create a lookup map to easily find original items by their text.
-  // This handles cases where you might have duplicate item names (e.g., "Milk" twice).
+  // If there are no items to categorize, return the original list
+  if (originalItems.length === 0) {
+    return c.json(originalItems);
+  }
+  
+  // ✅ 3. Create a lookup map from the now-correctly-sourced originalItems.
   const itemMap = new Map<string, any[]>();
   for (const item of originalItems) {
-    const key = item.text.toLowerCase(); // Use lowercase for case-insensitive matching
+    const key = item.text.toLowerCase();
     if (!itemMap.has(key)) {
       itemMap.set(key, []);
     }
     itemMap.get(key)?.push(item);
   }
 
+  // --- The rest of the logic remains exactly the same ---
+
   const cacheRef = adminRtdb.ref('itemCategoryCache');
   const cacheSnap = await cacheRef.once('value');
   const cache: { [key: string]: string } = cacheSnap.val() || {};
 
   const itemsForAI: string[] = [];
-  const allCategorizedItems = new Map<string, string[]>(); // Map<Category, ItemText[]>
+  const allCategorizedItems = new Map<string, string[]>();
 
-  // 1. Partition items into cached (known) and uncached (unknown)
   for (const item of originalItems) {
     const normalizedText = normalizeItemText(item.text);
     const cachedCategory = cache[normalizedText];
 
     if (cachedCategory) {
-      // Item category is known, add it to our categorized map
       if (!allCategorizedItems.has(cachedCategory)) {
         allCategorizedItems.set(cachedCategory, []);
       }
       allCategorizedItems.get(cachedCategory)?.push(item.text);
     } else {
-      // Item category is unknown, add it to the list for the LLM
       itemsForAI.push(item.text);
     }
   }
 
-  // 2. Conditionally call the LLM only for unknown items
   if (itemsForAI.length > 0) {
     const prompt = [
       `Group items:${JSON.stringify(itemsForAI)} into sections;`,
@@ -110,10 +120,8 @@ route.post('/', async (c) => {
 
     const cacheUpdates: { [key: string]: string } = {};
 
-    // 3. Process LLM response, merge results, and prepare cache updates
     for (const sec of parsed.sections) {
       if (Array.isArray(sec.items) && sec.items.length > 0) {
-        // Merge with existing categories
         if (!allCategorizedItems.has(sec.name)) {
           allCategorizedItems.set(sec.name, []);
         }
@@ -121,32 +129,23 @@ route.post('/', async (c) => {
         
         for (const itemText of sec.items) {
           existingItems.push(itemText);
-          // Prepare to update the cache for this new item
           cacheUpdates[normalizeItemText(itemText)] = sec.name;
         }
       }
     }
-
-    // 4. Update the cache in a single batch operation
     if (Object.keys(cacheUpdates).length > 0) {
       await cacheRef.update(cacheUpdates);
     }
   }
-  // highlight-end
   
-  // --- Rebuild the List ---
-  // This logic now works with the combined results from both cache and LLM
-
   let rank = LexoRank.middle();
   const newItems: any[] = [];
   
-  // Sort sections alphabetically for a consistent user experience
   const sortedCategories = Array.from(allCategorizedItems.keys()).sort();
 
   for (const categoryName of sortedCategories) {
     const itemsInSection = allCategorizedItems.get(categoryName)!;
 
-    // Add new section header
     newItems.push({
       id: uuid(),
       text: categoryName,
@@ -156,13 +155,12 @@ route.post('/', async (c) => {
     });
     rank = rank.genNext();
 
-    // Find and place original items under the new section
     for (const text of itemsInSection) {
       const key = text.toLowerCase();
       const matchingItems = itemMap.get(key);
       
       if (matchingItems && matchingItems.length > 0) {
-        const originalItem = matchingItems.shift(); // Handles duplicates
+        const originalItem = matchingItems.shift();
         newItems.push({
           ...originalItem,
           listOrder: rank.toString(),
@@ -174,7 +172,6 @@ route.post('/', async (c) => {
     }
   }
 
-  // Persist updated items
   await adminRtdb.ref(`lists/${groupId}/${id}/items`).set(newItems);
   return c.json(newItems);
 });

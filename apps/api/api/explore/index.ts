@@ -10,8 +10,8 @@ interface Creator {
     uid: string;
     displayName: string;
     photoURL: string | null;
-    followers: number;
-    recipes: number;
+    followerCount: number;
+    recipeCount: number;
     featuredRecipe?: {
         id: string;
         name: string;
@@ -72,18 +72,48 @@ route.get('/', async (c) => {
                 authUsersResult.users.map(user => [user.uid, user])
             );
 
+            const featuredRecipeIds = userDocs
+                .map(doc => doc.data().featuredRecipe)
+                .filter(id => !!id); // Filter out any null or undefined IDs
+
+            // 2. Create a lookup map to store the full recipe objects
+            const featuredRecipesMap = new Map();
+
+            // 3. If there are any IDs, fetch them all in a single batch query
+            if (featuredRecipeIds.length > 0) {
+                const recipesSnapshot = await fs.collection('recipes')
+                    .where(FieldPath.documentId(), 'in', featuredRecipeIds)
+                    .get();
+                
+                // 4. Populate the map with recipe data (id -> recipe object)
+                recipesSnapshot.forEach(doc => {
+                    const data = doc.data();
+                    featuredRecipesMap.set(doc.id, {
+                        id: doc.id,
+                        name: data.name || 'Untitled Recipe',
+                        photoURL: data.photoURL || '',
+                    });
+                });
+            }
+
+
+
             // Combine Firestore data with Auth data
             featuredCreators = userDocs.map(doc => {
                 const userData = doc.data();
                 const authUser = authUsersMap.get(doc.id);
+                const featuredRecipeId = userData.featuredRecipe;
 
+                const fullFeaturedRecipe = featuredRecipeId ? featuredRecipesMap.get(featuredRecipeId) : undefined;
+
+                // TODO: followers & recipes count
                 return {
                     uid: doc.id,
                     displayName: authUser?.displayName || 'Anonymous User',
                     photoURL: authUser?.photoURL || null,
-                    followers: userData.followerCount || 0,
-                    recipes: userData.publicRecipesCount || 0,
-                    featuredRecipe: userData.featuredRecipe
+                    followerCount: userData.followerCount || 0,
+                    recipeCount: userData.recipeCount || 0,
+                    featuredRecipe: fullFeaturedRecipe
                 };
             });
         }
