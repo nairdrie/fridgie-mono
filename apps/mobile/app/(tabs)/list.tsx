@@ -20,6 +20,7 @@ import {
     Alert,
     Keyboard,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     Pressable,
     StyleSheet,
@@ -65,6 +66,11 @@ export default function HomeScreen() {
     const hasCheckedForUnratedMeals = useRef(false);
 
     const [isFocused, setIsFocused] = useState(false);
+    
+    // --- Start of new/moved code ---
+    const [isSortModalVisible, setIsSortModalVisible] = useState(false);
+    // --- End of new/moved code ---
+
     useFocusEffect(
         useCallback(() => {
             setIsFocused(true); // Screen is focused
@@ -463,6 +469,49 @@ export default function HomeScreen() {
             await AsyncStorage.setItem('collapsedMealState', JSON.stringify(updatedStates));
         } catch (e) { console.error("Failed to save collapsed meal state.", e); }
     };
+    
+    // --- Start of new/moved code ---
+    const reRankAlphabetically = (currentItems: Item[]) => {
+        const itemsWithoutSections = currentItems.filter(item => !item.isSection);
+        const sortedAlphabetically = [...itemsWithoutSections].sort((a, b) => a.text.localeCompare(b.text));
+        
+        let rank = LexoRank.middle();
+        const rankMap = new Map<string, string>();
+        sortedAlphabetically.forEach(item => {
+            rank = rank.genNext();
+            rankMap.set(item.id, rank.toString());
+        });
+
+        return currentItems
+            .filter(item => !item.isSection) // ensure sections are removed
+            .map(item => ({
+                ...item,
+                listOrder: rankMap.get(item.id) || item.listOrder
+            }));
+    };
+
+    const handleSelectSort = (selectedMode: List['sort']) => {
+        if (selectedMode === 'category') {
+            handleAutoCategorize();
+        } else if (selectedMode === 'alphabetical') {
+            const newRankedItems = reRankAlphabetically(items);
+            setItems(newRankedItems);
+            setSort('custom'); // Immediately set the mode to custom, locking in the new order.
+        } else {
+            // This case handles selecting "Custom" which does nothing but close the modal.
+            setSort('custom');
+        }
+        setIsSortModalVisible(false);
+    };
+
+    const getSortIconText = () => {
+        switch (sort) {
+            case 'alphabetical': return "Alpha";
+            case 'category': return "Category";
+            default: return "Sort";
+        }
+    };
+    // --- End of new/moved code ---
 
     const mealsWithCookbookStatus = React.useMemo(() => {
         return meals.map(meal => ({
@@ -526,47 +575,63 @@ export default function HomeScreen() {
                 <Pressable style={StyleSheet.absoluteFill} onPress={() => setIsFabMenuOpen(false)} />
             )}
 
-            <View style={styles.fabContainer}>
-                {isFabMenuOpen && (
-                    <>
-                        {selectedView === ListView.MealPlan ? (
-                            <>
-                                <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
-                                        <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                        <Text style={styles.secondaryButtonText}>Suggest</Text>
-                                    </TouchableOpacity>
-                                </Animated.View>
-                                <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
-                                        <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                        <Text style={styles.secondaryButtonText}>Meal</Text>
-                                    </TouchableOpacity>
-                                </Animated.View>
-                            </>
-                        ) : (
-                            <>
-                                <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
-                                        <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                        <Text style={styles.secondaryButtonText}>Category</Text>
-                                    </TouchableOpacity>
-                                </Animated.View>
-                                <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                                    <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
-                                        <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                        <Text style={styles.secondaryButtonText}>Item</Text>
-                                    </TouchableOpacity>
-                                </Animated.View>
-                            </>
-                        )}
-                    </>
-                )}
-                <TouchableOpacity style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)}>
-                    <Animated.View style={fabRotation}>
-                        <Ionicons name="add" size={32} color="white" />
-                    </Animated.View>
-                </TouchableOpacity>
+            <View style={styles.bottomActionContainer}>
+                 {/* --- Start of new/moved code: Sort Button --- */}
+                 {selectedView === ListView.GroceryList && (
+                    <TouchableOpacity style={styles.sortButton} onPress={() => setIsSortModalVisible(true)}>
+                        <Ionicons name={'swap-vertical-outline'} size={20} color={primary} />
+                        <Text style={styles.sortButtonText}>{getSortIconText()}</Text>
+                    </TouchableOpacity>
+                 )}
+                 { selectedView != ListView.GroceryList && (
+                    <TouchableOpacity>
+                        <Text style={styles.sortButtonText}>&nbsp;</Text>
+                    </TouchableOpacity>
+                 )}
+                 {/* --- End of new/moved code --- */}
+
+                <View style={styles.fabContainer}>
+                    {isFabMenuOpen && (
+                        <>
+                            {selectedView === ListView.MealPlan ? (
+                                <>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Suggest</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Meal</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                </>
+                            ) : (
+                                <>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Category</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Item</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                </>
+                            )}
+                        </>
+                    )}
+                    <TouchableOpacity style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)}>
+                        <Animated.View style={fabRotation}>
+                            <Ionicons name="add" size={32} color="white" />
+                        </Animated.View>
+                    </TouchableOpacity>
+                </View>
             </View>
             <ViewRecipeModal
                 isVisible={!!recipeToViewId}
@@ -580,6 +645,39 @@ export default function HomeScreen() {
             />
             <AddEditRecipeModal isVisible={!!recipeToEdit} onClose={() => setRecipeToEdit(null)} mealForRecipe={recipeToEdit} onRecipeSave={handleRecipeSaved} />
             <MealSuggestionsModal isVisible={isSuggestionModalVisible} onClose={() => setSuggestionModalVisible(false)} onAddSelectedMeals={handleAddMealsFromSuggestion} listId={selectedList?.id ?? ''} />
+            
+            {/* --- Start of new/moved code: Sort Modal --- */}
+            <Modal
+                transparent={true}
+                visible={isSortModalVisible}
+                onRequestClose={() => setIsSortModalVisible(false)}
+                animationType="fade"
+            >
+                <Pressable style={styles.modalOverlay} onPress={() => setIsSortModalVisible(false)}>
+                    <View style={styles.sortModalContent}>
+                        <Text style={styles.sortModalTitle}>Sort List By</Text>
+                        
+                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('custom')}>
+                            <Ionicons name="swap-vertical-outline" size={24} color={primary} style={styles.sortIcon}/>
+                            <Text style={styles.sortOptionText}>Custom</Text>
+                            {sort === 'custom' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('alphabetical')}>
+                            <Ionicons name="text-outline" size={24} color={primary} style={styles.sortIcon}/>
+                            <Text style={styles.sortOptionText}>Alphabetical</Text>
+                            {sort === 'alphabetical' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('category')}>
+                            <Ionicons name="sparkles-outline" size={24} color={primary} style={styles.sortIcon}/>
+                            <Text style={styles.sortOptionText}>By Category</Text>
+                            {sort === 'category' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
+                        </TouchableOpacity>
+                    </View>
+                </Pressable>
+            </Modal>
+             {/* --- End of new/moved code --- */}
         </View>
         </>
     );
@@ -591,12 +689,41 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
         backgroundColor: 'rgba(0,0,0,0.2)',
     },
-    fabContainer: {
+    // --- Start of new/moved code ---
+    bottomActionContainer: {
         position: 'absolute',
         bottom: 30,
-        right: 20,
+        paddingHorizontal: 20,
+        width: '100%',
+        flexDirection: 'row',
+        justifyContent:'space-between',
         alignItems: 'flex-end',
-        width: 80
+        gap: 16
+    },
+    sortButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        height: 50,
+        borderRadius: 25,
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+    },
+    sortButtonText: {
+        marginLeft: 6,
+        color: primary,
+        fontWeight: '600',
+        fontSize: 16,
+    },
+    // --- End of new/moved code ---
+    fabContainer: {
+        alignItems: 'flex-end',
+        width: 80,
     },
     fab: {
         width: 60,
@@ -638,4 +765,43 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#333'
     },
+    // --- Start of new/moved code ---
+    modalOverlay: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.4)',
+    },
+    sortModalContent: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 20,
+        width: '80%',
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+    },
+    sortModalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginBottom: 20,
+        textAlign: 'center',
+        color: '#333',
+    },
+    sortOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 15,
+    },
+    sortIcon: {
+        marginRight: 15,
+    },
+    sortOptionText: {
+        fontSize: 16,
+        flex: 1,
+        color: '#333',
+    },
+     // --- End of new/moved code ---
 });

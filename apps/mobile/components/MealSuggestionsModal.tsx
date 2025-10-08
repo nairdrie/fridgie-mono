@@ -118,10 +118,11 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
             setIsSuggesting(false);
         }
     };
-
-    // TODO: reroll state breaks ui
+    
     const handleRerollSuggestions = async () => {
         if (isSuggesting) return;
+
+        setSuggestionModalStep('loading');
 
         const currentTitles = mealSuggestions.map(s => s.name);
         const newVetoedList = [...vetoedMeals, ...currentTitles];
@@ -267,7 +268,8 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                     <>
                         <Text style={styles.modalTitle}>Meal Suggestions</Text>
                         <View style={styles.rerollButtonContainer}>
-                            <TouchableOpacity
+                            { !isSuggesting && (
+                                <TouchableOpacity
                                 style={styles.rerollButton}
                                 onPress={handleRerollSuggestions}
                                 disabled={isSuggesting}
@@ -275,6 +277,8 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                 <Ionicons name="dice" size={18} color="white" />
                                 <Text style={styles.rerollButtonText}>Re-roll</Text>
                             </TouchableOpacity>
+                            )}
+                            
                         </View>
                     
                         <FlatList
