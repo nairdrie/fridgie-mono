@@ -4,89 +4,112 @@ import { LexoRank } from 'lexorank'
 import { v4 as uuid } from 'uuid'
 import { groupAuth } from '@/middleware/groupAuth'
 import { auth } from '@/middleware/auth'
-import { startOfWeek, addWeeks, isSameDay } from 'date-fns'
+import { startOfWeek, addWeeks } from 'date-fns' // isSameDay is no longer needed
 
 const route = new Hono()
 
 route.use('*', auth, groupAuth)
 
-// TODO: we are somehow still making duplicate lists. or wrong day of week start causing dupe. 
+// The `createListForWeek` helper function is no longer needed
+// as all list creation logic is now handled atomically inside the transaction.
 
-// --- Reusable Helper Function for Creating Lists ---
-// This function creates a new list with a blank item but only returns its metadata.
-async function createListForWeek(groupId: string, weekStartDate: Date) {
-  const id = uuid()
-  const newListData = {
-    weekStart: weekStartDate.toISOString(),
-    items: [
-      {
-        id: uuid(),
-        text: '',
-        checked: false,
-        order: LexoRank.middle().toString(),
-      },
-    ],
-  }
-
-  await adminRtdb.ref(`lists/${groupId}/${id}`).set(newListData)
-  
-  // ✅ Return only the id and weekStart, not the full items array.
-  return { id, weekStart: newListData.weekStart }
-}
-
-
-// --- Updated GET / Route ---
-// This route ensures lists exist but only returns their metadata.
+// --- Final Corrected GET / Route ---
+// This route ensures lists exist for this week and next week atomically and with timezone-safe checks.
 route.get('/', async (c) => {
   const groupId = c.req.query('groupId')
   if (!groupId) return c.json({ error: 'Missing groupId' }, 400)
 
-  // 1. Fetch all existing lists for the group
-  const snap = await adminRtdb.ref(`lists/${groupId}`).once('value')
-  const listsData = snap.val() || {}
-  
-  // We only need the weekStart from existing data for our checks.
-  let allLists = Object.entries(listsData).map(([id, data]: any) => ({ id, ...data, }));
+  const listsRef = adminRtdb.ref(`lists/${groupId}`)
 
-  // 2. Calculate the start dates for this week and next week
-  const now = new Date()
-  const thisWeekStart = startOfWeek(now, { weekStartsOn: 0 }) // Sunday
-  const nextWeekStart = addWeeks(thisWeekStart, 1)
+  // FIX 1: Use a transaction to prevent race conditions from simultaneous requests.
+  const transactionResult = await listsRef.transaction((currentData) => {
+    // If there's no data for this group yet, initialize it as an empty object.
+    const data = currentData || {}
 
-  // 3. Check if lists for these weeks already exist
-  const hasThisWeek = allLists.some(list => isSameDay(new Date(list.weekStart), thisWeekStart))
-  const hasNextWeek = allLists.some(list => isSameDay(new Date(list.weekStart), nextWeekStart))
+    const allLists = Object.entries(data).map(([id, listData]: any) => ({
+      id,
+      ...listData,
+    }));
 
-  // 4. Conditionally create any missing lists
-  if (!hasThisWeek) {
-    const newListMetadata = await createListForWeek(groupId, thisWeekStart)
-    allLists.push(newListMetadata)
-  }
-  if (!hasNextWeek) {
-    const newListMetadata = await createListForWeek(groupId, nextWeekStart)
-    allLists.push(newListMetadata)
-  }
+    // Calculate start dates. This runs on the UTC server, so dates are UTC.
+    const now = new Date()
+    const thisWeekStart = startOfWeek(now, { weekStartsOn: 0 }) // Sunday
+    const nextWeekStart = addWeeks(thisWeekStart, 1)
 
+    // FIX 2: Compare using YYYY-MM-DD strings to make the check timezone-proof.
+    // This correctly handles a '2025-10-05T00:00Z' and '2025-10-05T04:00Z' as the same day.
+    const thisWeekStartStr = thisWeekStart.toISOString().substring(0, 10)
+    const nextWeekStartStr = nextWeekStart.toISOString().substring(0, 10)
+
+    const hasThisWeek = allLists.some(list => list.weekStart.startsWith(thisWeekStartStr))
+    const hasNextWeek = allLists.some(list => list.weekStart.startsWith(nextWeekStartStr))
+
+    let listsWereCreated = false
+
+    // Conditionally create missing lists directly inside the transaction data.
+    if (!hasThisWeek) {
+      const id = uuid()
+      data[id] = {
+        weekStart: thisWeekStart.toISOString(),
+        items: [{
+          id: uuid(),
+          text: '',
+          checked: false,
+          order: LexoRank.middle().toString(),
+        }, ],
+      }
+      listsWereCreated = true
+    }
+
+    if (!hasNextWeek) {
+      const id = uuid()
+      data[id] = {
+        weekStart: nextWeekStart.toISOString(),
+        items: [{
+          id: uuid(),
+          text: '',
+          checked: false,
+          order: LexoRank.middle().toString(),
+        }, ],
+      }
+      listsWereCreated = true
+    }
+
+    // If we didn't change anything, return undefined to abort the transaction and prevent a write.
+    if (!listsWereCreated) {
+      return // Abort
+    }
+
+    return data // Commit the changes
+  })
+
+  // The transaction snapshot contains the final, correct data.
+  const listsData = transactionResult.snapshot.val() || {}
+  const allLists = Object.entries(listsData).map(([id, data]: any) => ({ id, ...data }))
+
+  // Format the response as before
   const formatted = allLists.map(list => {
-    const items = list.items || [];
+    const items = list.items || []
     // A list has content if it's not just a single, empty placeholder item
-    const hasContent = items.length > 1 || (items.length === 1 && items[0]?.text !== '');
-    
+    const hasContent = items.length > 1 || (items.length === 1 && items[0]?.text !== '')
+
     return {
       id: list.id,
       weekStart: list.weekStart,
-      hasContent: hasContent, // Add this property
-    };
-  });
+      hasContent: hasContent,
+    }
+  })
+  
   // Sort the lists chronologically before sending
-  formatted.sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime());
+  formatted.sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime())
 
   return c.json(formatted)
 })
 
 
-// --- Updated POST / Route ---
-// This route now uses the helper function and returns the full new list object.
+// --- POST / Route (No changes needed) ---
+// This route is correct as-is. It stores the timestamp provided by the client.
+// The GET route is now resilient to the different timestamp formats this may create.
 route.post('/', async (c) => {
   const groupId = c.req.query('groupId')
   if (!groupId) return c.json({ error: 'Missing groupId' }, 400)
@@ -97,14 +120,12 @@ route.post('/', async (c) => {
   const id = uuid()
   const newListData = {
     weekStart: new Date(weekStart).toISOString(),
-    items: [
-      {
-        id: uuid(),
-        text: '',
-        checked: false,
-        order: LexoRank.middle().toString(),
-      },
-    ],
+    items: [{
+      id: uuid(),
+      text: '',
+      checked: false,
+      order: LexoRank.middle().toString(),
+    }, ],
   }
   await adminRtdb.ref(`lists/${groupId}/${id}`).set(newListData)
 

@@ -5,8 +5,6 @@ import { auth } from '@/middleware/auth';
 import { fs } from '@/utils/firebase';
 import { FieldValue } from 'firebase-admin/firestore';
 
-// TODO: notification on follow
-
 const route = new Hono();
 
 // All routes in this file are protected
@@ -14,13 +12,13 @@ route.use('*', auth);
 
 /**
  * POST /api/user/:id/follow
- * Follows a user.
+ * Follows a user and creates a notification.
  */
 route.post('/', async (c) => {
     const currentUserId = c.get('uid');
     const targetUserId = c.req.param('id');
 
-     if(!targetUserId) {
+    if(!targetUserId) {
         return c.json({ error: 'Failed to follow user.' }, 500);
     }
 
@@ -31,6 +29,17 @@ route.post('/', async (c) => {
     try {
         const currentUserRef = fs.collection('users').doc(currentUserId);
         const targetUserRef = fs.collection('users').doc(targetUserId);
+        
+        // --- Start of new code ---
+
+        // 1. Get the current user's data to use in the notification.
+        const currentUserDoc = await currentUserRef.get();
+        if (!currentUserDoc.exists) {
+            return c.json({ error: 'Follower user not found.' }, 404);
+        }
+        const currentUserData = currentUserDoc.data();
+        
+        // --- End of new code ---
 
         const batch = fs.batch();
 
@@ -42,6 +51,23 @@ route.post('/', async (c) => {
         // Increment counts atomically
         batch.update(currentUserRef, { followingCount: FieldValue.increment(1) });
         batch.update(targetUserRef, { followerCount: FieldValue.increment(1) });
+        
+        // --- Start of new code ---
+
+        // 2. Define the notification document and add it to the batch.
+        const notificationRef = fs.collection('notifications').doc(); // Create a new doc with a random ID
+        batch.set(notificationRef, {
+            type: 'NEW_FOLLOWER',
+            recipientUid: targetUserId,
+            senderUid: currentUserId,
+            // Adjust these fields to match your user document schema
+            senderUsername: currentUserData?.username || 'Someone',
+            senderAvatar: currentUserData?.avatarUrl || null,
+            read: false,
+            createdAt: FieldValue.serverTimestamp(),
+        });
+
+        // --- End of new code ---
         
         await batch.commit();
 
