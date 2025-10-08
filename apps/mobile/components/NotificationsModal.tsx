@@ -13,6 +13,19 @@ interface NotificationsModalProps {
     onDecline: (invitationId: string) => void;
 }
 
+// TODO: handle follow notifications
+
+//  batch.set(notificationRef, {
+//             type: 'NEW_FOLLOWER',
+//             recipientUid: targetUserId,
+//             senderUid: currentUserId,
+//             // Adjust these fields to match your user document schema
+//             senderUsername: currentUserData?.username || 'Someone',
+//             senderAvatar: currentUserData?.avatarUrl || null,
+//             read: false,
+//             createdAt: FieldValue.serverTimestamp(),
+//         });
+
 export default function NotificationsModal({ isVisible, onClose, notifications, isLoading, onAccept, onDecline }: NotificationsModalProps) {
     return (
         <Modal visible={isVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
