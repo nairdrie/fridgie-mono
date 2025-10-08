@@ -66,6 +66,8 @@ export default function HomeScreen() {
     const hasCheckedForUnratedMeals = useRef(false);
 
     const [isFocused, setIsFocused] = useState(false);
+
+    const listRef = useRef<any>(null); 
     
     // --- Start of new/moved code ---
     const [isSortModalVisible, setIsSortModalVisible] = useState(false);
@@ -173,6 +175,22 @@ export default function HomeScreen() {
     useEffect(() => {
         if (!editingId) return;
         requestAnimationFrame(() => focusAtEnd(editingId));
+
+        // --- START OF FIX ---
+    // After focusing, also scroll the item into view
+    const findAndScrollToItem = () => {
+        // Find the index of the item (or its aggregate) in the currently rendered list
+        const index = items.findIndex(i => i.id === editingId);
+
+        // Check if the listRef and index are valid
+        if (listRef.current && index > -1) {
+            listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+        }
+    };
+
+    // Add a small delay to ensure the keyboard is fully visible before scrolling
+    setTimeout(findAndScrollToItem, 100); 
+    // --- END OF FIX ---
     }, [editingId, items]);
 
     useEffect(() => {
@@ -548,6 +566,7 @@ export default function HomeScreen() {
                         inputRefs={inputRefs}
                         isKeyboardVisible={isKeyboardVisible}
                         markDirty={markDirty}
+                        ref={listRef} 
                     />
                 ) : (
                     <MealPlanView
