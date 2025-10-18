@@ -198,6 +198,10 @@ export async function getMyNotifications(): Promise<any[]> { // Define a proper 
     return res.json();
 }
 
+export async function dismissNotification(notificationId: string): Promise<void> {
+    await authorizedFetch(`${BASE_URL}/notification/${notificationId}`, { method: 'DELETE' });
+}
+
 /**
  * Searches for users by a query string.
  * @param query The search term (name, email, or phone).

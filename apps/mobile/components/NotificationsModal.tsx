@@ -1,8 +1,8 @@
 // components/NotificationsModal.tsx
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React from 'react';
-import { ActivityIndicator, Modal, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useMemo } from 'react';
+import { ActivityIndicator, FlatList, Image, Modal, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface NotificationsModalProps {
     isVisible: boolean;
@@ -13,20 +13,18 @@ interface NotificationsModalProps {
     onDecline: (invitationId: string) => void;
 }
 
-// TODO: handle follow notifications
-
-//  batch.set(notificationRef, {
-//             type: 'NEW_FOLLOWER',
-//             recipientUid: targetUserId,
-//             senderUid: currentUserId,
-//             // Adjust these fields to match your user document schema
-//             senderUsername: currentUserData?.username || 'Someone',
-//             senderAvatar: currentUserData?.avatarUrl || null,
-//             read: false,
-//             createdAt: FieldValue.serverTimestamp(),
-//         });
-
 export default function NotificationsModal({ isVisible, onClose, notifications, isLoading, onAccept, onDecline }: NotificationsModalProps) {
+    const sortedNotifications = useMemo(() => {
+        if (!notifications) return [];
+        // The 'createdAt' field might be a Firestore Timestamp object.
+        // We need to handle both object and number cases for sorting.
+        return [...notifications].sort((a, b) => {
+            const timeA = a.createdAt?.seconds ? a.createdAt.toMillis() : (a.createdAt || 0);
+            const timeB = b.createdAt?.seconds ? b.createdAt.toMillis() : (b.createdAt || 0);
+            return timeB - timeA; // Sort descending (newest first)
+        });
+    }, [notifications]);
+
     return (
         <Modal visible={isVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
             <SafeAreaView style={styles.container}>
@@ -34,30 +32,50 @@ export default function NotificationsModal({ isVisible, onClose, notifications, 
                     <Text style={styles.headerTitle}>Notifications</Text>
                     <TouchableOpacity onPress={onClose}><Ionicons name="close" size={28} color={primary} /></TouchableOpacity>
                 </View>
-                {isLoading ? <ActivityIndicator/> :
-                    notifications.length === 0 ? (
-                        <View style={styles.emptyView}><Text>No new notifications.</Text></View>
-                    ) : (
-                        notifications.map(notif => {
-                            // This part will need to be expanded for different notification types
-                            if (notif.type === 'group_invitation') {
-                                return (
-                                    <View key={notif.id} style={styles.notificationItem}>
-                                        <Text><Text style={{fontWeight: 'bold'}}>{notif.data.inviterName}</Text> invited you to join <Text style={{fontWeight: 'bold'}}>{notif.data.groupName}</Text>.</Text>
-                                        <View style={styles.actions}>
-                                            <TouchableOpacity style={[styles.button, styles.acceptButton]} onPress={() => onAccept(notif.data.invitationId)}>
-                                                <Text style={styles.acceptButtonText}>Accept</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity style={[styles.button, styles.declineButton]} onPress={() => onDecline(notif.data.invitationId)}>
-                                                <Text style={styles.declineButtonText}>Decline</Text>
-                                            </TouchableOpacity>
+                {isLoading ? (
+                    <View style={styles.emptyView}><ActivityIndicator size="large" /></View>
+                ) : (
+                    <FlatList
+                        data={sortedNotifications}
+                        keyExtractor={(item) => item.id}
+                        ListEmptyComponent={<View style={styles.emptyView}><Text>No new notifications.</Text></View>}
+                        renderItem={({ item: notif }) => {
+                            switch (notif.type) {
+                                case 'group_invitation':
+                                    return (
+                                        <View style={styles.notificationItem}>
+                                            <Ionicons name="people-outline" size={24} color="#888" style={styles.icon} />
+                                            <View style={styles.content}>
+                                                <Text style={styles.text}><Text style={{ fontWeight: 'bold' }}>{notif.data.inviterName}</Text> invited you to join <Text style={{ fontWeight: 'bold' }}>{notif.data.groupName}</Text>.</Text>
+                                                <View style={styles.actions}>
+                                                    <TouchableOpacity style={[styles.button, styles.acceptButton]} onPress={() => onAccept(notif.data.invitationId)}>
+                                                        <Text style={styles.acceptButtonText}>Accept</Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity style={[styles.button, styles.declineButton]} onPress={() => onDecline(notif.data.invitationId)}>
+                                                        <Text style={styles.declineButtonText}>Decline</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
                                         </View>
-                                    </View>
-                                )
+                                    );
+                                case 'NEW_FOLLOWER':
+                                    return (
+                                        <View style={styles.notificationItem}>
+                                            {notif.senderAvatar ? (
+                                                <Image source={{ uri: notif.senderAvatar }} style={styles.avatar} />
+                                            ) : (
+                                                <Ionicons name="person-circle-outline" size={32} color="#888" style={styles.icon} />
+                                            )}
+                                            <View style={styles.content}>
+                                                <Text style={styles.text}><Text style={{ fontWeight: 'bold' }}>{notif.senderUsername}</Text> started following you.</Text>
+                                            </View>
+                                        </View>
+                                    );
+                                default:
+                                    return null;
                             }
-                            // Add other notification types here (e.g., likes, follows)
-                            return null;
-                        })
+                        }}
+                    />
                     )
                 }
             </SafeAreaView>
@@ -88,13 +106,31 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     notificationItem: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
         padding: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#eee',
     },
+    icon: {
+        marginRight: 12,
+        marginTop: 2,
+    },
+    avatar: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        marginRight: 12,
+    },
+    content: {
+        flex: 1,
+    },
+    text: {
+        fontSize: 16,
+    },
     actions: {
         flexDirection: 'row',
-        marginTop: 10,
+        marginTop: 12,
     },
     button: {
         paddingVertical: 8,

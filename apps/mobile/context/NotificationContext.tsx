@@ -1,6 +1,7 @@
 import {
     acceptGroupInvitation,
     declineGroupInvitation,
+    dismissNotification,
     getMyNotifications,
 } from '@/utils/api';
 import {
@@ -72,6 +73,11 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         } catch (error) {
             console.error("Failed to decline invitation:", error);
         }
+    };
+
+    const dismiss = async (notificationId: string) => {
+        await dismissNotification(notificationId);
+        setNotifications(prev => prev.filter(n => n.id !== notificationId));
     };
 
     const value = {
