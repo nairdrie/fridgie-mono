@@ -2,7 +2,7 @@
 
 import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
-import { fs } from '@/utils/firebase';
+import { fs, adminAuth } from '@/utils/firebase';
 import { FieldValue } from 'firebase-admin/firestore';
 
 const route = new Hono();
@@ -30,14 +30,10 @@ route.post('/', async (c) => {
         const currentUserRef = fs.collection('users').doc(currentUserId);
         const targetUserRef = fs.collection('users').doc(targetUserId);
         
-        // --- Start of new code ---
-
-        // 1. Get the current user's data to use in the notification.
-        const currentUserDoc = await currentUserRef.get();
-        if (!currentUserDoc.exists) {
-            return c.json({ error: 'Follower user not found.' }, 404);
-        }
-        const currentUserData = currentUserDoc.data();
+        // 1. Get the current user's auth data to use in the notification.
+        const currentUserAuthRecord = await adminAuth.getUser(currentUserId);
+        const senderUsername = currentUserAuthRecord.displayName || 'Someone';
+        const senderAvatar = currentUserAuthRecord.photoURL || null;
         
         // --- End of new code ---
 
@@ -60,9 +56,9 @@ route.post('/', async (c) => {
             type: 'NEW_FOLLOWER',
             recipientUid: targetUserId,
             senderUid: currentUserId,
-            // Adjust these fields to match your user document schema
-            senderUsername: currentUserData?.username || 'Someone',
-            senderAvatar: currentUserData?.avatarUrl || null,
+            // Use details from the auth record
+            senderUsername,
+            senderAvatar,
             read: false,
             createdAt: FieldValue.serverTimestamp(),
         });

@@ -15,12 +15,13 @@
     "cheerio": "^1.1.2",
     "cookie": "^1.0.2",
     "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
+    "fast-glob": "^3.3.3",
     "firebase": "^11.7.3",
     "firebase-admin": "^13.4.0",
     "hono": "4.7.10",
     "lexorank": "^1.0.5",
-    "openai": "^4.100.0",
-    "fast-glob": "^3.3.3"
+    "openai": "^4.100.0"
   },
   "scripts": {
     "dev": "bun --watch index.ts",

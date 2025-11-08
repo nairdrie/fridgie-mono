@@ -4,11 +4,30 @@ import { LexoRank } from 'lexorank'
 import { v4 as uuid } from 'uuid'
 import { groupAuth } from '@/middleware/groupAuth'
 import { auth } from '@/middleware/auth'
-import { startOfWeek, addWeeks } from 'date-fns' // isSameDay is no longer needed
+import {  addWeeks, startOfWeek } from 'date-fns' // isSameDay is no longer needed
+import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 
 const route = new Hono()
 
 route.use('*', auth, groupAuth)
+
+/**
+ * Calculates a date function (like startOfWeek) relative to a specific timezone.
+ * @param date The UTC date to calculate from (e.g., new Date())
+ * @param tz The IANA timezone (e.g., 'America/Toronto')
+ * @param fn The date-fns function to call (e.g., startOfWeek)
+ * @param options The options for the date-fns function (e.g., { weekStartsOn: 0 })
+ */
+const calcInTimezone = (date:any, tz:any, fn:any, options:any) => {
+  // 1. Get a date object representing the local time in the target zone
+  const zonedDate = toZonedTime(date, tz)
+  
+  // 2. Run the function (e.g., startOfWeek) on that local date
+  const resultDate = options ? fn(zonedDate, options) : fn(zonedDate)
+  
+  // 3. Convert the resulting local date back to its true UTC timestamp
+  return fromZonedTime(resultDate, tz)
+}
 
 // The `createListForWeek` helper function is no longer needed
 // as all list creation logic is now handled atomically inside the transaction.
@@ -17,13 +36,14 @@ route.use('*', auth, groupAuth)
 // This route ensures lists exist for this week and next week atomically and with timezone-safe checks.
 route.get('/', async (c) => {
   const groupId = c.req.query('groupId')
+  const clientTz = c.req.query('tz') // e.g., 'America/Toronto'
+
   if (!groupId) return c.json({ error: 'Missing groupId' }, 400)
+  if (!clientTz) return c.json({ error: 'Missing tz (timezone) query param' }, 400)
 
   const listsRef = adminRtdb.ref(`lists/${groupId}`)
 
-  // FIX 1: Use a transaction to prevent race conditions from simultaneous requests.
   const transactionResult = await listsRef.transaction((currentData) => {
-    // If there's no data for this group yet, initialize it as an empty object.
     const data = currentData || {}
 
     const allLists = Object.entries(data).map(([id, listData]: any) => ({
@@ -31,13 +51,17 @@ route.get('/', async (c) => {
       ...listData,
     }));
 
-    // Calculate start dates. This runs on the UTC server, so dates are UTC.
+    // --- TIMEZONE FIX ---
     const now = new Date()
-    const thisWeekStart = startOfWeek(now, { weekStartsOn: 0 }) // Sunday
+    const weekOptions = { weekStartsOn: 0 } // Sunday
+
+    // Use the helper to get the start of the week *in the client's timezone*
+    const thisWeekStart = calcInTimezone(now, clientTz, startOfWeek, weekOptions)
+    
+    // addWeeks works on the resulting UTC date, which is correct
     const nextWeekStart = addWeeks(thisWeekStart, 1)
 
-    // FIX 2: Compare using YYYY-MM-DD strings to make the check timezone-proof.
-    // This correctly handles a '2025-10-05T00:00Z' and '2025-10-05T04:00Z' as the same day.
+    // These comparisons are still correct
     const thisWeekStartStr = thisWeekStart.toISOString().substring(0, 10)
     const nextWeekStartStr = nextWeekStart.toISOString().substring(0, 10)
 
@@ -46,11 +70,10 @@ route.get('/', async (c) => {
 
     let listsWereCreated = false
 
-    // Conditionally create missing lists directly inside the transaction data.
     if (!hasThisWeek) {
       const id = uuid()
       data[id] = {
-        weekStart: thisWeekStart.toISOString(),
+        weekStart: thisWeekStart.toISOString(), // Correct UTC timestamp
         items: [{
           id: uuid(),
           text: '',
@@ -64,7 +87,7 @@ route.get('/', async (c) => {
     if (!hasNextWeek) {
       const id = uuid()
       data[id] = {
-        weekStart: nextWeekStart.toISOString(),
+        weekStart: nextWeekStart.toISOString(), // Correct UTC timestamp
         items: [{
           id: uuid(),
           text: '',
@@ -75,22 +98,20 @@ route.get('/', async (c) => {
       listsWereCreated = true
     }
 
-    // If we didn't change anything, return undefined to abort the transaction and prevent a write.
     if (!listsWereCreated) {
       return // Abort
     }
 
-    return data // Commit the changes
+    return data // Commit
   })
 
-  // The transaction snapshot contains the final, correct data.
+  // (The rest of your response formatting code is perfect and needs no changes)
+  // ...
   const listsData = transactionResult.snapshot.val() || {}
   const allLists = Object.entries(listsData).map(([id, data]: any) => ({ id, ...data }))
 
-  // Format the response as before
   const formatted = allLists.map(list => {
     const items = list.items || []
-    // A list has content if it's not just a single, empty placeholder item
     const hasContent = items.length > 1 || (items.length === 1 && items[0]?.text !== '')
 
     return {
@@ -100,7 +121,6 @@ route.get('/', async (c) => {
     }
   })
   
-  // Sort the lists chronologically before sending
   formatted.sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime())
 
   return c.json(formatted)
