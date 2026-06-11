@@ -55,16 +55,24 @@ serve({
         const uid = decodedToken.uid;
 
         // --- At this point, the user is AUTHENTICATED ---
-        // Now you can perform your AUTHORIZATION check (like groupAuth)
+        // Authorization: the user must be a member of the group whose list
+        // they are subscribing to, mirroring the groupAuth HTTP middleware.
         const groupId = url.searchParams.get('groupId');
-        // Example check: const isMember = await isUserInGroup(uid, groupId);
-        // if (!isMember) return new Response('Forbidden', { status: 403 });
+        if (!groupId) {
+          return new Response('Missing groupId', { status: 400 });
+        }
+        const memberSnap = await adminRtdb.ref(`groups/${groupId}/members/${uid}`).once('value');
+        if (!memberSnap.exists()) {
+          return new Response('Forbidden', { status: 403 });
+        }
 
         const listId = url.pathname.split('/').pop()!;
-        
+
         // ✅ Success! Upgrade the connection and pass the verified uid
-        server.upgrade(req, { data: { listId, groupId, uid } });
-        return new Response(null, { status: 204 });
+        if (server.upgrade(req, { data: { listId, groupId, uid } })) {
+          return undefined;
+        }
+        return new Response('WebSocket upgrade failed', { status: 400 });
 
       } catch (error) {
         // Token is invalid or expired, reject the connection

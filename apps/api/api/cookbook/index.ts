@@ -11,6 +11,18 @@ const route = new Hono()
 route.use('*', auth)
 
 
+// Firestore 'in' queries accept at most 30 values, so fetch in chunks.
+async function fetchRecipeDocsByIds(recipeIds: string[]) {
+  const chunks: string[][] = []
+  for (let i = 0; i < recipeIds.length; i += 30) {
+    chunks.push(recipeIds.slice(i, i + 30))
+  }
+  const snapshots = await Promise.all(
+    chunks.map((ids) => fs.collection('recipes').where('__name__', 'in', ids).get())
+  )
+  return snapshots.flatMap((snapshot) => snapshot.docs)
+}
+
 const getMealDate = (weekStart: string, dayOfWeek?: Meal['dayOfWeek']): Date => {
   const weekStartDate = new Date(weekStart);
   if (dayOfWeek) {
@@ -100,8 +112,8 @@ export async function getCookbook(uid: string) {
 
     if (groupIds.length === 0) {
       // If user has no groups, we can't find a lastAte date.
-      const recipesSnapshot = await fs.collection('recipes').where('__name__', 'in', recipeIds).get();
-      const recipes = recipesSnapshot.docs.map(doc => ({
+      const recipeDocs = await fetchRecipeDocsByIds(recipeIds);
+      const recipes = recipeDocs.map(doc => ({
         id: doc.id,
         ...doc.data(),
         lastAte: null, // No groups, so lastAte is null
@@ -137,10 +149,10 @@ export async function getCookbook(uid: string) {
     }
 
     // --- Step 4: Fetch full recipe documents from Firestore and merge `lastAte` data ---
-    const recipesSnapshot = await fs.collection('recipes').where('__name__', 'in', recipeIds).get();
+    const recipeDocs = await fetchRecipeDocsByIds(recipeIds);
 
     // 2. Get a list of *unique* author UIDs using a Set
-    const uniqueAuthorUids = [...new Set(recipesSnapshot.docs.map(doc => doc.data().createdBy))];
+    const uniqueAuthorUids = [...new Set(recipeDocs.map(doc => doc.data().createdBy))];
 
     // 3. Batch-fetch all unique authors in parallel
     const authorPromises = uniqueAuthorUids.map(uid => 
@@ -163,7 +175,7 @@ export async function getCookbook(uid: string) {
     });
 
     // 5. Finally, map the recipes and attach the author's name from your lookup map
-    const recipes = recipesSnapshot.docs.map(doc => {
+    const recipes = recipeDocs.map(doc => {
         const recipeData = doc.data();
         const authorUid = recipeData.createdBy;
         

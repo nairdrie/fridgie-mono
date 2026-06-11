@@ -78,8 +78,10 @@ route.get('/', async (c) => {
           id: uuid(),
           text: '',
           checked: false,
-          order: LexoRank.middle().toString(),
+          isSection: false,
+          listOrder: LexoRank.middle().toString(),
         }, ],
+        rev: 1,
       }
       listsWereCreated = true
     }
@@ -92,8 +94,10 @@ route.get('/', async (c) => {
           id: uuid(),
           text: '',
           checked: false,
-          order: LexoRank.middle().toString(),
+          isSection: false,
+          listOrder: LexoRank.middle().toString(),
         }, ],
+        rev: 1,
       }
       listsWereCreated = true
     }
@@ -144,8 +148,10 @@ route.post('/', async (c) => {
       id: uuid(),
       text: '',
       checked: false,
-      order: LexoRank.middle().toString(),
+      isSection: false,
+      listOrder: LexoRank.middle().toString(),
     }, ],
+    rev: 1,
   }
   await adminRtdb.ref(`lists/${groupId}/${id}`).set(newListData)
 
