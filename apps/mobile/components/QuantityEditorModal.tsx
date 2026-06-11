@@ -1,94 +1,39 @@
 // components/QuantityEditorModal.tsx
 import { Item } from "@/types/types";
+import {
+    convert,
+    formatQuantity,
+    parseQuantity,
+    unitCycle,
+} from "@/utils/quantity";
 import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useMemo, useState } from "react";
 import { Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
-// TODO: fractional conversions eg. 3 1/2 cup
-
-const UNITS = ['g', 'oz', 'ml', 'cups', 'tbsp'];
-const CONVERSIONS: { [key: string]: { toBase: (v: number) => number; fromBase: (b: number) => number; unit: string, variations: RegExp } } = {
-    g:     { toBase: v => v,            fromBase: b => b,            unit: 'g',    variations: /^g(rams?)?$/i },
-    oz:    { toBase: v => v / 0.035274, fromBase: b => b * 0.035274, unit: 'oz',   variations: /^oz|ounces?$/i },
-    ml:    { toBase: v => v,            fromBase: b => b,            unit: 'ml',   variations: /^ml|milliliters?$/i },
-    cups:  { toBase: v => v * 236.59,   fromBase: b => b / 236.59,   unit: 'cups', variations: /^cups?|c$/i },
-    tbsp:  { toBase: v => v * 14.79,    fromBase: b => b / 14.79,    unit: 'tbsp', variations: /^tbsps?|tablespoons?$/i },
-};
+// Re-exported for existing imports; implementation lives in utils/quantity.
+export { parseQuantityAndText } from "@/utils/quantity";
 
 const parseForConversion = (text: string) => {
-    if (!text) return null;
-    const parseRegex = /^(\d*\.?\d+)\s*([a-zA-Z]+)$/;
-    const match = text.trim().match(parseRegex);
-    if (!match) return null;
-
-    const value = parseFloat(match[1]);
-    const unitStr = match[2];
-
-    for (const unitKey in CONVERSIONS) {
-        if (CONVERSIONS[unitKey].variations.test(unitStr)) {
-            return { value, unit: unitKey };
-        }
-    }
-    return null;
-}
+    const parsed = parseQuantity(text);
+    if (!parsed || !parsed.known || !parsed.unit) return null;
+    return { value: parsed.value, unit: parsed.unit };
+};
 
 interface QuantityEditorModalProps {
     isVisible: boolean;
-    // [FIXED] Allow the passed item to have a `totalQuantity` property
     item: (Item & { totalQuantity?: string }) | null;
     onSave: (newQuantity: string) => void;
     onClose: () => void;
 }
 
- /**
- * Parses a string to find a quantity at the beginning OR end.
- * @param text The full item text.
- * @returns An object with the parsed quantity and the remaining text.
- */
-export const parseQuantityAndText = (text: string): { quantity: string | null; text: string } => {
-  if (!text) return { quantity: null, text: '' };
-  const trimmedText = text.trim();
-
-  const startRegex = /^(\d*\.?\d+)\s*([a-zA-Z]*)\s+(.*)/;
-  const startMatch = trimmedText.match(startRegex);
-
-  if (startMatch) {
-    const number = startMatch[1];
-    const unit = startMatch[2];
-    const remainingText = startMatch[3];
-    return {
-      quantity: `${number}${unit}`.trim(),
-      text: remainingText,
-    };
-  }
-
-  const endRegex = /^(.*?)\s+(\d*\.?\d+\s*[a-zA-Z]*)$/;
-  const endMatch = trimmedText.match(endRegex);
-  
-  if (endMatch) {
-    const leadingText = endMatch[1];
-    const quantity = endMatch[2];
-    
-    if (leadingText.toLowerCase().includes('vintage') && /^\d{4}$/.test(quantity.trim())) {
-        return { quantity: null, text: trimmedText };
-    }
-
-    return {
-      quantity: quantity.trim(),
-      text: leadingText,
-    };
-  }
-
-  return { quantity: null, text: trimmedText };
-};
-
 export default function QuantityEditorModal({ isVisible, item, onSave, onClose }: QuantityEditorModalProps) {
     const [quantity, setQuantity] = useState('');
+    // The last user-entered convertible quantity; unit cycling always converts
+    // from this anchor so repeated cycles don't accumulate rounding error.
     const [anchor, setAnchor] = useState<{ value: number, unit: string } | null>(null);
 
     useEffect(() => {
-        // [FIXED] Use the aggregated total quantity if it exists, otherwise fall back.
         if (item) {
             const initialQuantity = item.totalQuantity || item.quantity || '';
             setQuantity(initialQuantity);
@@ -96,44 +41,27 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
         }
     }, [item]);
 
-    const convertibleInfo = useMemo(() => {
-        const parseRegex = /^(\d*\.?\d+)\s*([a-zA-Z]+)$/;
-        const match = quantity.trim().match(parseRegex);
-        if (!match) return null;
-
-        const value = parseFloat(match[1]);
-        const unitStr = match[2];
-
-        for (const unitKey in CONVERSIONS) {
-            if (CONVERSIONS[unitKey].variations.test(unitStr)) {
-                return { value, unit: unitKey };
-            }
-        }
-        return null;
-    }, [quantity]);
+    const convertibleInfo = useMemo(() => parseForConversion(quantity), [quantity]);
 
     const handleCycleUnits = () => {
         if (!anchor) return;
         Keyboard.dismiss();
 
-        const currentlyDisplayedInfo = parseForConversion(quantity);
-        if (!currentlyDisplayedInfo) return;
+        const current = parseForConversion(quantity);
+        if (!current) return;
 
-        const currentIndex = UNITS.indexOf(currentlyDisplayedInfo.unit);
-        const nextIndex = (currentIndex + 1) % UNITS.length;
-        const nextUnit = UNITS[nextIndex];
+        // Only cycle through units of the same dimension (mass stays mass,
+        // volume stays volume) — there is no safe density assumption.
+        const cycle = unitCycle(current.unit);
+        if (cycle.length < 2) return;
 
-        const baseValue = CONVERSIONS[anchor.unit].toBase(anchor.value);
-        const newValue = CONVERSIONS[nextUnit].fromBase(baseValue);
-        
-        let formattedValue;
-        if (newValue < 1) formattedValue = newValue.toFixed(2);
-        else if (newValue < 10) formattedValue = newValue.toFixed(1);
-        else formattedValue = newValue.toFixed(0);
+        const nextUnit = cycle[(cycle.indexOf(current.unit) + 1) % cycle.length];
+        const newValue = convert(anchor.value, anchor.unit, nextUnit);
+        if (newValue === null) return;
 
-        setQuantity(`${formattedValue} ${CONVERSIONS[nextUnit].unit}`);
+        setQuantity(formatQuantity(newValue, nextUnit));
     };
-    
+
     const handleTextChange = (text: string) => {
         setQuantity(text);
         setAnchor(parseForConversion(text));
@@ -159,19 +87,19 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
                             style={styles.modalInput}
                             value={quantity}
                             onChangeText={handleTextChange}
-                            placeholder="e.g., 200g or 1 cup"
+                            placeholder="e.g., 200g or 1 1/2 cups"
                             autoFocus={true}
                             onSubmitEditing={handleSave}
                         />
-                        <TouchableOpacity 
-                            style={styles.cycleButton} 
+                        <TouchableOpacity
+                            style={styles.cycleButton}
                             onPress={handleCycleUnits}
                             disabled={!convertibleInfo}
                         >
                             <Ionicons
-                                name="swap-horizontal-outline" 
-                                size={24} 
-                                color={convertibleInfo ? primary : '#ccc'} 
+                                name="swap-horizontal-outline"
+                                size={24}
+                                color={convertibleInfo ? primary : '#ccc'}
                             />
                         </TouchableOpacity>
                     </View>

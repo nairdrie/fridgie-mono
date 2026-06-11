@@ -48,7 +48,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 
   // ✅ 2. useEffect to cycle through loading messages
   useEffect(() => {
-    let interval: number | undefined = undefined;
+    let interval: ReturnType<typeof setInterval> | undefined = undefined;
 
     if (isImporting) {
         const messages = [

@@ -1,11 +1,17 @@
 // components/GroceryListView.tsx
 
-// TODO: if I have 200g sugar in list, 2 tsp sugar in a meal, the quantity is updated to "200 g + 2 tsp". Convert tsp to the unit in main list.
 import { Item, List } from '@/types/types';
+import {
+    aggregateQuantities,
+    convert,
+    formatQuantity,
+    parseQuantity,
+    parseQuantityAndText,
+} from '@/utils/quantity';
+import { nextListRank, safeParseRank } from '@/utils/rank';
 import { primary } from '@/utils/styles';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
-// --- FIX: Import `forwardRef` from React ---
 import React, { forwardRef, useCallback, useMemo, useState } from 'react';
 import {
     Pressable,
@@ -17,19 +23,11 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import QuantityEditorModal, { parseQuantityAndText } from './QuantityEditorModal';
+import QuantityEditorModal from './QuantityEditorModal';
 
 type AggregatedItem = Item & {
  sourceIds: string[];
  totalQuantity: string;
-};
-
-// --- HELPER FUNCTIONS ---
-const parseNumericQuantity = (q?: string): { value: number; unit: string } | null => {
- if (!q) return null;
- const match = q.trim().match(/^(\d*\.?\d+)\s*(.*)$/);
- if (!match) return null;
- return { value: parseFloat(match[1]), unit: match[2].trim() };
 };
 
 // --- COMPONENT PROPS ---
@@ -46,7 +44,6 @@ interface GroceryListViewProps {
   onCategorize: () => Promise<void>;
 }
 
-// --- FIX: Wrap component in forwardRef and accept the `ref` as the second argument ---
 const GroceryListView = forwardRef<any, GroceryListViewProps>(({
     items,
     setItems,
@@ -82,25 +79,18 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         for (const [, sources] of itemMap) {
             if (sources.length === 0) continue;
             const baseItem = sources[0];
+            const computedTotal = aggregateQuantities(sources.map(s => s.quantity));
+
+            // An override replaces the computed total, but only while the
+            // underlying quantities still match the snapshot taken when it was
+            // set. If meal ingredients changed since, the override is stale and
+            // the live computed total wins.
             const overrideSource = sources.find(s => s.overrideQuantity);
-            let totalQuantity = '';
-
-            if (overrideSource && overrideSource.overrideQuantity) {
-                totalQuantity = overrideSource.overrideQuantity;
-            } else {
-                const quantities = sources.map(s => parseNumericQuantity(s.quantity)).filter(Boolean) as { value: number; unit: string }[];
-                if (quantities.length > 0) {
-                    const unitTotals = quantities.reduce((acc, q) => {
-                        const unitKey = q.unit.toLowerCase() || 'misc';
-                        acc[unitKey] = (acc[unitKey] || 0) + q.value;
-                        return acc;
-                    }, {} as Record<string, number>);
-
-                    totalQuantity = Object.entries(unitTotals)
-                        .map(([unit, value]) => `${parseFloat(value.toFixed(2))}${unit === 'misc' ? '' : ` ${unit}`}`)
-                        .join(' + ');
-                }
-            }
+            const overrideIsFresh = overrideSource
+                && (overrideSource.overrideBase === undefined || overrideSource.overrideBase === computedTotal);
+            const totalQuantity = overrideIsFresh
+                ? overrideSource!.overrideQuantity!
+                : computedTotal;
 
             result.push({
                 ...baseItem,
@@ -110,7 +100,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 checked: sources.every(s => s.checked),
             });
         }
-        
+
         const combined = [...result, ...sections];
         combined.sort((a, b) => a.listOrder.localeCompare(b.listOrder));
         return combined;
@@ -120,8 +110,15 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         inputRefs.current[id] = ref;
     }, [inputRefs]);
 
-    const updateItemText = (id: string, text: string) => {
+    const updateSectionText = (id: string, text: string) => {
         setItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item)));
+        markDirty();
+    };
+
+    // Renaming an aggregated row renames every source item (including meal
+    // ingredients) so the group stays together instead of splitting mid-keystroke.
+    const updateAggregatedText = (aggItem: AggregatedItem, text: string) => {
+        setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id) ? { ...item, text } : item));
         markDirty();
     };
 
@@ -142,16 +139,21 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         const currentIndex = aggregatedItems.findIndex(i => i.id === currentItem.id);
         if (currentIndex === -1) return;
 
-        const currentRank = LexoRank.parse(aggregatedItems[currentIndex].listOrder);
+        const currentRank = safeParseRank(aggregatedItems[currentIndex].listOrder) ?? nextListRank(items);
         const nextItem = aggregatedItems[currentIndex + 1];
-        const nextRank = nextItem ? LexoRank.parse(nextItem.listOrder) : currentRank.genNext();
-        const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: currentRank.between(nextRank).toString(), isSection: false };
+        const nextRank = nextItem ? safeParseRank(nextItem.listOrder) : null;
+        const newRank = nextRank && currentRank.compareTo(nextRank) < 0
+            ? currentRank.between(nextRank)
+            : currentRank.genNext();
+        const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: newRank.toString(), isSection: false };
         setItems(prev => [...prev, newItem]);
         setEditingId(newItem.id);
         markDirty();
     };
 
     const deleteItem = (aggItem: AggregatedItem) => {
+        // Deletes every source, including meal ingredients — checking and
+        // deleting intentionally act on the whole aggregate.
         const sourceIdsToDelete = new Set(aggItem.sourceIds);
         const updatedItems = items.filter(item => !sourceIdsToDelete.has(item.id));
         setItems(updatedItems);
@@ -181,9 +183,13 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         const { quantity, text: newText } = parseQuantityAndText(baseItem.text);
         if (quantity || newText !== baseItem.text) {
             setItems(prev =>
-                prev.map(i =>
-                    i.id === baseItemId ? { ...i, text: newText, quantity: quantity || i.quantity } : i
-                )
+                prev.map(i => {
+                    if (!aggItem.sourceIds.includes(i.id)) return i;
+                    // Text applies to every source; a typed-in quantity only to the base.
+                    const updated = { ...i, text: newText };
+                    if (i.id === baseItemId && quantity) updated.quantity = quantity;
+                    return updated;
+                })
             );
             markDirty();
         }
@@ -209,7 +215,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         setItems(prev => prev.map(originalItem => ({ ...originalItem, listOrder: rankMap.get(originalItem.id) || originalItem.listOrder })));
         markDirty();
     };
-    
+
     const openQuantityEditor = (item: AggregatedItem) => {
         setSelectedItem(item);
         setIsModalVisible(true);
@@ -223,80 +229,103 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
     const handleSaveQuantity = (newQuantityStr: string) => {
         if (!selectedItem) return;
         const newQuant = newQuantityStr.trim();
-        const desiredTotalParsed = parseNumericQuantity(newQuant);
+
+        // Unchanged from the displayed total: nothing to do. (Without this,
+        // saving a computed multi-unit total like "200 g + 2 tsp" would freeze
+        // it as an override.)
+        if (newQuant === selectedItem.totalQuantity) {
+            closeQuantityEditor();
+            return;
+        }
+
+        const desired = parseQuantity(newQuant);
 
         setItems(prev => {
-            const mealItems = prev.filter(item =>
-                selectedItem.sourceIds.includes(item.id) && !!item.mealId
-            );
-            let hasUnitConflict = false;
-            if (desiredTotalParsed) {
-                const desiredUnit = desiredTotalParsed.unit.toLowerCase() || 'misc';
-                hasUnitConflict = mealItems.some(item => {
-                    const mealParsed = parseNumericQuantity(item.quantity);
-                    return mealParsed && (mealParsed.unit.toLowerCase() || 'misc') !== desiredUnit;
-                });
-            }
+            const sources = prev.filter(item => selectedItem.sourceIds.includes(item.id));
+            const mealItems = sources.filter(item => !!item.mealId);
+            const mainItem = sources.find(item => !item.mealId);
 
-            let mainListItemId = prev.find(item =>
-                selectedItem.sourceIds.includes(item.id) && !item.mealId
-            )?.id;
+            const clearOverride = (item: Item): Item =>
+                ({ ...item, overrideQuantity: undefined, overrideBase: undefined });
 
-            if (hasUnitConflict) {
-                if (mainListItemId) {
-                    return prev.map(item => item.id === mainListItemId ? { ...item, quantity: undefined, overrideQuantity: newQuant } : item);
-                } else {
-                    const lastItem = prev[prev.length - 1];
-                    const newRank = lastItem ? LexoRank.parse(lastItem.listOrder).genNext() : LexoRank.middle();
-                    const newItem: Item = {
-                        id: uuid.v4() as string, text: selectedItem.text, checked: false, isSection: false,
-                        listOrder: newRank.toString(), overrideQuantity: newQuant
-                    };
-                    return [...prev, newItem];
-                }
-            }
-            
-            let quantityToSet: string | undefined = undefined;
-            let shouldRemoveMainItem = false;
-
+            // Empty input: drop the standalone item; meal-driven quantities remain.
             if (!newQuant) {
-                shouldRemoveMainItem = true;
-            } else if (desiredTotalParsed) {
-                const desiredUnit = desiredTotalParsed.unit.toLowerCase() || 'misc';
-                const mealContribution = mealItems.reduce((sum, item) => {
-                    const parsed = parseNumericQuantity(item.quantity);
-                    if (parsed && (parsed.unit.toLowerCase() || 'misc') === desiredUnit) {
-                        return sum + parsed.value;
-                    }
-                    return sum;
-                }, 0);
-                const mainListQuantityNeeded = desiredTotalParsed.value - mealContribution;
-                if (mainListQuantityNeeded <= 0) {
-                    shouldRemoveMainItem = true;
-                } else {
-                    const originalUnit = desiredTotalParsed.unit;
-                    quantityToSet = `${parseFloat(mainListQuantityNeeded.toFixed(2))}${originalUnit ? ` ${originalUnit}` : ''}`;
-                }
-            } else {
-                quantityToSet = newQuant;
+                return prev
+                    .filter(item => item.id !== mainItem?.id)
+                    .map(item => sources.some(s => s.id === item.id) ? clearOverride(item) : item);
             }
 
-            if (mainListItemId) {
-                if (shouldRemoveMainItem) {
-                    return prev.filter(item => item.id !== mainListItemId);
+            // Snapshot of the quantities the override would be replacing
+            // (excluding the main item, whose own quantity gets cleared when an
+            // override is set). Used later to detect staleness.
+            const overrideBase = aggregateQuantities(
+                sources.filter(s => s.id !== mainItem?.id).map(s => s.quantity)
+            );
+
+            const setOverride = (): Item[] => {
+                if (mainItem) {
+                    return prev.map(item => item.id === mainItem.id
+                        ? { ...item, quantity: undefined, overrideQuantity: newQuant, overrideBase }
+                        : item);
                 }
-                return prev.map(item => item.id === mainListItemId ? { ...item, quantity: quantityToSet, overrideQuantity: undefined } : item);
-            } else if (!shouldRemoveMainItem) {
-                const lastItem = prev[prev.length - 1];
-                const newRank = lastItem ? LexoRank.parse(lastItem.listOrder).genNext() : LexoRank.middle();
                 const newItem: Item = {
                     id: uuid.v4() as string, text: selectedItem.text, checked: false, isSection: false,
-                    listOrder: newRank.toString(), quantity: quantityToSet
+                    listOrder: nextListRank(prev).toString(), overrideQuantity: newQuant, overrideBase,
+                };
+                return [...prev, newItem];
+            };
+
+            // How much do meal ingredients already contribute, expressed in the
+            // desired unit? null = not expressible (different dimension or
+            // unknown unit), in which case the input becomes an override.
+            let mealContribution: number | null = desired ? 0 : null;
+            if (desired && mealContribution !== null) {
+                for (const item of mealItems) {
+                    const parsed = parseQuantity(item.quantity);
+                    if (!parsed) continue;
+                    if (parsed.unit === desired.unit) {
+                        mealContribution += parsed.value;
+                        continue;
+                    }
+                    const converted = parsed.unit && desired.unit
+                        ? convert(parsed.value, parsed.unit, desired.unit)
+                        : null;
+                    if (converted === null) { mealContribution = null; break; }
+                    mealContribution += converted;
+                }
+            }
+
+            if (!desired || mealContribution === null) {
+                return setOverride();
+            }
+
+            const needed = desired.value - mealContribution;
+
+            if (needed > 0) {
+                const quantityToSet = formatQuantity(needed, desired.unit);
+                if (mainItem) {
+                    return prev.map(item => item.id === mainItem.id
+                        ? { ...clearOverride(item), quantity: quantityToSet }
+                        : item);
+                }
+                const newItem: Item = {
+                    id: uuid.v4() as string, text: selectedItem.text, checked: false, isSection: false,
+                    listOrder: nextListRank(prev).toString(), quantity: quantityToSet,
                 };
                 return [...prev, newItem];
             }
 
-            return prev;
+            if (needed === 0) {
+                // Meals cover the desired total exactly; no standalone item needed.
+                return prev
+                    .filter(item => item.id !== mainItem?.id)
+                    .map(item => sources.some(s => s.id === item.id) ? clearOverride(item) : item);
+            }
+
+            // Desired total is below what meals contribute. We can't shrink meal
+            // ingredients from here, so honor the number as an explicit override
+            // instead of silently snapping back to the meal sum.
+            return setOverride();
         });
 
         markDirty();
@@ -315,7 +344,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                         ref={assignRef(item.id)}
                         value={item.text}
                         style={[styles.editInput, styles.sectionText]}
-                        onChangeText={text => updateItemText(item.id, text)}
+                        onChangeText={text => updateSectionText(item.id, text)}
                         onFocus={() => setEditingId(item.id)}
                         onBlur={() => setEditingId('')}
                         onSubmitEditing={() => addItemAfter(item)}
@@ -343,7 +372,9 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                     />
                     {isEditing && (
                         <TouchableOpacity
-                            onPress={() => {
+                            // onPressIn: the input's onBlur unmounts this button
+                            // before a regular onPress can fire.
+                            onPressIn={() => {
                                 setItems(prev => prev.filter(i => i.id !== item.id));
                                 markDirty();
                             }}
@@ -355,11 +386,11 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 </View>
             );
         }
-        
+
         const aggItem = item as AggregatedItem;
         const baseItemId = aggItem.sourceIds[0];
         const isEditing = editingId === baseItemId;
-        
+
         return (
             <View style={styles.itemRow}>
                 <Pressable onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); drag(); }} disabled={isActive} style={styles.dragHandle} hitSlop={20}>
@@ -368,7 +399,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 <TouchableOpacity style={styles.checkbox} onPress={() => toggleCheck(aggItem)}>
                     {aggItem.checked && <Text>✓</Text>}
                 </TouchableOpacity>
-                
+
                 {aggItem.totalQuantity && (
                     <TouchableOpacity onPress={() => openQuantityEditor(aggItem)}>
                         <View style={[styles.quantityLabel, aggItem.checked && styles.quantityChecked]}>
@@ -379,14 +410,14 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
 
                 <TextInput
                     ref={assignRef(baseItemId)} value={aggItem.text} style={[styles.editInput, aggItem.checked && styles.checked]}
-                    onChangeText={text => updateItemText(baseItemId, text)} onFocus={() => setEditingId(baseItemId)}
+                    onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => setEditingId(baseItemId)}
                     onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => addItemAfter(aggItem)}
                     onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && aggItem.text === '') { deleteItem(aggItem); } }}
                     returnKeyType="next" blurOnSubmit={false}
                 />
-                
+
                 {isEditing && (
-                    <TouchableOpacity onPress={() => deleteItem(aggItem)} style={styles.clearButton}>
+                    <TouchableOpacity onPressIn={() => deleteItem(aggItem)} style={styles.clearButton}>
                         <Text style={styles.clearText}>✕</Text>
                     </TouchableOpacity>
                 )}
@@ -396,10 +427,10 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
 
     return (
         <View style={{ flex: 1 }}>
-            { aggregatedItems.length == 0 && 
+            { aggregatedItems.length == 0 &&
                 <View style={styles.emptyMealsContainer}>
                     <Text style={styles.emptyMealsText}>Your list is empty</Text>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={styles.addMealButton}
                         onPress={() => addItemAfter()}>
                         <Text style={styles.addMealText}>+ Add Item</Text>
@@ -407,7 +438,6 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 </View>
             }
             <DraggableFlatList
-                // --- FIX: Attach the forwarded ref here ---
                 ref={ref}
                 data={aggregatedItems} onDragEnd={({ data }) => reRankItems(data)}
                 keyExtractor={item => item.id} renderItem={renderItem as any}
@@ -422,6 +452,8 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         </View>
     );
 });
+
+GroceryListView.displayName = 'GroceryListView';
 
 export default GroceryListView;
 
@@ -447,7 +479,7 @@ const styles = StyleSheet.create({
         fontSize: 28,
         fontWeight: 'bold',
         color: 'grey'
-    
+
     },
     addMealButton: { paddingVertical: 5 },
     addMealText: { color: primary, fontSize: 16, textAlign: 'center'  }

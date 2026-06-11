@@ -13,7 +13,7 @@ const styleMappings: { tag: string; style: CardStyle }[] = [
   { tag: 'italian', style: { backgroundColor: '#e63946', icon: 'pizza-outline' } },
   { tag: 'mexican', style: { backgroundColor: '#fca311', icon: 'flame-outline' } },
   { tag: 'japanese', style: { backgroundColor: '#219ebc', icon: 'fish-outline' } },
-  { tag: 'chinese', style: { backgroundColor: '#d62828', icon: 'bowl-outline' } },
+  { tag: 'chinese', style: { backgroundColor: '#d62828', icon: 'restaurant-outline' } },
   { tag: 'thai', style: { backgroundColor: '#8ac926', icon: 'leaf-outline' } },
   { tag: 'indian', style: { backgroundColor: '#ffb703', icon: 'bonfire-outline' } },
   { tag: 'mediterranean', style: { backgroundColor: '#00b4d8', icon: 'water-outline' } },

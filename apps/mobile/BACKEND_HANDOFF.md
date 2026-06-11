@@ -1,146 +1,181 @@
 # Fridgie — Full App Review & Backend Handoff
 
-*Reviewed: frontend repo (`nairdrie/fridgie`) as of branch `claude/grocery-meal-prep-review-gzac06`, 2026-06-11.*
-*Audience: backend agent (API repo owner). Sections 5–6 are the actionable handoff; sections 1–4 are context and the frontend bug inventory so we agree on the contract.*
+*Frontend repo (`nairdrie/fridgie`), branch `claude/grocery-meal-prep-review-gzac06`, updated 2026-06-11.*
+*Audience: backend agent (API repo owner).*
+
+**Status update:** every frontend-fixable finding from the original review has now been **fixed on this branch** (commits after the initial report). Section 2 describes what changed and the new client behavior you must account for. Section 3 is your required work — three of the client fixes are only half of a contract and need backend counterparts. Section 4 is the question list to answer in a report back. Section 5 lists what remains open and why. The original full bug inventory is preserved in Section 6 for reference, with resolution status per item.
 
 ---
 
-## 1. Feature inventory (what the app does today)
+## 1. App summary (context)
 
 | Area | Features |
 |---|---|
-| Auth | Email/password, Google, Apple sign-in; anonymous guest fallback; complete-profile flow |
-| Grocery list | Weekly lists per group; add/edit/check/drag-reorder items; sections; sort modes (custom / alphabetical one-shot / AI categorize); quantity chips with editor + unit cycling |
-| Meal plan | Meal cards per week; day-of-week assignment; ingredients per meal (drag-sortable); collapse state persisted locally; meal ingredients flow into the grocery list and aggregate by name |
-| Recipes | Manual create/edit with photo; URL/TikTok import; view modal; add to meal plan (any upcoming week); personal cookbook (add/remove) |
-| AI | Meal suggestions from saved preferences, with re-roll + veto list; list auto-categorization |
-| Ratings | Post-meal rating screen (like/dislike + feedback), scheduled via backend, local "already rated" tracking |
-| Social | User search (Algolia), follow/unfollow, public profiles with cookbooks, explore feed (trending recipes, featured creators), notifications (group invites, follows) |
-| Groups | Create/rename/delete groups, invitations (accept/decline), shared lists, realtime presence (RTDB) |
-| Sync | WebSocket live updates per list; debounced full-document saves |
+| Auth | Email/password, Google, Apple; anonymous guest fallback; complete-profile flow |
+| Grocery list | Weekly lists per group; add/edit/check/drag items; sections; sort (custom / alphabetical / AI categorize); quantity chips with editor + unit conversion |
+| Meal plan | Meal cards per week, day-of-week assignment, per-meal ingredients that flow into the grocery list and aggregate by name |
+| Recipes | Manual create/edit with photo; URL/TikTok import; cookbook; add-to-plan from Explore |
+| AI | Meal suggestions (preferences + veto/re-roll); list auto-categorization |
+| Social | Search (Algolia), follow, public profiles, explore feed, notifications, post-meal ratings |
+| Groups | Create/invite/manage, shared lists, RTDB presence |
+| Sync | WebSocket live updates per list; debounced whole-document saves |
 
-Overall design impression: the product surface is genuinely complete and coherent — weekly list + meal plan + recipes + social is a full loop. The polish gaps are concentrated in (a) the quantity model, (b) the sync protocol, and (c) release hygiene (env config, push notifications). Those three are what stand between "works in my kitchen" and "feels complete."
-
----
-
-## 2. How list/meal quantity sync works today (shared contract)
-
-- A `List` document holds **one flat `items[]` array plus `meals[]`**. Meal ingredients are just items with a `mealId`; there is no separate ingredients collection.
-- `Item = { id, text, checked, listOrder (LexoRank), mealOrder?, isSection, mealId?, quantity?: string, overrideQuantity?: string }`. Quantities are **freeform strings** ("200 g", "2 cups").
-- The grocery view aggregates items by `text.trim().toLowerCase()`. Display total = sum of parsed `quantity` values grouped by unit string, joined with `+` (e.g. `"200 g + 2 tsp"`). If any source item has `overrideQuantity`, that wins verbatim.
-- Saves are **debounced whole-document POSTs** of `{ items, meals, sort }` to `POST /list/:id`. Incoming WS broadcasts replace local state unless a local edit happened in the last 1200 ms ("dirty window").
-
-Keep this model in mind for everything below.
+Data model reminder: a `List` doc holds one flat `items[]` plus `meals[]`. Meal ingredients are items with `mealId`. The grocery view aggregates items by `text.trim().toLowerCase()`. Quantities are freeform strings. Saves are debounced `POST /list/:id` with the full `{ items, meals, sort }`.
 
 ---
 
-## 3. Quantity sync & conversion — bug list (the area Nick flagged)
+## 2. What was fixed on this branch (frontend)
 
-These are mostly frontend bugs, listed so we can decide which belong in a shared/backend quantity model instead of being patched in three places.
+### 2.1 New shared quantity engine — `utils/quantity.ts`
+All quantity parsing/conversion/aggregation now lives in one module (previously three divergent regex sets). It handles:
+- **Fractions**: `1/2`, `1 1/2`, and unicode `½ ¼ ¾ ⅓ ⅔ ⅛ …` — `"1 1/2 cups flour"` now parses as qty `1.5 cups` + text `flour` (previously it corrupted the item to text `"1/2 cups flour"`, qty `"1"`).
+- **Unit normalization**: `cup/cups/c`, `tbsp/tablespoons`, `g/grams`, etc. map to canonical units `g, kg, oz, lb, ml, l, tsp, tbsp, cup` with anchored regexes (the old `/^cups?|c$/` matched any word ending in "c").
+- **Dimension-aware conversion**: mass and volume each convert within their dimension; cross-dimension conversion is refused (no more implicit 1 g = 1 ml). `tsp`, `kg`, `lb`, `l` added.
+- **Aggregation** (`aggregateQuantities`): same-dimension quantities convert into the unit of the first item and sum — `"1 cup" + "2 tbsp"` → `"1.13 cups"`, `"1 cup" + "2 cups"` → `"3 cups"`, `"1/2 cup" × 2` → `"1 cup"`. Different dimensions stay separate (`"200 g + 2 tsp"` — correct, since sugar by weight and by spoon genuinely can't merge without density). Unknown units group by token with naive plural merging (`"2 bunches" + "1 bunch"` → `"3 bunches"`). Unparseable strings ("to taste") are ignored in totals.
+- **Smarter text splitting**: `"2 chicken breasts"` → qty `2`, text `chicken breasts` (the old parser produced qty `"2chicken"`).
 
-| # | Severity | Bug | Where |
+The unit-cycle button in the quantity editor now cycles only within the current dimension.
+
+### 2.2 Override semantics fixed — **new `Item.overrideBase` field** ⚠️ *backend action needed (§3.1)*
+- Opening the editor on a computed total and saving without changes is now a no-op (previously it froze e.g. `"200 g + 2 tsp"` into a permanent `overrideQuantity`).
+- When an override IS set, the client also stores `overrideBase`: the aggregated total of the other source items at that moment. At display time the total is recomputed; **if it no longer matches `overrideBase`, the override is considered stale and ignored**, so meal-plan quantity edits flow through again instead of being masked forever.
+- Setting a total *below* the meal contribution now stores it as an explicit override (previously the input was silently discarded and the display snapped back).
+
+### 2.3 Sync hardening — `app/(tabs)/list.tsx`, `utils/api.ts`
+- **Echo loop killed (client side)**: state changes that came from the server (WS snapshots) no longer trigger the debounced save. Previously *every* broadcast caused a `POST /list` 500 ms later — with two clients open this ping-ponged writes indefinitely.
+- **Initial-load guard**: no saves are sent until the first server snapshot for the selected list has been applied. Previously the save effect could fire on mount and **overwrite the list with the initial empty state** if the WS snapshot took >500 ms.
+- **`NEEDS-RANK` eliminated**: recipe-save now assigns real LexoRanks (list *and* meal order) to new ingredient items — this path previously persisted the literal string `'NEEDS-RANK'` and crashed `LexoRank.parse` on the next insert. All other rank parsing now goes through `utils/rank.ts` (`safeParseRank` / `nextListRank` / `sanitizeListOrders`), and incoming snapshots + categorize responses are sanitized, so existing bad rows in the DB are repaired on read.
+- **WS reconnect**: dropped sockets now reconnect with exponential backoff (1s → 30s cap) and a fresh ID token per attempt. Previously one drop meant no live updates until remount.
+- **No socket churn from presence**: the listener and save effects now depend on `groupId`/`listId` strings instead of object identities; presence updates were re-creating the group object and tearing down/reopening the socket on every member status change.
+
+### 2.4 Other fixes
+| Area | Fix |
+|---|---|
+| Dates/TZ | All `weekStart` parsing goes through new `parseWeekStart()` (local-time `yyyy-MM-dd`); previously `new Date(string)` parsed UTC midnight = previous day across the Americas. Applied in list screen (unrated-meal check), `ListHeader`, `AddToMealPlanModal` (also de-duplicated its hand-rolled week math), `ListContext`, `getWeekLabel`, `getAvailableWeeks`. |
+| Config | `BASE_URL` now reads `EXPO_PUBLIC_API_URL`, **defaulting to `https://api.fridgie.ca/api`** (was a hardcoded LAN IP). `eas.json` production Android build switched `apk` → `app-bundle`. |
+| Push | `registerForPushNotificationsAsync` no longer dead code — `Constants.isDevice` (removed in SDK 53) check dropped, token request passes the EAS `projectId` and fails gracefully on simulators. |
+| UX | Ingredient/item ✕ delete buttons now use `onPressIn` (the input's `onBlur` unmounted them before `onPress` could fire — the long-standing "delete button broken" TODO). Renaming an aggregated grocery row renames **all** source items, so the row no longer splits mid-keystroke. Categorize shows a "Sorting…" spinner and disables the sort button. Meal-name placeholders are deterministic per meal id (no more reshuffling). Rate-meal photo pick now actually uploads + persists via `saveRecipe` (was preview-only with a "in a real app…" comment). Meal-preferences save now surfaces errors instead of silently failing. FAB animation styles no longer call hooks via a factory. |
+| Presence | Cleanup now runs in safe order (unsubscribe → cancel `onDisconnect` → write offline, errors swallowed). Partial fix; see §5. |
+| Type errors | Fixed two pre-existing `tsc` failures (`bowl-outline` icon name, `setInterval` typing). `npx tsc --noEmit` is now clean. |
+
+**Design decision (was Q10):** checking/unchecking and deleting an aggregated grocery row intentionally act on **all** source items, including meal ingredients. Kept and documented in code — flag if you disagree.
+
+---
+
+## 3. Backend work required to sync up
+
+### 3.1 Preserve `overrideBase` (and unknown `Item` fields generally) — **required, or quantity overrides regress**
+The client now writes `overrideBase?: string` on items alongside `overrideQuantity`. Anything server-side that reads and re-emits items must round-trip it:
+- the list document store itself (presumably fine if items are opaque JSON),
+- **`POST /list/categorize/:id`** — if it reconstructs items field-by-field it will strip `overrideBase` (and possibly `overrideQuantity`/`mealOrder`); please make it pass through unknown fields,
+- **`POST /meal`** (add recipe to list) item creation,
+- any other code path that maps/validates items.
+Treat `Item` as open/extensible: copy unknown keys through.
+
+### 3.2 `NEEDS-RANK` cleanup — one-off migration + validation
+The client no longer produces it and repairs it on read, but stored lists may still contain items with `listOrder: 'NEEDS-RANK'` (or missing `mealOrder` on meal items). Please:
+1. Run a migration re-ranking any item whose `listOrder` doesn't parse as a LexoRank.
+2. Add write-time validation rejecting/repairing unparseable `listOrder` so no other client can reintroduce it.
+
+### 3.3 Sender-echo suppression + revisioning — the remaining sync gap
+The client no longer *echoes* saves, but the underlying protocol is still whole-document last-write-wins; two members editing concurrently still clobber each other (original finding S3, **still open**):
+1. Accept a `clientId` (or echo a `rev`) on `POST /list/:id` and include it in WS broadcasts so clients can hard-ignore their own echoes (the client currently uses a 1.2 s dirty-window heuristic).
+2. Add a monotonically increasing `rev` to the list doc; reject stale writes with 409 so the client can rebase, or merge server-side.
+3. (Longer term) item-level patch ops instead of full-document POSTs.
+Tell me the shape you choose and I'll wire the client.
+
+### 3.4 Quantity normalization at the source — recommended
+The client parser is now tolerant (fractions, unicode, plurals), but the **recipe importer** and **meal-suggest** endpoints should still emit canonical `"<decimal> <unit>"` strings (unit ∈ `g, kg, oz, lb, ml, l, tsp, tbsp, cup`, or unitless) so totals are exact and the freeform fallback path is rarely hit. Send me 10–20 real sample quantity strings from recent imports (see §4 Q3) and I'll confirm coverage either way.
+
+### 3.5 Confirmations needed for fixes already shipped
+- **`weekStart` format**: client now parses the first 10 chars as local `yyyy-MM-dd`. Confirm that's what you store (and that weeks are Sunday-based). If you store a UTC datetime computed from a different timezone, week labels can still be off — say so and I'll adjust.
+- **Push token route**: client POSTs to `/notifications/save-push-token`, but other notification routes are `/notification/...` (singular). Confirm the real path and that the Expo push pipeline is live.
+- **`saveRecipe` by non-author**: rate-meal now persists a picked photo via `POST /recipe`. What happens when the rater isn't the recipe author — fork, in-place update, or 403? If 403, I'll gate the photo button to authors.
+- **WS broadcast on `POST /meal`**: adding a recipe from Explore relies on the server broadcasting the list change over the websocket; the old "doesn't show up right away" bug suggests it doesn't. Please confirm/add.
+- **Env URLs**: client now defaults to `https://api.fridgie.ca/api` and reads `EXPO_PUBLIC_API_URL` otherwise. Confirm prod is live with WSS (client derives `ws(s)://` from the API URL). Nick: for local dev, add `.env` with `EXPO_PUBLIC_API_URL=http://<lan-ip>:3000/api`.
+- **`scheduleMealRating`**: client calls it on every day-of-week change; please make it idempotent per (mealId, listId).
+- **`hasContent`**: confirm the server maintains this flag (client never writes it).
+
+---
+
+## 4. Questions — please generate a report back
+
+1. **Categorize contract**: exact response of `POST /list/categorize/:id` — does it preserve `mealId`, `quantity`, `overrideQuantity`, `overrideBase`, `mealOrder` and produce valid LexoRanks for all items including sections?
+2. **WS protocol**: message shape, does the sender receive its own broadcast, any server-side debounce, reconnect/auth semantics (client now reconnects with a fresh token — is a token in the query string logged anywhere? consider first-message auth).
+3. **Importer output**: 10–20 real `ingredients[].quantity` samples from recent imports (fractions? `½`? ranges like "2-3"? "to taste"?).
+4. **Suggest contract**: response shape of `POST /meal/suggest` — quantities normalized? `tags`/`photoURL` populated?
+5. **Notification routes**: definitive list (`/notification` vs `/notifications/...`); are follow/invite pushes implemented?
+6. **Anonymous → registered migration**: are a guest's groups/lists/cookbook migrated on signup or orphaned?
+7. **Security rules**: current Firebase RTDB rules (`/status/*` presence paths) and Storage rules (profile/recipe images) — the web config is public by design, so rules are the entire boundary.
+8. **Group member removal**: is `PUT /group/:id` with `members` actually implemented? (Client comment says "placeholder".)
+9. **Rate limits**: any constraints on `POST /list/:id` frequency the client's 500 ms debounce should respect?
+
+---
+
+## 5. Known remaining items (frontend, deliberately not done)
+
+| Item | Why |
+|---|---|
+| LWW conflict clobbering | Needs §3.3 backend protocol first; client will follow. |
+| Presence stuck-online after logout | Mitigated (ordered cleanup), but a complete fix needs the offline write awaited *before* `signOut()` in the logout flow, and RTDB rules that allow it — pending §4 Q7. |
+| Explore → meal plan not instant | Pending §3.5 WS-broadcast confirmation. |
+| `toE164` hardcodes +1 | Product decision (country picker) — out of scope for a bug pass. |
+| iOS/Android keyboard dismissal polish (TODOs in list.tsx) | Needs on-device testing; behavior-tuning, not a bug. |
+| Rate-meal "edit recipe" stub | Feature work (navigating into the edit modal from rate-meal), not a bug; left as-is. |
+| Cosmetic lint (unescaped apostrophes, pre-existing `exhaustive-deps` warnings) | Pre-existing, no behavior impact. |
+
+Verification done: `npx tsc --noEmit` clean; `eslint` on all touched files introduces no new findings; the quantity engine was exercised against all the §6 bug scenarios (fraction parsing, plural merge, dimension separation, regex precedence, conversion cycle) with a scripted run — all pass. Not yet verified on a device/simulator — worth a manual pass on the grocery/meal flow before release.
+
+---
+
+## 6. Original findings (reference, with resolution status)
+
+### Quantity sync & conversion
+| # | Severity | Bug | Status |
 |---|---|---|---|
-| Q1 | High | **No unit conversion in aggregation.** "200 g" in list + "2 tsp" in a meal renders `"200 g + 2 tsp"` (the known TODO). The `CONVERSIONS` table exists only inside `QuantityEditorModal` and is never used by aggregation. | `components/GroceryListView.tsx:3,91-102`, `components/QuantityEditorModal.tsx:10-17` |
-| Q2 | High | **Fractions are mis-parsed, not just unsupported.** `parseQuantityAndText("1 1/2 cups flour")` → quantity `"1"`, text `"1/2 cups flour"` (item text is corrupted on blur). Aggregating two `"1/2 cup"` quantities yields `"2 /2 cup"` (`parseNumericQuantity` reads value `1`, unit `"/2 cup"`). Unicode `½` (common in imported recipes) isn't handled at all. | `components/QuantityEditorModal.tsx:49-84`, `components/GroceryListView.tsx:28-33` |
-| Q3 | High | **Open-editor-then-Save corrupts multi-unit totals.** Opening the quantity editor on an aggregated total like `"200 g + 2 tsp"` and pressing Save without edits parses it as value `200`, unit `"g + 2 tsp"`, detects a "unit conflict", and freezes the whole string as `overrideQuantity`. From then on the total never updates when meal ingredients change. | `components/GroceryListView.tsx:223-257` |
-| Q4 | High | **`overrideQuantity` is never invalidated.** Once set, it wins over computed totals forever — meal ingredient edits, additions, and deletions no longer affect the displayed grocery quantity, with no UI hint and no way to clear it except editing to a non-conflicting value. | `components/GroceryListView.tsx:86-90` |
-| Q5 | Med | **Editing a total below the meal contribution silently fails.** Meals contribute 3 cups; user edits the grocery total to "2 cups" → the standalone list item is deleted and the display snaps back to "3 cups". No warning, no override. | `components/GroceryListView.tsx:273-275` |
-| Q6 | Med | **Singular/plural and synonym units don't merge.** `"1 cup" + "2 cups"` → `"1 cup + 2 cups"`. The variations regexes that could normalize this aren't used in aggregation. | `components/GroceryListView.tsx:93-97` |
-| Q7 | Med | **Unit-matching regexes have alternation-precedence bugs.** `/^cups?|c$/i` matches any word *ending* in "c" (e.g. "metric"); `/^oz|ounces?$/i` matches "ozzy"/"flounces"; same pattern for ml/tbsp. Should be `/^(cups?|c)$/i` etc. | `components/QuantityEditorModal.tsx:12-16` |
-| Q8 | Med | **Unit cycling converts mass↔volume with implicit density 1 g/ml.** 100 g → 3.5 oz → 100 ml → 0.42 cups. Fine for water, wrong for flour/sugar. Also `tsp`, `kg`, `lb` are missing entirely (tsp is literally the unit in the headline TODO). | `components/QuantityEditorModal.tsx:10-17,115-135` |
-| Q9 | Med | **Renaming an aggregated grocery row splits it mid-keystroke and can rename a meal ingredient.** The text input writes only to `sources[0]` (first occurrence in array order — which can be a *meal* item). First keystroke changes the aggregation key, the row splits in two while typing, and if the base was a meal item you've renamed an ingredient inside a recipe's meal card from the grocery tab. | `components/GroceryListView.tsx:123-126,380-386` |
-| Q10 | Design question | **Deleting an aggregated grocery row deletes the meal ingredients too** (all `sourceIds`). Is that intended? Most apps keep recipe ingredients intact and only remove the shopping entry. Same question for check-toggling (checking the grocery row checks the ingredient inside the meal card — that one feels right). | `components/GroceryListView.tsx:154-156` |
-
-**Recommendation (see §5.1):** stop parsing freeform strings in three different places. Move to a canonical `{ value: number, unit: string|null, raw: string }` quantity produced once (at input/import time), and put the single parser + conversion table in a shared module. Backend involvement needed because the recipe importer and suggestion endpoint are the main producers of quantity strings.
-
----
-
-## 4. Other frontend bugs found (for completeness / triage)
+| Q1 | High | No unit conversion in aggregation ("200 g + 2 tsp") | ✅ Fixed (§2.1) — same-dimension merges; cross-dimension correctly stays separate |
+| Q2 | High | Fractions mis-parsed; "1 1/2 cups flour" corrupted item text; "2 /2 cup" totals | ✅ Fixed (§2.1) |
+| Q3 | High | Open-editor-then-Save froze computed totals as overrides | ✅ Fixed (§2.2) |
+| Q4 | High | `overrideQuantity` never invalidated | ✅ Fixed (§2.2) — needs §3.1 server round-trip of `overrideBase` |
+| Q5 | Med | Total below meal contribution silently discarded | ✅ Fixed (§2.2) — becomes explicit override |
+| Q6 | Med | "1 cup + 2 cups" didn't merge | ✅ Fixed (§2.1) |
+| Q7 | Med | Unit regex precedence bugs (`/^cups?\|c$/` etc.) | ✅ Fixed (§2.1) |
+| Q8 | Med | Mass↔volume cycling at 1 g/ml; tsp/kg/lb missing | ✅ Fixed (§2.1) |
+| Q9 | Med | Renaming aggregated row split it and could desync a meal ingredient | ✅ Fixed — renames all sources |
+| Q10 | Design | Delete/check on aggregate hits meal ingredients | ✅ Decided: intentional, documented in code |
 
 ### Sync & data integrity
-| # | Severity | Bug | Where |
+| # | Severity | Bug | Status |
 |---|---|---|---|
-| S1 | **Critical** | **`NEEDS-RANK` listOrder is persisted and crashes LexoRank.** `AddEditRecipeModal.handleSaveRecipe` creates ingredient items with `listOrder: 'NEEDS-RANK'` and `handleRecipeSaved` in `list.tsx` **never re-ranks them** (unlike the suggestions path, which does). They sort to the bottom by accident, get saved to the server verbatim, and `LexoRank.parse('NEEDS-RANK')` throws the next time anyone presses Enter on/after such an item or adds an item (`addItemAfter`, `handleAddItem`, `handleAddIngredient`, `handleAddMealsFromSuggestion` all parse existing ranks). | `components/AddEditRecipeModal.tsx:149`, `app/(tabs)/list.tsx:233-250` |
-| S2 | **Critical** | **WS echo → save loop / write amplification.** The debounced-save effect fires on *any* `items/meals/sort` state change, including state set by the WS listener. Every received broadcast triggers a `POST /list` 500 ms later, which the server presumably re-broadcasts. With 2 clients open this ping-pongs writes; it also re-saves on initial load. Bonus: when a list is empty the listener injects a phantom blank item (`list.tsx:140`) which then gets persisted to the server. Needs a "skip save when change came from the server" guard client-side **and** sender-echo suppression server-side (§5.2). | `app/(tabs)/list.tsx:121-161` |
-| S3 | High | **Whole-document last-write-wins.** Two group members editing concurrently clobber each other's items — the entire `items[]`+`meals[]` is overwritten by whichever debounce fires last. The 1200 ms dirty window only protects against *displaying* stale data, not against overwriting. | `app/(tabs)/list.tsx:155-161`, `utils/api.ts:101-115` |
-| S4 | Med | **WS has no reconnect.** One dropped socket = no live updates until the screen remounts. `onclose` is an empty handler. Token is also passed in the query string (gets into server/proxy logs). | `utils/api.ts:389-434` |
-| S5 | Med | **Categorize round-trip races the editor.** `handleAutoCategorize` sends current items and replaces state with the response; anything typed during the request is lost. Also no loading indicator (existing TODO). | `app/(tabs)/list.tsx:341-359` |
+| S1 | Critical | `NEEDS-RANK` persisted; `LexoRank.parse` crashes | ✅ Fixed client-side; **backend migration §3.2 pending** |
+| S2 | Critical | WS echo → save loop; save-on-mount could wipe list | ✅ Fixed client-side; **echo suppression §3.3 recommended** |
+| S3 | High | Whole-doc last-write-wins clobbering | ❌ Open — needs §3.3 |
+| S4 | Med | No WS reconnect; token in query string | ✅ Reconnect fixed; token placement = §4 Q2 |
+| S5 | Med | Categorize race; no loading indicator | ✅ Indicator added, response sanitized; race inherent until §3.3 |
+| S6 | Med | (Found during fix) presence updates tore down/reopened the WS on every status change | ✅ Fixed — id-based effect deps |
 
-### Release blockers / config
-| # | Severity | Bug | Where |
+### Release / config
+| # | Severity | Bug | Status |
 |---|---|---|---|
-| R1 | **Critical** | `BASE_URL` is a hardcoded LAN IP (`http://192.168.2.193:3000/api`), with AWS/prod URLs commented out. Needs env-driven config (`app.config.ts` + `EXPO_PUBLIC_API_URL` or expo-updates channels). | `utils/api.ts:17-19` |
-| R2 | High | **Push registration is dead code:** `Constants.isDevice` no longer exists in Expo SDK 53 (`expo-device`'s `Device.isDevice` is the replacement), so the function always logs "Must use physical device" and returns before getting a token. Also calls `/notifications/save-push-token` while other notification routes are `/notification/...` — confirm which the backend actually exposes (§6). | `utils/api.ts:236-289` |
-| R3 | Med | `eas.json` production Android build is `apk`, not `aab` (Play Store requires aab). | `eas.json` |
-| R4 | Low | Firebase web config committed — that's fine by design (these keys are not secrets), but it means **RTDB/Storage security rules are the only protection**. Worth a rules audit (§6). | `utils/firebase.ts:12-21` |
+| R1 | Critical | Hardcoded LAN `BASE_URL` | ✅ Fixed — `EXPO_PUBLIC_API_URL`, prod default |
+| R2 | High | Push registration dead (`Constants.isDevice` gone in SDK 53); route mismatch | ✅ Client fixed; route = §3.5 |
+| R3 | Med | Production Android build = apk | ✅ Fixed — app-bundle |
+| R4 | Low | Firebase web config public (by design) → rules are the boundary | Open — §4 Q7 rules audit |
 
 ### Dates / timezones
-| # | Severity | Bug | Where |
+| # | Severity | Bug | Status |
 |---|---|---|---|
-| D1 | Med | `weekStart` strings are parsed with `new Date(string)`. If the backend stores `yyyy-MM-dd`, that parses as **UTC midnight**, which is the previous day in all of the Americas — while `weekKeyFromDate` formats in *local* time. Week labels, the "past unrated meals" math (`list.tsx:447-463`), and `AddToMealPlanModal`'s week filtering can all be off by a day depending on timezone. Need one canonical rule (suggest: backend stores `yyyy-MM-dd` week keys, frontend parses with `dateFromWeekKey` everywhere — it already exists in `utils/date.ts:40` but is unused in these spots). | `utils/date.ts`, `app/(tabs)/list.tsx:449`, `components/AddToMealPlanModal.tsx:57-67` |
-| D2 | Low | `AddToMealPlanModal` re-implements week-start math by hand instead of using `date-fns`/`utils/date.ts`. | `components/AddToMealPlanModal.tsx:59-63` |
+| D1 | Med | `new Date('yyyy-MM-dd')` = UTC midnight, off-by-a-day in the Americas | ✅ Fixed — `parseWeekStart` everywhere; format confirm = §3.5 |
+| D2 | Low | Hand-rolled week math in AddToMealPlanModal | ✅ Fixed |
 
-### UX bugs (known/confirmed)
-| # | Severity | Bug | Where |
+### UX
+| # | Severity | Bug | Status |
 |---|---|---|---|
-| U1 | Med | Ingredient ✕ delete button doesn't work reliably (the existing TODO): tapping it blurs the input first, `onBlur` clears `editingId`, the button unmounts before its `onPress` fires. Classic fix: keep the button mounted and use `onPressIn`, or delay the blur-clear. | `components/MealCard.tsx:14,234-238` |
-| U2 | Med | Adding a recipe to a meal plan from Explore doesn't show up until refetch (existing TODO) — `addRecipeToList` succeeds server-side but no local state/WS-driven update reaches the list screen if it's mounted on that week. | `app/(tabs)/explore.tsx:14`, `components/AddToMealPlanModal.tsx:69-85` |
-| U3 | Med | Rate-meal photo "upload" is preview-only; the picked image is never uploaded (comment in code admits it). Edit-recipe button there is also a stub Alert. | `app/rate-meal.tsx:157-195` |
-| U4 | Med | RTDB presence: `onDisconnect` registration isn't awaited before setting `online: true`, and logout cleanup doesn't await the offline write — matches the known "issues around logging out" TODO; users can get stuck "online". | `context/AuthContext.tsx:135-172` |
-| U5 | Low | `toE164` hardcodes country code `1` (NANP-only). | `utils/utils.ts:1-9` |
-| U6 | Low | Meal-name `placeholder` is randomized per render-mount of each card, so placeholders shuffle when cards remount. | `components/MealCard.tsx:81-83` |
-| U7 | Low | Keyboard-avoidance TODOs on the list screen (iOS dismiss-on-scroll, Android keep-open) are acknowledged and still open. | `app/(tabs)/list.tsx:554-556` |
-| U8 | Low | `useAnimatedStyle` called inside `secondaryFabStyle(index)` factory within render — works today but violates hooks rules; will break if FAB count becomes dynamic. | `app/(tabs)/list.tsx:108-117` |
-
----
-
-## 5. Backend work requested (implementation gaps)
-
-### 5.1 Canonical quantity model (highest priority — unblocks all of §3)
-The frontend currently parses freeform quantity strings in 3 places with 2 different regex sets. Proposal — please review and confirm:
-- Extend `Item`/`Ingredient` with structured quantity: `{ value: number | null, unit: string | null, raw: string }`. Keep `raw` for display fallback ("to taste", "a pinch", "2–3").
-- **Recipe importer and meal-suggestion endpoints normalize quantities at the source**: convert fractions (`1/2`, `1 1/2`, `½`), normalize unit names to a fixed enum (`g, kg, oz, lb, ml, l, tsp, tbsp, cup, count`), and tag dimension (mass/volume/count) so the client never converts across dimensions.
-- Backend `categorize` endpoint must round-trip the new fields untouched.
-- Frontend will then do display aggregation + conversion from one shared table (I'll handle that side).
-If you'd rather keep quantities as plain strings server-side, say so and I'll centralize parsing client-side instead — but importer output normalization is needed either way (see Q-IMP question below).
-
-### 5.2 Sync protocol hardening
-1. **Sender-echo suppression**: accept a `clientId` (or `rev`) on `POST /list/:id` and include it in WS broadcasts so clients can ignore their own echoes. This plus a client guard kills the S2 write loop.
-2. **Versioning for conflict safety**: add a monotonically increasing `rev` to the list document; reject (or merge) stale writes instead of silent LWW (S3). Even a simple 409-on-stale-rev would let the client rebase.
-3. Longer term: consider item-level patch ops (`add/update/remove/reorder`) instead of whole-document POSTs. Not urgent if 1+2 land.
-4. WS: confirm the server tolerates reconnect with the same token, and consider moving the token from query string to first-message auth.
-
-### 5.3 `NEEDS-RANK` defense
-I'll fix the client (S1), but please add server-side validation that rejects/repairs items whose `listOrder` is not a parseable LexoRank — existing lists in the DB may already contain `'NEEDS-RANK'` rows. A one-off migration to re-rank any such items would clean up live data.
-
-### 5.4 Smaller items
-- **Push notifications**: confirm the save-push-token route path (`/notifications/save-push-token` vs `/notification/...`) and that the Expo push pipeline is live; I'll fix the client-side `Constants.isDevice` bug.
-- **`scheduleMealRating` dedupe**: the client calls it every time a meal's day changes — please make it idempotent per (mealId, listId).
-- **`addRecipeToList` (POST /meal)**: confirm the server assigns valid `listOrder`/`mealOrder` to the items it creates (the in-app path creates items client-side; the explore path is server-side — they should produce identical item shapes).
-- **`hasContent`** on lists: confirm who maintains it (client never sets it).
-- **Week-start canonicalization** (D1): confirm the exact format of `weekStart` as stored (`yyyy-MM-dd` local? ISO datetime? UTC?) and that it's Sunday-based, so I can fix client parsing consistently.
-
----
-
-## 6. Questions for the backend agent (please generate a report back)
-
-1. **List schema & categorize**: exact response shape of `POST /list/categorize/:id` — does it preserve `mealId`, `quantity`, `overrideQuantity`, `mealOrder` on every item, and does it generate fresh valid LexoRanks for all items including sections?
-2. **WS protocol**: message shape, whether the sender receives their own broadcast, reconnect/auth semantics, and any server-side debounce.
-3. **Recipe importer output**: 10–20 real sample `ingredients[].quantity` strings from recent imports (do we see `½`, ranges, "to taste"?), so the normalization spec in §5.1 matches reality.
-4. **Meal suggestions contract**: response shape of `POST /meal/suggest` — are ingredient quantities normalized? Are `tags`/`photoURL` populated?
-5. **Notification routes**: definitive list (`/notification` vs `/notifications/...`), and whether follow/invite push notifications are implemented server-side.
-6. **Anonymous → registered migration**: when a guest signs up, are their group/lists/cookbook migrated to the new uid, or orphaned?
-7. **Security rules**: current Firebase RTDB rules (presence paths) and Storage rules (profile/recipe images) — since the web config is public, rules are the entire security boundary.
-8. **Prod environment**: is `https://api.fridgie.ca` live and is WSS terminated correctly (the client derives `ws(s)://` from the API URL)?
-9. **Group invitation flow**: behavior of `PUT /group/:id` `members` updates (the client comment says "placeholder") — is member removal actually implemented?
-10. **Rate limits / debounce expectations**: any server-side constraints on `POST /list/:id` frequency we should respect when fixing S2?
-
----
-
-## 7. Suggested fix order
-
-1. S1 (`NEEDS-RANK`) + S2 (echo loop) — data corruption and write storms; both small, high impact.
-2. §5.1 quantity model + Q1–Q8 — the "feels complete" win Nick asked about.
-3. R1/R2 (env config, push token) — release blockers.
-4. S3/S4 (LWW + reconnect), D1 (week parsing), U1–U4.
-5. Cosmetics and remaining TODOs.
+| U1 | Med | Ingredient ✕ delete button unmounted before press registered | ✅ Fixed — `onPressIn` |
+| U2 | Med | Explore → meal plan not visible until refetch | ❌ Open — likely backend WS broadcast, §3.5 |
+| U3 | Med | Rate-meal photo never uploaded; edit-recipe stub | ✅ Photo upload fixed; edit stub deferred (§5) |
+| U4 | Med | Presence stuck-online on logout | ✅ Partial (§2.4, §5) |
+| U5 | Low | `toE164` NANP-only | Deferred (§5) |
+| U6 | Low | Meal placeholders reshuffled per mount | ✅ Fixed — deterministic |
+| U7 | Low | Keyboard dismissal TODOs | Deferred (§5) |
+| U8 | Low | Hooks called via factory in render (FAB) | ✅ Fixed |

@@ -13,10 +13,12 @@ import { Group, Item, Meal, MealPreferences, PendingInvitation, Recipe, UserSear
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
-// your API root
-const BASE_URL = "http://192.168.2.193:3000/api" // LOCAL
-// const BASE_URL = "http://35.182.135.90:3000/api" // AWS
-// const BASE_URL = "https://api.fridgie.ca/api" // PROD
+// API root. Configure per environment via EXPO_PUBLIC_API_URL
+// (e.g. in .env / eas.json build profiles):
+//   local: http://<your-lan-ip>:3000/api
+//   aws:   http://35.182.135.90:3000/api
+//   prod:  https://api.fridgie.ca/api
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://api.fridgie.ca/api"
 
 export interface GroupInvitation {
   id: string;
@@ -236,12 +238,6 @@ export async function createGroup(name: string, inviteeUids?: string[]): Promise
 export async function registerForPushNotificationsAsync() {
   let token;
 
-  // You must use a real device for push notifications, not a simulator
-  if (!Constants.isDevice) {
-    console.error("Must use physical device for Push Notifications");
-    return;
-  }
-
   // Check for existing permissions
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
@@ -258,9 +254,15 @@ export async function registerForPushNotificationsAsync() {
     return;
   }
 
-  // This is the magic function that gets the token
-  token = (await Notifications.getExpoPushTokenAsync()).data;
-  console.log('My Expo Push Token:', token);
+  try {
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    token = (await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)).data;
+  } catch (error) {
+    // Simulators and misconfigured builds can't get a push token.
+    console.warn('Could not get Expo push token', error);
+    return;
+  }
 
   // --- 👇 SEND TOKEN TO YOUR SERVER ---
   // This is the crucial step where you link the device to the user
@@ -392,44 +394,69 @@ export async function listenToList(
   onData: (data: any) => void,
   onError?: (err: any) => void
 ) {
-  const auth = getAuth();
-  const user = auth.currentUser;
-
-  // 3. Handle the case where no user is logged in
-  if (!user) {
-    const authError = new Error("User is not authenticated.");
-    console.error(authError);
-    onError?.(authError);
-    // Return an empty unsubscribe function to prevent crashes
-    return () => {}; 
-  }
-
-  // 4. Get the ID token asynchronously
-  const idToken = await user.getIdToken();
-
-  // The rest of your code is now correct
   const wsUrl = BASE_URL.replace(/^http/, "ws");
-  const ws = new WebSocket(
-    `${wsUrl}/ws/list/${id}?groupId=${groupId}&token=${idToken}`
-  );
 
-  ws.onmessage = (e) => {
-    try {
-      onData(JSON.parse(e.data));
-    } catch (err) {
-      console.error("WS parse error", err);
+  let closed = false;
+  let ws: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let attempt = 0;
+
+  const connect = async () => {
+    if (closed) return;
+
+    const user = getAuth().currentUser;
+    if (!user) {
+      const authError = new Error("User is not authenticated.");
+      console.error(authError);
+      onError?.(authError);
+      return;
     }
+
+    // Fetch a fresh token each (re)connect — the previous one may have expired.
+    let idToken: string;
+    try {
+      idToken = await user.getIdToken();
+    } catch (err) {
+      onError?.(err);
+      scheduleReconnect();
+      return;
+    }
+    if (closed) return;
+
+    ws = new WebSocket(`${wsUrl}/ws/list/${id}?groupId=${groupId}&token=${idToken}`);
+
+    ws.onopen = () => {
+      attempt = 0;
+    };
+    ws.onmessage = (e) => {
+      try {
+        onData(JSON.parse(e.data));
+      } catch (err) {
+        console.error("WS parse error", err);
+      }
+    };
+    ws.onerror = (err) => {
+      console.warn("WS error", err);
+      onError?.(err);
+    };
+    ws.onclose = () => {
+      // Reconnect with backoff unless this listener was unsubscribed.
+      scheduleReconnect();
+    };
   };
-  ws.onerror = (err) => {
-    console.warn("WS error", err);
-    onError?.(err);
+
+  const scheduleReconnect = () => {
+    if (closed) return;
+    const delay = Math.min(30_000, 1000 * 2 ** attempt++);
+    reconnectTimer = setTimeout(connect, delay);
   };
-  ws.onclose = () => {
-    // You could optionally call onError here as well
-  };
+
+  await connect();
 
   return () => {
-    if (ws.readyState <= 1) ws.close();
+    closed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (ws && ws.readyState <= 1) ws.close();
   };
 }
 

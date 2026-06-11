@@ -160,15 +160,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
 
     return () => {
-      // On cleanup, if the user is logging out cleanly,
-      // we can immediately set their status to offline.
-      if (user) {
-          set(userStatusRef, {
-              online: false,
-              lastOnline: serverTimestamp()
-          });
-      }
+      // Stop the connection listener first so it can't race us back online,
+      // then clear the server-side disconnect hook and write offline. Both
+      // writes can fail if auth was already torn down (e.g. after signOut), so
+      // swallow errors — the onDisconnect handler is the fallback.
       unsubscribe();
+      onDisconnect(userStatusRef).cancel().catch(() => {});
+      set(userStatusRef, {
+          online: false,
+          lastOnline: serverTimestamp()
+      }).catch(() => {});
     };
   }, [user]);
 

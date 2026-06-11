@@ -1,5 +1,6 @@
 // components/MealPlanView.tsx
 import { Item, Meal } from "@/types/types";
+import { formatQuantity, parseQuantity } from "@/utils/quantity";
 import { primary } from "@/utils/styles";
 import React, { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
@@ -67,11 +68,16 @@ export default function MealPlanView({
             return;
         }
 
+        // Normalize parseable input ("1 1/2 cup" -> "1.5 cups") so grocery-list
+        // aggregation can convert it; keep freeform strings as typed.
+        const trimmed = newQuantity.trim();
+        const parsed = parseQuantity(trimmed);
+        const quantityToSave = parsed ? formatQuantity(parsed.value, parsed.unit) : (trimmed || undefined);
+
         setAllItems(prev =>
             prev.map(i =>
                 i.id === selectedItem.id
-                    // If the input is empty, set quantity to null, otherwise save the trimmed value
-                    ? { ...i, quantity: newQuantity.trim() || undefined }
+                    ? { ...i, quantity: quantityToSave }
                     : i
             )
         );

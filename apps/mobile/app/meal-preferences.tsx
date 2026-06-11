@@ -5,6 +5,7 @@ import { primary } from '@/utils/styles';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -99,10 +100,14 @@ export default function MealPreferencesScreen() {
       cuisines,
       dislikedIngredients,
     };
-    
-    await saveMealPreferences(preferences);
-    
-    router.back();
+
+    try {
+      await saveMealPreferences(preferences);
+      router.back();
+    } catch (error) {
+      console.error("Failed to save meal preferences:", error);
+      Alert.alert("Error", "Could not save your preferences. Please try again.");
+    }
   };
   
   const renderStepContent = () => {
