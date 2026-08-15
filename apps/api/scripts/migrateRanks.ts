@@ -10,6 +10,7 @@
 // Requires Firebase credentials (FIREBASE_CREDENTIALS env var or
 // utils/firebase-service-account.json), same as the server.
 import { adminRtdb } from '../utils/firebase'
+import { mutateList } from '../utils/listStore'
 import { sanitizeItems } from '../utils/rank'
 
 const dryRun = !!process.env.DRY_RUN
@@ -24,13 +25,22 @@ async function run() {
   for (const [groupId, lists] of Object.entries(groups)) {
     for (const [listId, list] of Object.entries(lists ?? {})) {
       scanned++
-      const { items, changed } = sanitizeItems(list?.items)
-      if (!changed) continue
+      // This up-front snapshot only decides whether a list is WORTH touching.
+      // The authoritative read+repair happens inside the transaction below —
+      // writing items computed from this (by now stale) snapshot with a bare
+      // .set() would silently clobber edits made while the migration runs.
+      if (!sanitizeItems(list?.items).changed) continue
 
       repaired++
       console.log(`${dryRun ? '[dry-run] would repair' : 'repairing'} lists/${groupId}/${listId}`)
       if (!dryRun) {
-        await adminRtdb.ref(`lists/${groupId}/${listId}/items`).set(items)
+        const result = await mutateList(groupId, listId, (current) => ({
+          ...current,
+          items: sanitizeItems(current?.items).items,
+        }))
+        if (result.status !== 'ok') {
+          console.warn(`  skipped lists/${groupId}/${listId}: ${result.status}`)
+        }
       }
     }
   }

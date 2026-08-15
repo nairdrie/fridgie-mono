@@ -15,15 +15,21 @@ describe('safeParseRank', () => {
 })
 
 describe('sanitizeItems', () => {
-  test('passes valid items through unchanged', () => {
+  test('passes valid items through unchanged, without mutating the input', () => {
     const a = LexoRank.middle()
     const items = [
       { id: '1', text: 'a', listOrder: rank(a), isSection: false, checked: false },
       { id: '2', text: 'b', listOrder: rank(a.genNext()), isSection: false, checked: false },
     ]
+    const snapshot = structuredClone(items)
+
     const result = sanitizeItems(items)
+
     expect(result.changed).toBe(false)
-    expect(result.items).toEqual(items)
+    expect(result.items).toEqual(snapshot)
+    // sanitizeItems used to repair in place, which made the assertion above
+    // compare the input against itself and pass no matter what it did.
+    expect(items).toEqual(snapshot)
   })
 
   test('repairs NEEDS-RANK while preserving array order', () => {
@@ -36,17 +42,50 @@ describe('sanitizeItems', () => {
     ]
     const { items: fixed, changed } = sanitizeItems(items)
     expect(changed).toBe(true)
-    const ranks = fixed.map((i) => LexoRank.parse(i.listOrder))
+    const ranks = fixed.map((i) => LexoRank.parse(i.listOrder!))
     expect(ranks[1]!.compareTo(ranks[0]!)).toBeGreaterThan(0)
     expect(ranks[2]!.compareTo(ranks[1]!)).toBeGreaterThan(0)
+  })
+
+  test('is idempotent — a second pass reports no change', () => {
+    const a = LexoRank.middle()
+    const items = [
+      { id: '1', listOrder: rank(a) },
+      { id: '2', listOrder: 'NEEDS-RANK' },
+      { id: '3', listOrder: rank(a.genNext().genNext()) },
+    ]
+    const first = sanitizeItems(items)
+    expect(first.changed).toBe(true)
+
+    const second = sanitizeItems(first.items)
+    expect(second.changed).toBe(false)
+    expect(second.items).toEqual(first.items)
+  })
+
+  test('repairs relative to the running max, not the previous array element', () => {
+    // Persisted arrays are not guaranteed to be in rank order. Using the
+    // preceding element as the anchor let a repaired item land arbitrarily.
+    const a = LexoRank.middle()
+    const b = a.genNext()
+    const c = b.genNext()
+    const items = [
+      { id: 'c', listOrder: rank(c) },
+      { id: 'a', listOrder: rank(a) },
+      { id: 'broken', listOrder: 'NEEDS-RANK' },
+      { id: 'b', listOrder: rank(b) },
+    ]
+    const { items: fixed } = sanitizeItems(items)
+    const broken = fixed.find((i) => i.id === 'broken')!
+    // Must sort after the highest valid rank seen before it (c), not after `a`.
+    expect(LexoRank.parse(broken.listOrder!).compareTo(c)).toBeGreaterThan(0)
   })
 
   test('migrates the legacy order key', () => {
     const items = [{ id: '1', text: '', checked: false, order: LexoRank.middle().toString() }]
     const { items: fixed, changed } = sanitizeItems(items)
     expect(changed).toBe(true)
-    expect(fixed[0].listOrder).toBe(LexoRank.middle().toString())
-    expect(fixed[0].order).toBeUndefined()
+    expect(fixed[0]!.listOrder).toBe(LexoRank.middle().toString())
+    expect(fixed[0]!.order).toBeUndefined()
   })
 
   test('assigns missing mealOrder for meal items', () => {
@@ -57,9 +96,20 @@ describe('sanitizeItems', () => {
     ]
     const { items: fixed, changed } = sanitizeItems(items)
     expect(changed).toBe(true)
-    const m1 = LexoRank.parse(fixed[0].mealOrder)
-    const m2 = LexoRank.parse(fixed[1].mealOrder)
+    const m1 = LexoRank.parse(fixed[0]!.mealOrder!)
+    const m2 = LexoRank.parse(fixed[1]!.mealOrder!)
     expect(m2.compareTo(m1)).toBeGreaterThan(0)
+  })
+
+  test('does not assign mealOrder to section rows', () => {
+    const a = LexoRank.middle()
+    const items = [
+      { id: 's', mealId: 'm1', isSection: true, listOrder: rank(a) },
+      { id: '1', mealId: 'm1', listOrder: rank(a.genNext()) },
+    ]
+    const { items: fixed } = sanitizeItems(items)
+    expect(fixed[0]!.mealOrder).toBeUndefined()
+    expect(fixed[1]!.mealOrder).toBeDefined()
   })
 
   test('preserves unknown item fields', () => {
@@ -73,9 +123,9 @@ describe('sanitizeItems', () => {
       },
     ]
     const { items: fixed } = sanitizeItems(items)
-    expect(fixed[0].overrideQuantity).toBe('2 cup')
-    expect(fixed[0].overrideBase).toBe('1.13 cup')
-    expect(fixed[0].someFutureField).toEqual({ nested: true })
+    expect(fixed[0]!.overrideQuantity).toBe('2 cup')
+    expect(fixed[0]!.overrideBase).toBe('1.13 cup')
+    expect(fixed[0]!.someFutureField).toEqual({ nested: true })
   })
 
   test('drops RTDB array holes and tolerates object-shaped items', () => {

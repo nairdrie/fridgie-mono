@@ -6,7 +6,7 @@ import { auth } from '@/middleware/auth'
 import { groupAuth } from '@/middleware/groupAuth'
 import { type Item, type Meal, type Recipe } from '@/utils/types'
 import { mutateList } from '@/utils/listStore'
-import { safeParseRank, sanitizeItems } from '@/utils/rank'
+import { maxRank, sanitizeItems } from '@/utils/rank'
 import { normalizeQuantity } from '@/utils/quantity'
 
 const route = new Hono()
@@ -48,8 +48,10 @@ route.post('/', groupAuth, async (c) => {
             // below can't crash, and keeps unknown item fields intact.
             const { items: currentItems } = sanitizeItems(current.items)
 
-            const lastOrder = currentItems[currentItems.length - 1]?.listOrder
-            let listRank = safeParseRank(lastOrder) ?? LexoRank.middle()
+            // Rank off the MAXIMUM existing rank, not the last array element —
+            // the stored array isn't necessarily in rank order, and taking the
+            // tail scattered new ingredients into the middle of the user's list.
+            let listRank = maxRank(currentItems, 'listOrder') ?? LexoRank.middle()
             let mealRank = LexoRank.middle()
 
             const newItems: Item[] = (recipe.ingredients || []).map((ingredient) => {

@@ -5,8 +5,11 @@ import { groupAuth } from '@/middleware/groupAuth'
 import { auth } from '@/middleware/auth'
 import { sanitizeItems } from '@/utils/rank'
 import { mutateList } from '@/utils/listStore'
+import type { ListSort } from '@/utils/types'
 
 const route = new Hono()
+
+const LIST_SORTS: ListSort[] = ['alphabetical', 'category', 'custom']
 
 route.use('*', auth, groupAuth)
 
@@ -42,6 +45,13 @@ route.post('/', async (c) => {
 
   if (payload.items !== undefined) {
     payload.items = sanitizeItems(payload.items).items
+  }
+
+  // `sort` is a closed union the client exhaustively switches on. Persisting
+  // anything outside it (e.g. 'Category') leaves the sort modal with nothing
+  // selected and the list falling through every branch.
+  if (payload.sort !== undefined && !LIST_SORTS.includes(payload.sort)) {
+    payload.sort = 'custom'
   }
 
   const result = await mutateList(groupId!, id, (current) => ({ ...current, ...payload }), {

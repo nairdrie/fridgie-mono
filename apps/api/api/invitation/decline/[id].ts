@@ -25,7 +25,10 @@ route.post('/', async (c) => {
 
     const invitation = invitationDoc.data() as GroupInvitation;
 
-    if (invitation.inviteeUid !== uid) {
+    // The invitee declines; the inviter revokes. Both end up deleting the same
+    // document, and the group owner's "Revoke" button posts here — it used to
+    // 403 for them every time, so a pending invite could never be withdrawn.
+    if (invitation.inviteeUid !== uid && invitation.inviterUid !== uid) {
       return c.json({ error: 'Forbidden' }, 403);
     }
 

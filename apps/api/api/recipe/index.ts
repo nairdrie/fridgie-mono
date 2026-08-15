@@ -19,8 +19,20 @@ route.use('*', auth)
  */
 route.post('/', async (c) => {
   const uid = c.get('uid')
-  // ownership/lineage fields are server-managed — never trust them from the body
-  const { id, createdBy: _cb, createdAt: _ca, forkedFromId: _ff, ...recipeDetails } = await c.req.json()
+  // Ownership/lineage fields are server-managed — never trust them from the body.
+  // authorName/authorUid/lastAte are DERIVED per-request from createdBy and must
+  // be stripped too: the client round-trips them, and writing them back stamped
+  // the original author onto every fork.
+  const {
+    id,
+    createdBy: _cb,
+    createdAt: _ca,
+    forkedFromId: _ff,
+    authorName: _an,
+    authorUid: _au,
+    lastAte: _la,
+    ...recipeDetails
+  } = await c.req.json()
 
   if (!id) {
     const data = { ...recipeDetails, createdBy: uid, createdAt: new Date() }
@@ -41,8 +53,11 @@ route.post('/', async (c) => {
 
   if (existing.createdBy && existing.createdBy !== uid) {
     const rootId = existing.forkedFromId || id
+    // A fork starts its own life: engagement counters belong to the original and
+    // must not be copied, or every fork inherits the source's popularity.
+    const { popularity, ratingCount, ratingTotal, ...carryOver } = existing
     const forkData = {
-      ...existing,
+      ...carryOver,
       ...recipeDetails,
       createdBy: uid,
       createdAt: new Date(),

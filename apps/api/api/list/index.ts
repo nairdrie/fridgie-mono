@@ -4,29 +4,40 @@ import { LexoRank } from 'lexorank'
 import { v4 as uuid } from 'uuid'
 import { groupAuth } from '@/middleware/groupAuth'
 import { auth } from '@/middleware/auth'
-import {  addWeeks, startOfWeek } from 'date-fns' // isSameDay is no longer needed
-import { toZonedTime, fromZonedTime } from 'date-fns-tz';
+import { addWeeks, format, startOfWeek } from 'date-fns'
+import { fromZonedTime, toZonedTime } from 'date-fns-tz';
 
 const route = new Hono()
 
 route.use('*', auth, groupAuth)
 
 /**
- * Calculates a date function (like startOfWeek) relative to a specific timezone.
- * @param date The UTC date to calculate from (e.g., new Date())
- * @param tz The IANA timezone (e.g., 'America/Toronto')
- * @param fn The date-fns function to call (e.g., startOfWeek)
- * @param options The options for the date-fns function (e.g., { weekStartsOn: 0 })
+ * The Sunday starting the caller's local week, as a bare `yyyy-MM-dd` key.
+ *
+ * weekStart used to be persisted as a UTC *instant* (`fromZonedTime(...)
+ * .toISOString()`). For every zone east of Greenwich that instant falls on the
+ * previous UTC day, so the client — which reads `weekStart.slice(0, 10)` as a
+ * local date — saw Saturday and shifted the entire app back one week. Keeping
+ * the value in local calendar fields and never round-tripping through UTC also
+ * makes the arithmetic immune to DST transitions across UTC+0.
  */
-const calcInTimezone = (date:any, tz:any, fn:any, options:any) => {
-  // 1. Get a date object representing the local time in the target zone
-  const zonedDate = toZonedTime(date, tz)
-  
-  // 2. Run the function (e.g., startOfWeek) on that local date
-  const resultDate = options ? fn(zonedDate, options) : fn(zonedDate)
-  
-  // 3. Convert the resulting local date back to its true UTC timestamp
-  return fromZonedTime(resultDate, tz)
+const localWeekKeys = (now: Date, tz: string) => {
+  const zonedNow = toZonedTime(now, tz)
+  const thisWeekLocal = startOfWeek(zonedNow, { weekStartsOn: 0 })
+  const nextWeekLocal = addWeeks(thisWeekLocal, 1)
+  return {
+    thisWeek: format(thisWeekLocal, 'yyyy-MM-dd'),
+    nextWeek: format(nextWeekLocal, 'yyyy-MM-dd'),
+    // What the old code would have written for the same week, so pre-existing
+    // lists are still recognised and we don't create duplicates on rollout.
+    legacyThisWeek: fromZonedTime(thisWeekLocal, tz).toISOString().substring(0, 10),
+    legacyNextWeek: fromZonedTime(nextWeekLocal, tz).toISOString().substring(0, 10),
+  }
+}
+
+const matchesWeek = (stored: unknown, ...keys: string[]) => {
+  const value = typeof stored === 'string' ? stored : ''
+  return keys.some((k) => value.startsWith(k))
 }
 
 // The `createListForWeek` helper function is no longer needed
@@ -51,29 +62,19 @@ route.get('/', async (c) => {
       ...listData,
     }));
 
-    // --- TIMEZONE FIX ---
-    const now = new Date()
-    const weekOptions = { weekStartsOn: 0 } // Sunday
+    const keys = localWeekKeys(new Date(), clientTz)
 
-    // Use the helper to get the start of the week *in the client's timezone*
-    const thisWeekStart = calcInTimezone(now, clientTz, startOfWeek, weekOptions)
-    
-    // addWeeks works on the resulting UTC date, which is correct
-    const nextWeekStart = addWeeks(thisWeekStart, 1)
-
-    // These comparisons are still correct
-    const thisWeekStartStr = thisWeekStart.toISOString().substring(0, 10)
-    const nextWeekStartStr = nextWeekStart.toISOString().substring(0, 10)
-
-    const hasThisWeek = allLists.some(list => list.weekStart.startsWith(thisWeekStartStr))
-    const hasNextWeek = allLists.some(list => list.weekStart.startsWith(nextWeekStartStr))
+    const hasThisWeek = allLists.some(list =>
+      matchesWeek(list.weekStart, keys.thisWeek, keys.legacyThisWeek))
+    const hasNextWeek = allLists.some(list =>
+      matchesWeek(list.weekStart, keys.nextWeek, keys.legacyNextWeek))
 
     let listsWereCreated = false
 
     if (!hasThisWeek) {
       const id = uuid()
       data[id] = {
-        weekStart: thisWeekStart.toISOString(), // Correct UTC timestamp
+        weekStart: keys.thisWeek, // bare local yyyy-MM-dd Sunday
         items: [{
           id: uuid(),
           text: '',
@@ -89,7 +90,7 @@ route.get('/', async (c) => {
     if (!hasNextWeek) {
       const id = uuid()
       data[id] = {
-        weekStart: nextWeekStart.toISOString(), // Correct UTC timestamp
+        weekStart: keys.nextWeek, // bare local yyyy-MM-dd Sunday
         items: [{
           id: uuid(),
           text: '',
@@ -141,9 +142,17 @@ route.post('/', async (c) => {
   const { weekStart } = await c.req.json()
   if (!weekStart) return c.json({ error: 'Missing weekStart in body' }, 400)
 
+  // Store the bare local date key the client sent. Re-deriving it via
+  // `new Date(weekStart).toISOString()` would reinterpret a bare `yyyy-MM-dd`
+  // as UTC midnight and shift it a day for anyone west of Greenwich.
+  const weekStartKey = String(weekStart).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartKey)) {
+    return c.json({ error: 'weekStart must be a yyyy-MM-dd date key' }, 400)
+  }
+
   const id = uuid()
   const newListData = {
-    weekStart: new Date(weekStart).toISOString(),
+    weekStart: weekStartKey,
     items: [{
       id: uuid(),
       text: '',

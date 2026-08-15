@@ -1,0 +1,10 @@
+{
+  "name": "@fridgie/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Types and pure logic shared by apps/api and apps/mobile. Source-only — no build step.",
+  "type": "module",
+  "dependencies": {
+    "lexorank": "^1.0.5"
+  }
+}

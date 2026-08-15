@@ -31,7 +31,7 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
-import { addUserCookbookRecipe, categorizeList, getUserCookbook, listenToList, removeUserCookbookRecipe, scheduleMealRating, updateList } from '../../utils/api';
+import { addUserCookbookRecipe, categorizeList, CLIENT_ID, getUserCookbook, listenToList, removeUserCookbookRecipe, scheduleMealRating, StaleRevError, updateList } from '../../utils/api';
 import { parseWeekStart } from '../../utils/date';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
 
@@ -88,11 +88,20 @@ export default function HomeScreen() {
         setIsFabMenuOpen(false);
     }, [selectedView]);
 
+    // Marks a short window in which the user is actively editing. This is no
+    // longer used to suppress our OWN echo (lastClientId does that precisely);
+    // it only defers applying ANOTHER client's snapshot mid-keystroke. Deferring
+    // is safe now: our next save carries `rev`, so if we did miss someone's
+    // write the server 409s us and we rebase instead of clobbering them.
     const dirtyUntilRef = useRef<number>(0);
     const markDirty = () => {
         const until = Date.now() + 1200;
         dirtyUntilRef.current = until;
     };
+
+    // Last rev we have seen for the selected list, sent with every save so the
+    // server can reject writes built on a stale snapshot.
+    const revRef = useRef<number | undefined>(undefined);
 
     // Animate FAB menu
     useEffect(() => {
@@ -127,6 +136,7 @@ export default function HomeScreen() {
     const applyRemoteList = (list: List) => {
         applyingRemoteRef.current = true;
         hasLoadedRef.current = true;
+        if (typeof list.rev === 'number') revRef.current = list.rev;
 
         const rawItems = Array.isArray(list.items) ? list.items : [];
         // Repair missing/invalid LexoRanks (e.g. legacy 'NEEDS-RANK' rows).
@@ -146,13 +156,31 @@ export default function HomeScreen() {
             return;
         }
         hasLoadedRef.current = false;
+        revRef.current = undefined;
 
         let unsubscribe: () => void;
         const setupListener = async () => {
             try {
                 unsubscribe = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
                     if (!list) return;
-                    if (Date.now() < dirtyUntilRef.current) return;
+
+                    // Our own write echoing back — never re-apply it.
+                    if (list.lastClientId === CLIENT_ID) {
+                        if (typeof list.rev === 'number') revRef.current = list.rev;
+                        return;
+                    }
+
+                    // Server-initiated (add-meal, categorize, migration) — these
+                    // carry no clientId and MUST always be applied. Time-gating
+                    // them is what let a meal added from Explore get silently
+                    // deleted by the next debounced save.
+                    const serverInitiated = list.lastClientId == null;
+
+                    // Another client's edit, while we're mid-keystroke: defer.
+                    // Our next save sends the older rev, so the server 409s it
+                    // and we rebase rather than overwriting their change.
+                    if (!serverInitiated && Date.now() < dirtyUntilRef.current) return;
+
                     applyRemoteList(list);
                 });
             } catch (error) {
@@ -178,7 +206,19 @@ export default function HomeScreen() {
         const groupId = selectedGroup.id;
         const listId = selectedList.id;
         const timeout = setTimeout(() => {
-            updateList(groupId, listId, { items, meals, sort }).catch(console.error);
+            updateList(groupId, listId, { items, meals, sort }, revRef.current)
+                .then(res => { if (typeof res?.rev === 'number') revRef.current = res.rev; })
+                .catch(err => {
+                    if (err instanceof StaleRevError) {
+                        // Someone committed first. Rebase onto their document
+                        // instead of overwriting it; without this the last
+                        // writer silently wins and the other user's edit is gone.
+                        console.warn('List save was stale; rebasing onto rev', err.rev);
+                        applyRemoteList(err.list);
+                        return;
+                    }
+                    console.error(err);
+                });
         }, 500);
         return () => clearTimeout(timeout);
     }, [items, meals, sort, selectedList?.id, selectedGroup?.id]);
@@ -276,11 +316,25 @@ export default function HomeScreen() {
         });
         markDirty();
 
-        // If the list is sorted by category, re-categorize after adding new items.
+        // If the list is sorted by category, re-categorize after adding new
+        // items — passing them explicitly. The old code fired on a 100ms timer
+        // and relied on the 500ms debounced save having landed, which it never
+        // had, so categorize read a snapshot without these ingredients and then
+        // wrote it back, erasing them.
         if (sort === 'category') {
-            setTimeout(async () => {
-                await handleAutoCategorize();
-            }, 100);
+            const base = items
+                .filter(item => item.mealId !== updatedMeal.id)
+                .filter(i => (i.text ?? '').trim() !== '' || i.isSection);
+            let listRank = nextListRank(base);
+            let mealRank = LexoRank.middle();
+            const rankedNewItems = newItems
+                .filter(i => (i.text ?? '').trim() !== '')
+                .map(i => {
+                    listRank = listRank.genNext();
+                    mealRank = mealRank.genNext();
+                    return { ...i, listOrder: listRank.toString(), mealOrder: i.mealOrder ?? mealRank.toString() };
+                });
+            handleAutoCategorize([...base, ...rankedNewItems]).catch(console.error);
         }
     };
 
@@ -318,11 +372,12 @@ export default function HomeScreen() {
         try {
             // 3. Explicitly save the new, UNCATEGORIZED items to Firestore
             if (selectedGroup && selectedList) {
-                await updateList(selectedGroup.id, selectedList.id, {
+                const res = await updateList(selectedGroup.id, selectedList.id, {
                     items: finalNewItems,
                     meals: updatedMeals,
                     sort: sort,
-                });
+                }, revRef.current);
+                if (typeof res?.rev === 'number') revRef.current = res.rev;
             }
 
             // 4. AFTER saving is successful, categorize if needed
@@ -361,7 +416,10 @@ export default function HomeScreen() {
         setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
         markDirty();
         if (updates.dayOfWeek && selectedList) {
-            scheduleMealRating(mealId, selectedList.id, updates.dayOfWeek).catch(console.error);
+            // The server needs an absolute sendAt — only the client knows the
+            // user's zone — so it's derived from the list's local weekStart.
+            scheduleMealRating(mealId, selectedList.id, selectedList.weekStart, updates.dayOfWeek)
+                .catch(console.error);
         }
     };
     

@@ -8,7 +8,7 @@ import { toReadablePhone } from '@/utils/utils';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import { User } from 'firebase/auth';
+
 import { debounce } from 'lodash';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -41,7 +41,7 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     // --- State for the expanded/editing view ---
     const [members, setMembers] = useState<UserProfile[]>([]);
     const [initialMembers, setInitialMembers] = useState<UserProfile[]>([]);
-    const [newlyInvited, setNewlyInvited] = useState<User[]>([]);
+    const [newlyInvited, setNewlyInvited] = useState<UserProfile[]>([]);
     const [pendingInvites, setPendingInvites] = useState<PendingInvitation[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -49,7 +49,7 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     // Editing state
     const [editedName, setEditedName] = useState(group.name);
     const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState<User[]>([]);
+    const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
     const [isSearching, setIsSearching] = useState(false);
 
     const isOwner = auth.currentUser?.uid === group.owner;
@@ -118,12 +118,12 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
         debouncedSearch(text);
     };
 
-    const handleStageInvite = (userToInvite: User) => {
+    const handleStageInvite = (userToInvite: UserProfile) => {
         setNewlyInvited(prev => [...prev, userToInvite]);
         setSearchResults(prev => prev.filter(u => u.uid !== userToInvite.uid));
     };
 
-    const handleRemoveStagedInvite = (userToUninvite: User) => {
+    const handleRemoveStagedInvite = (userToUninvite: UserProfile) => {
         setNewlyInvited(prev => prev.filter(u => u.uid !== userToUninvite.uid));
     };
 
@@ -343,8 +343,8 @@ export default function GroupsScreen() {
     const [isGroupModalVisible, setGroupModalVisible] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState<User[]>([]);
-    const [invitedMembers, setInvitedMembers] = useState<User[]>([]);
+    const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+    const [invitedMembers, setInvitedMembers] = useState<UserProfile[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     
     const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
@@ -380,12 +380,12 @@ export default function GroupsScreen() {
         debouncedSearch(text);
     };
 
-    const handleInviteUser = (userToInvite: User) => {
+    const handleInviteUser = (userToInvite: UserProfile) => {
         setInvitedMembers(prev => [...prev, userToInvite]);
         setSearchResults(prev => prev.filter(u => u.uid !== userToInvite.uid));
     };
 
-    const handleRemoveUser = (userToRemove: User) => {
+    const handleRemoveUser = (userToRemove: UserProfile) => {
         setInvitedMembers(prev => prev.filter(u => u.uid !== userToRemove.uid));
     };
 

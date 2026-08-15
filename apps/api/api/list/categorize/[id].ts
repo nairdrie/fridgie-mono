@@ -28,39 +28,49 @@ route.post('/', async (c) => {
   const groupId = c.req.query('groupId');
   if (!id) return c.text('Missing list ID', 400);
 
-  let originalItems: any[];
+  let originalItems: any[] | undefined;
+  // Blank placeholder rows (every list is created with one `text: ''` item) must
+  // survive categorization without being treated as uncategorizable — otherwise
+  // they get swept into a spurious "Other" section on every single run.
+  let blankItems: any[] = [];
 
-  // ✅ 1. Try to get items from the request body first to avoid race conditions.
+  const isReal = (i: any) => !i?.isSection && String(i?.text ?? '').trim() !== '';
+  const isBlank = (i: any) => !i?.isSection && String(i?.text ?? '').trim() === '';
+
+  // 1. Prefer items from the request body — they carry edits the client hasn't
+  // saved yet. Accept a bare array too, since older clients POST it unwrapped.
   try {
     const body = await c.req.json();
-    if (body && Array.isArray(body.items)) {
-      // If items are provided in the body, use them as the source of truth.
-      originalItems = body.items.filter((i: any) => !i.isSection);
+    const bodyItems = Array.isArray(body) ? body : body?.items;
+    if (Array.isArray(bodyItems)) {
+      originalItems = bodyItems.filter(isReal);
+      blankItems = bodyItems.filter(isBlank);
     }
   } catch (e) {
-    // This will catch errors if the body is empty or not valid JSON.
-    // We'll proceed to fetch from the database in the 'else' block below.
+    // Empty or invalid JSON body — fall through to the stored copy below.
   }
 
-  // ✅ 2. If items were not in the body, fall back to fetching from the database.
-  // @ts-ignore - This check is valid as originalItems would be unassigned.
+  // 2. Otherwise fall back to the database.
   if (!originalItems) {
     const snap = await adminRtdb.ref(`lists/${groupId}/${id}`).once('value');
     const list = snap.val();
     if (!list) return c.text('List not found', 404);
-    originalItems = Array.isArray(list.items)
-      ? list.items.filter((i: any) => !i.isSection)
-      : [];
+    const stored = Array.isArray(list.items) ? list.items : [];
+    originalItems = stored.filter(isReal);
+    blankItems = stored.filter(isBlank);
   }
-  
+
+  // Both branches above assign it; this makes that provable to the compiler.
+  const sourceItems: any[] = originalItems ?? [];
+
   // If there are no items to categorize, return the original list
-  if (originalItems.length === 0) {
-    return c.json(originalItems);
+  if (sourceItems.length === 0) {
+    return c.json([...sourceItems, ...blankItems]);
   }
-  
-  // ✅ 3. Create a lookup map from the now-correctly-sourced originalItems.
+
+  // ✅ 3. Create a lookup map from the now-correctly-sourced items.
   const itemMap = new Map<string, any[]>();
-  for (const item of originalItems) {
+  for (const item of sourceItems) {
     const key = String(item.text ?? '').toLowerCase();
     if (!itemMap.has(key)) {
       itemMap.set(key, []);
@@ -77,7 +87,7 @@ route.post('/', async (c) => {
   const itemsForAI: string[] = [];
   const allCategorizedItems = new Map<string, string[]>();
 
-  for (const item of originalItems) {
+  for (const item of sourceItems) {
     const normalizedText = normalizeItemText(String(item.text ?? ''));
     const cachedCategory = cache[normalizedText];
 
@@ -194,9 +204,23 @@ route.post('/', async (c) => {
     }
   }
 
+  // Blank placeholder rows go back on the end, outside any section.
+  for (const item of blankItems) {
+    newItems.push({ ...item, listOrder: rank.toString() });
+    rank = rank.genNext();
+  }
+
   // Write through the shared list mutator so the doc's rev is bumped and
   // websocket consumers see this as a server-initiated change.
-  const result = await mutateList(groupId!, id, (current) => ({ ...current, items: newItems }));
+  //
+  // `sort` is persisted here too: the client sets sort='category' locally after
+  // calling this, but the very broadcast this write triggers would otherwise
+  // reset it, since a server-initiated snapshot is always applied.
+  const result = await mutateList(groupId!, id, (current) => ({
+    ...current,
+    items: newItems,
+    sort: 'category',
+  }));
   if (result.status === 'missing') return c.text('List not found', 404);
   return c.json(newItems);
 });

@@ -6,11 +6,15 @@
       "@/*": [
         "./*"
       ],
+      "@fridgie/shared/*": [
+        "../../packages/shared/*"
+      ],
     }
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    "../../packages/shared/**/*.ts",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
   ],

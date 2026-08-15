@@ -57,7 +57,10 @@ route.get('/', async (c) => {
             id: hit.objectID,
             name: hit.name,
             description: hit.description,
-            photoURL: hit.photoURL
+            photoURL: hit.photoURL,
+            // Indexed and used by the client for per-cuisine card styling —
+            // dropping it here made every search result render the generic style.
+            tags: hit.tags ?? [],
         }));
 
         const usersFromAlgolia = results[1]?.hits || [];

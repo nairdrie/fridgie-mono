@@ -1,101 +1,10 @@
-export type Item = {
-    id: string;
-    text: string;
-    checked: boolean;
-    listOrder: string; 
-    mealOrder?: string; 
-    isSection: boolean; 
-    mealId?: string;
-    quantity?: string;
-    overrideQuantity?: string;
-    // Aggregated total of all same-named items at the moment overrideQuantity was set.
-    // When the recomputed total no longer matches, the override is stale and ignored.
-    overrideBase?: string;
-  };
-  
-export type List = {
-    id: string; // Firestore document ID
-    weekStart: string;
-    hasContent?: boolean;
-    items: Item[];
-    meals: Meal[];
-    sort?: 'alphabetical' | 'category' | 'custom';
-};
+// The data contract now lives in packages/shared, shared verbatim with the API.
+// `export type *` is fully erased at compile time, so Metro never resolves it.
 
-// types/types.ts
-export interface Group {
-  id: string;
-  name: string;
-  members: UserProfile[];
-  owner: string;
-}
+export type * from '@fridgie/shared/types';
 
-export interface Meal {
-  id: string;
-  listId: string;
-  dayOfWeek?: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
-  name: string;
-  recipeId?: string;
-  addedToCookbook?: boolean; 
-}
-
+// Runtime value — cannot live in the type-only shared package.
 export enum ListView {
   GroceryList = 'list',
-  MealPlan = 'plan'
-}
-
-export interface UserProfile {
-  uid: string;
-  email: string | null;
-  phoneNumber: string | null;
-  photoURL: string | null;
-  displayName?: string | null;
-  followerCount?: number;
-  followingCount?: number;
-  isFollowing?: boolean;
-  // Add other properties from your user document here
-}
-
-export interface MealPreferences {
-  dietaryNeeds?: string[];
-  cookingStyles?: string[];
-  cuisines?: string[];
-  dislikedIngredients?: string;
-  query?: string;
-}
-
-export interface Ingredient {
-  name: string;
-  quantity: string;
-}
-
-export interface Recipe {
-  id:string;
-  name: string;
-  description: string;
-  photoURL?: string;
-  ingredients: Ingredient[];
-  instructions: string[];
-  lastAte?: string;
-  tags?: string[];
-  authorName?: string;
-  authorUid?: string;
-}
-
-export interface PendingInvitation {
-    id: string; // The invitation document ID
-    groupId: string;
-    groupName: string;
-    inviterName: string;
-    invitee: UserProfile; // Enriched with invitee details for the frontend
-}
-
-export interface UserSearchResult {
-  objectID: string; // From Algolia
-  displayName: string;
-  photoURL: string;
-  email: string;
-  followerCount?: number;
-  recipeCount?: number;
-  // Add other fields you indexed, like email
+  MealPlan = 'plan',
 }
