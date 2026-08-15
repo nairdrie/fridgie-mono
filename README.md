@@ -26,12 +26,50 @@ resolution, so Metro and EAS never need to resolve it.
 ## Getting started
 
 ```bash
-# API
-cd apps/api && bun install && bun dev
-
-# Mobile
-cd apps/mobile && npm install && npx expo start
+make setup
 ```
+
+Then add Firebase credentials — **the API exits at startup without them**, since
+it loads the service account at import time. Either drop the service-account
+JSON at `apps/api/utils/firebase-service-account.json`, or:
+
+```bash
+cp apps/api/.env.example apps/api/.env
+```
+
+Then run both with live reload:
+
+```bash
+make dev
+```
+
+That starts the API on `:3000` (prefixed `[api]` output) and Metro in the
+foreground so its interactive keys still work. `EXPO_PUBLIC_API_URL` is wired to
+your current LAN IP automatically, which is what a physical device needs — pass
+`API_URL=...` to override. `make` on its own lists every target, and
+`make doctor` reports on your toolchain.
+
+### iOS
+
+`make ios` builds and launches the dev client in the simulator. It needs **full
+Xcode** — Command Line Tools alone are not enough:
+
+```bash
+# once
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+xcodebuild -runFirstLaunch
+sudo gem install cocoapods
+```
+
+`ios/` is not committed (unlike `android/`); `make ios` generates it via prebuild
+on first run. After the dev client is installed, `make dev` alone is enough —
+Fast Refresh handles JS changes, and you only need to rebuild natively when a
+native dependency or `app.json` changes.
+
+Without Xcode, `make ios-build-cloud` builds a dev client through EAS that you
+install on a physical iPhone; `make dev` then live-reloads it over the LAN. Note
+that Expo Go (`make mobile-go`) will not work for the full app — Google Sign-In
+and the other custom native modules need a dev build.
 
 ## packages/shared
 
