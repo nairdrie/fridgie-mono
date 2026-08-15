@@ -1,0 +1,18 @@
+# Root-level only. Each app keeps its own .gitignore for app-specific rules.
+
+# macOS
+.DS_Store
+
+# editors
+.idea/
+*.swp
+
+# logs
+*.log
+
+# dependencies (belt-and-braces; apps ignore these too)
+node_modules/
+
+# env
+.env
+.env.*.local
