@@ -1,5 +1,7 @@
 import { Item, Meal } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
+import { parseQuantityAndText } from "@/utils/quantity";
+import { nextListRank, safeParseRank } from "@/utils/rank";
 import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
@@ -8,10 +10,6 @@ import { LayoutAnimation, Pressable, StyleSheet, Text, TextInput, TouchableOpaci
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import uuid from 'react-native-uuid';
-import { parseQuantityAndText } from "./QuantityEditorModal";
-
-
-// TODO: delete button on ingredient broken from here. also from list its maybe a little small
 
 const DAYS: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -79,8 +77,11 @@ function MealCard({
     }, [isMealNameEditing]);
 
     const placeholder = useMemo(() => {
-        return mealPlaceholders[Math.floor(Math.random() * mealPlaceholders.length)];
-    }, []);
+        // Deterministic per meal so the placeholder doesn't shuffle on remount.
+        let hash = 0;
+        for (let i = 0; i < meal.id.length; i++) hash = (hash * 31 + meal.id.charCodeAt(i)) | 0;
+        return mealPlaceholders[Math.abs(hash) % mealPlaceholders.length];
+    }, [meal.id]);
     
     const mealNameDisplay = useMemo(() => {
         if (!meal.name || meal.name.length <= 32) {
@@ -162,13 +163,12 @@ function MealCard({
         if (afterIndex < 0 || ingredients.length === 0) {
             mealRank = LexoRank.middle();
         } else {
-            const current = LexoRank.parse(ingredients[afterIndex].mealOrder!);
-            const next = ingredients[afterIndex + 1] ? LexoRank.parse(ingredients[afterIndex + 1].mealOrder!) : current.genNext();
-            mealRank = current.between(next);
+            const current = safeParseRank(ingredients[afterIndex].mealOrder) ?? LexoRank.middle();
+            const next = safeParseRank(ingredients[afterIndex + 1]?.mealOrder);
+            mealRank = next && current.compareTo(next) < 0 ? current.between(next) : current.genNext();
         }
-        
-        const lastItem = allItems[allItems.length - 1];
-        const listRank = lastItem ? LexoRank.parse(lastItem.listOrder).genNext() : LexoRank.middle();
+
+        const listRank = nextListRank(allItems);
 
         const newItem: Item = {
             id: uuid.v4() as string,
@@ -232,7 +232,9 @@ function MealCard({
                     returnKeyType="next"
                 />
                 {isEditing && (
-                    <TouchableOpacity onPress={() => handleDeleteIngredient(item.id)} style={styles.clearButton}>
+                    // onPressIn: the input's onBlur clears editingId and unmounts
+                    // this button before a regular onPress can fire.
+                    <TouchableOpacity onPressIn={() => handleDeleteIngredient(item.id)} style={styles.clearButton} hitSlop={8}>
                         <Text style={styles.clearText}>✕</Text>
                     </TouchableOpacity>
                 )}

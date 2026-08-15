@@ -2,7 +2,8 @@
 import { useLists } from '@/context/ListContext';
 import { List, Recipe } from '@/types/types';
 import { addRecipeToList } from '@/utils/api';
-import { getWeekLabel } from '@/utils/date';
+import { getWeekLabel, parseWeekStart } from '@/utils/date';
+import { startOfWeek } from 'date-fns';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -56,14 +57,10 @@ export default function AddToMealPlanModal({ isVisible, onClose, recipe }: AddTo
 
     const displayLists = useMemo(() => {
         if (!allLists) return [];
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const startOfThisWeek = new Date(today);
-        startOfThisWeek.setDate(today.getDate() - today.getDay());
-        const startOfThisWeekTime = startOfThisWeek.getTime();
+        const startOfThisWeekTime = startOfWeek(new Date(), { weekStartsOn: 0 }).getTime();
         return allLists
-            .filter(list => new Date(list.weekStart).getTime() >= startOfThisWeekTime)
-            .sort((a, b) => new Date(a.weekStart).getTime() - new Date(b.weekStart).getTime());
+            .filter(list => parseWeekStart(list.weekStart).getTime() >= startOfThisWeekTime)
+            .sort((a, b) => parseWeekStart(a.weekStart).getTime() - parseWeekStart(b.weekStart).getTime());
     }, [allLists]);
 
     const handleSelectWeek = async (list: List) => {
@@ -134,7 +131,7 @@ export default function AddToMealPlanModal({ isVisible, onClose, recipe }: AddTo
                                         <View>
                                             <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
                                             <Text style={styles.weekSubText}>
-                                                {new Date(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(new Date(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                {parseWeekStart(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(parseWeekStart(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                             </Text>
                                         </View>
                                         <Ionicons name="chevron-forward" size={22} color="#666" />

@@ -1,6 +1,6 @@
 import { useAuth } from '@/context/AuthContext';
 import { Recipe } from '@/types/types';
-import { addUserCookbookRecipe, getRecipe, getUserCookbook, submitRecipeFeedback } from '@/utils/api';
+import { addUserCookbookRecipe, getRecipe, getUserCookbook, saveRecipe, submitRecipeFeedback, uploadRecipePhoto } from '@/utils/api';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -169,19 +169,21 @@ export default function RateMealScreen() {
 
         if (!result.canceled) {
             const photoUri = result.assets[0].uri;
+            const previousPhotoURL = recipe?.photoURL;
 
-            // [FIX] Update the recipe state to immediately display the new photo
-            // instead of showing an alert.
-            setRecipe(prevRecipe => {
-                if (!prevRecipe) return null;
-                return {
-                    ...prevRecipe,
-                    photoURL: photoUri, // Overwrite with the local file URI
-                };
-            });
+            // Show the local file immediately, then persist it.
+            setRecipe(prevRecipe => prevRecipe ? { ...prevRecipe, photoURL: photoUri } : null);
 
-            // In a real app, you would now trigger an async upload of this photoUri
-            // to your backend and update the permanent recipe photoURL.
+            try {
+                if (!recipe) return;
+                const uploadedUrl = await uploadRecipePhoto(photoUri, recipe.id);
+                const savedRecipe = await saveRecipe({ ...recipe, photoURL: uploadedUrl });
+                setRecipe(savedRecipe);
+            } catch (error) {
+                console.error("Failed to upload recipe photo:", error);
+                setRecipe(prevRecipe => prevRecipe ? { ...prevRecipe, photoURL: previousPhotoURL } : null);
+                Alert.alert("Error", "Could not save the photo. Please try again.");
+            }
         }
     };
 

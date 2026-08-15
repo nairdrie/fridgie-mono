@@ -8,6 +8,9 @@ export type Item = {
     mealId?: string;
     quantity?: string;
     overrideQuantity?: string;
+    // Aggregated total of all same-named items at the moment overrideQuantity was set.
+    // When the recomputed total no longer matches, the override is stale and ignored.
+    overrideBase?: string;
   };
   
 export type List = {

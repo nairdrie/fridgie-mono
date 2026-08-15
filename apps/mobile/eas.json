@@ -18,7 +18,7 @@
     "production": {
       "developmentClient": false,
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
       }
     }
   },

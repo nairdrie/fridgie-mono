@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import Modal from 'react-native-modal';
 import Animated, { interpolate, interpolateColor, useAnimatedStyle, useDerivedValue, withTiming } from 'react-native-reanimated';
-import { getWeekLabel } from '../utils/date';
+import { getWeekLabel, parseWeekStart } from '../utils/date';
 import GroupIndicator from './GroupIndicator';
 
 const DEVICE_HEIGHT =
@@ -110,7 +110,7 @@ export default function ListHeader() {
                   <View style={styles.weekSelectorText}>
                     <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
                     <Text style={styles.subtitle}>
-                      {new Date(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(new Date(selectedList.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      {parseWeekStart(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(parseWeekStart(selectedList.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     </Text>
                   </View>
                   
@@ -177,8 +177,8 @@ export default function ListHeader() {
                       <View>
                         <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
                         <Text style={styles.weekRange}>
-                          {new Date(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
-                          {new Date(new Date(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
+                          {parseWeekStart(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
+                          {new Date(parseWeekStart(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
                             undefined,
                             { month: 'short', day: 'numeric' }
                           )}

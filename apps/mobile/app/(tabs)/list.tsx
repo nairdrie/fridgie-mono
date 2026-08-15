@@ -32,9 +32,8 @@ import {
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
 import { addUserCookbookRecipe, categorizeList, getUserCookbook, listenToList, removeUserCookbookRecipe, scheduleMealRating, updateList } from '../../utils/api';
-
-// TODO: need a loading indicator when categorizing
-// TODO: if the user already categorized, adding a meal should also categorize
+import { parseWeekStart } from '../../utils/date';
+import { nextListRank, sanitizeListOrders } from '../../utils/rank';
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -105,25 +104,48 @@ export default function HomeScreen() {
         transform: [{ rotate: `${fabAnimation.value * 45}deg` }],
     }));
 
-    const secondaryFabStyle = (index: number) => useAnimatedStyle(() => {
-        const translateY = fabAnimation.value * -(80 + (index * 65));
-        return {
-            transform: [{ translateY }],
-            opacity: fabAnimation.value,
-        };
-    });
+    const fabStyle0 = useAnimatedStyle(() => ({
+        transform: [{ translateY: fabAnimation.value * -80 }],
+        opacity: fabAnimation.value,
+    }));
+    const fabStyle1 = useAnimatedStyle(() => ({
+        transform: [{ translateY: fabAnimation.value * -145 }],
+        opacity: fabAnimation.value,
+    }));
 
-    const fabStyle0 = secondaryFabStyle(0);
-    const fabStyle1 = secondaryFabStyle(1);
 
+    // True while the latest items/meals/sort state came from the server (WS or
+    // categorize) rather than a local edit — those changes must NOT be saved
+    // back, or every broadcast would trigger a write and clients would
+    // ping-pong saves at each other.
+    const applyingRemoteRef = useRef(false);
+    // No saves until the first server snapshot for the current list has
+    // arrived; otherwise the debounced save could overwrite the list with the
+    // initial empty state.
+    const hasLoadedRef = useRef(false);
+
+    const applyRemoteList = (list: List) => {
+        applyingRemoteRef.current = true;
+        hasLoadedRef.current = true;
+
+        const rawItems = Array.isArray(list.items) ? list.items : [];
+        // Repair missing/invalid LexoRanks (e.g. legacy 'NEEDS-RANK' rows).
+        const withOrder = sanitizeListOrders(rawItems)
+            .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
+
+        setItems(withOrder.length > 0 ? withOrder : [{ id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false }]);
+        setMeals(Array.isArray(list.meals) ? list.meals : []);
+        setSort(list.sort || 'custom');
+    };
 
     // Handles ALL incoming data (Initial Fetch + Real-time Updates)
     useEffect(() => {
-        if (!selectedList || !selectedGroup) {
+        if (!selectedList?.id || !selectedGroup?.id) {
             setItems([]);
             setMeals([]);
             return;
         }
+        hasLoadedRef.current = false;
 
         let unsubscribe: () => void;
         const setupListener = async () => {
@@ -131,15 +153,7 @@ export default function HomeScreen() {
                 unsubscribe = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
                     if (!list) return;
                     if (Date.now() < dirtyUntilRef.current) return;
-                    
-                    const rawItems = Array.isArray(list.items) ? list.items : [];
-                    const withOrder = rawItems
-                        .map((item: Item) => ({ ...item, listOrder: item.listOrder ?? LexoRank.middle().toString() }))
-                        .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
-                    
-                    setItems(withOrder.length > 0 ? withOrder : [{ id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false }]);
-                    setMeals(Array.isArray(list.meals) ? list.meals : []);
-                    setSort(list.sort || 'custom'); // Update sort state
+                    applyRemoteList(list);
                 });
             } catch (error) {
                 console.error("Failed to set up list listener:", error);
@@ -149,16 +163,25 @@ export default function HomeScreen() {
         return () => {
             if (unsubscribe) unsubscribe();
         };
-    }, [selectedList, selectedGroup]);
+        // Depend on stable IDs: presence updates re-create the group object and
+        // would otherwise tear the socket down on every status change.
+    }, [selectedList?.id, selectedGroup?.id]);
 
     // Handles ALL outgoing data (Debounced Saving)
      useEffect(() => {
-        if (!selectedList?.id || !selectedGroup) return;
+        if (!selectedList?.id || !selectedGroup?.id) return;
+        if (!hasLoadedRef.current) return;
+        if (applyingRemoteRef.current) {
+            applyingRemoteRef.current = false;
+            return;
+        }
+        const groupId = selectedGroup.id;
+        const listId = selectedList.id;
         const timeout = setTimeout(() => {
-            updateList(selectedGroup.id, selectedList.id, { items, meals, sort }).catch(console.error);
+            updateList(groupId, listId, { items, meals, sort }).catch(console.error);
         }, 500);
         return () => clearTimeout(timeout);
-    }, [items, meals, sort, selectedList?.id, selectedGroup]);
+    }, [items, meals, sort, selectedList?.id, selectedGroup?.id]);
 
     const focusAtEnd = (id: string) => {
         const ref = inputRefs.current[id];
@@ -232,12 +255,24 @@ export default function HomeScreen() {
 
     const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
         setMeals(prevMeals => prevMeals.map(meal => (meal.id === updatedMeal.id ? updatedMeal : meal)));
-        
+
         // Add new items to the list
         setItems(currentItems => {
-            const base = currentItems.filter(item => item.mealId !== updatedMeal.id);
-            const allNewItems = [...base, ...newItems].filter(i => (i.text ?? '').trim() !== '' || i.isSection);
-            return allNewItems;
+            const base = currentItems
+                .filter(item => item.mealId !== updatedMeal.id)
+                .filter(i => (i.text ?? '').trim() !== '' || i.isSection);
+            // Modal items arrive with placeholder orders ('NEEDS-RANK'); assign
+            // real ranks here or LexoRank.parse will throw on the next insert.
+            let listRank = nextListRank(base);
+            let mealRank = LexoRank.middle();
+            const rankedNewItems = newItems
+                .filter(i => (i.text ?? '').trim() !== '')
+                .map(i => {
+                    listRank = listRank.genNext();
+                    mealRank = mealRank.genNext();
+                    return { ...i, listOrder: listRank.toString(), mealOrder: i.mealOrder ?? mealRank.toString() };
+                });
+            return [...base, ...rankedNewItems];
         });
         markDirty();
 
@@ -264,14 +299,12 @@ export default function HomeScreen() {
         // 1. Prepare the new state variables
         const updatedMeals = [...meals, ...newMeals];
 
-        let lastRank =
-            items.length > 0 && items[items.length - 1].text !== ''
-                ? LexoRank.parse(items[items.length - 1].listOrder)
-                : LexoRank.middle();
-
+        let lastRank = nextListRank(items);
+        let mealRank = LexoRank.middle();
         const rankedNewItems = newItemsFromModal.map(item => {
             lastRank = lastRank.genNext();
-            return { ...item, listOrder: lastRank.toString() };
+            mealRank = mealRank.genNext();
+            return { ...item, listOrder: lastRank.toString(), mealOrder: item.mealOrder ?? mealRank.toString() };
         });
 
         const isSingleEmpty = items.length === 1 && (items[0].text ?? '') === '' && !items[0].isSection;
@@ -348,7 +381,7 @@ export default function HomeScreen() {
 
         try {
             const newItems = await categorizeList(selectedGroup.id, selectedList.id, currentItems);
-            setItems(newItems);
+            setItems(sanitizeListOrders(newItems));
             setSort('category'); // Set sort mode to category
             setEditingId('');
         } catch (err) {
@@ -402,8 +435,7 @@ export default function HomeScreen() {
     }
 
     if (!selectedList) return;
-    const lastOrder = items.length > 0 && items[items.length - 1].text !== '' ? LexoRank.parse(items[items.length - 1].listOrder) : LexoRank.middle();
-    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: lastOrder.genNext().toString(), isSection: isSection };
+    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: isSection };
     const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
     setItems(newItems);
     setEditingId(newItem.id);
@@ -444,23 +476,24 @@ export default function HomeScreen() {
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
 
+                    // parseWeekStart interprets weekStart in LOCAL time; a bare
+                    // `new Date('yyyy-MM-dd')` would be UTC midnight (the
+                    // previous day across the Americas).
+                    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const mealDateOf = (dayOfWeek: string) => {
+                        const date = parseWeekStart(selectedList.weekStart);
+                        date.setDate(date.getDate() + DAY_NAMES.indexOf(dayOfWeek));
+                        return date;
+                    };
                     const unratedPastMeals = meals.filter(meal => {
                         if (!meal.dayOfWeek || !meal.recipeId || ratedMealIds[meal.id]) return false;
-                        const weekStartDate = new Date(selectedList.weekStart);
-                        const dayIndex = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(meal.dayOfWeek);
-                        const mealDate = new Date(weekStartDate.getTime());
-                        mealDate.setDate(weekStartDate.getDate() + dayIndex);
-                        return mealDate < today;
+                        return mealDateOf(meal.dayOfWeek) < today;
                     });
 
                     if (unratedPastMeals.length > 0) {
-                        const mealToRate = unratedPastMeals.sort((a, b) => {
-                            const dateA = new Date(selectedList.weekStart);
-                            dateA.setDate(dateA.getDate() + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(a.dayOfWeek!));
-                            const dateB = new Date(selectedList.weekStart);
-                            dateB.setDate(dateB.getDate() + ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].indexOf(b.dayOfWeek!));
-                            return dateB.getTime() - dateA.getTime();
-                        })[0];
+                        const mealToRate = unratedPastMeals.sort((a, b) =>
+                            mealDateOf(b.dayOfWeek!).getTime() - mealDateOf(a.dayOfWeek!).getTime()
+                        )[0];
 
                         router.push({
                             pathname: '/rate-meal',
@@ -597,9 +630,18 @@ export default function HomeScreen() {
             <View style={styles.bottomActionContainer}>
                  {/* --- Start of new/moved code: Sort Button --- */}
                  {selectedView === ListView.GroceryList && (
-                    <TouchableOpacity style={styles.sortButton} onPress={() => setIsSortModalVisible(true)}>
-                        <Ionicons name={'swap-vertical-outline'} size={20} color={primary} />
-                        <Text style={styles.sortButtonText}>{getSortIconText()}</Text>
+                    <TouchableOpacity style={styles.sortButton} onPress={() => setIsSortModalVisible(true)} disabled={isCategorizing}>
+                        {isCategorizing ? (
+                            <>
+                                <ActivityIndicator size="small" color={primary} />
+                                <Text style={styles.sortButtonText}>Sorting…</Text>
+                            </>
+                        ) : (
+                            <>
+                                <Ionicons name={'swap-vertical-outline'} size={20} color={primary} />
+                                <Text style={styles.sortButtonText}>{getSortIconText()}</Text>
+                            </>
+                        )}
                     </TouchableOpacity>
                  )}
                  { selectedView != ListView.GroceryList && (

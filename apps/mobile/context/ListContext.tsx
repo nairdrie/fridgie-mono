@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { List, ListView } from '../types/types';
 import { ApiError, getLists } from '../utils/api';
+import { parseWeekStart } from '../utils/date';
 import { GroupWithPresence, useAuth } from './AuthContext';
 
 interface ListContextType {
@@ -42,7 +43,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
 
         if (fetchedLists.length > 0) {
           // Your existing logic to select the most recent list by default
-          const sortedLists = [...fetchedLists].sort((a, b) => new Date(b.weekStart).getTime() - new Date(a.weekStart).getTime());
+          const sortedLists = [...fetchedLists].sort((a, b) => parseWeekStart(b.weekStart).getTime() - parseWeekStart(a.weekStart).getTime());
           const listWithContent = sortedLists.find(list => list.hasContent);
           setSelectedList(listWithContent || sortedLists[0]);
         } else {
