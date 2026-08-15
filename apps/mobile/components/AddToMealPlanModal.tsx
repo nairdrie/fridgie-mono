@@ -2,7 +2,7 @@
 import { useLists } from '@/context/ListContext';
 import { List, Recipe } from '@/types/types';
 import { addRecipeToList } from '@/utils/api';
-import { getWeekLabel, parseWeekStart } from '@/utils/date';
+import { getWeekLabel, parseWeekEnd, parseWeekStart } from '@/utils/date';
 import { startOfWeek } from 'date-fns';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -131,7 +131,7 @@ export default function AddToMealPlanModal({ isVisible, onClose, recipe }: AddTo
                                         <View>
                                             <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
                                             <Text style={styles.weekSubText}>
-                                                {parseWeekStart(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(parseWeekStart(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                {parseWeekStart(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {parseWeekEnd(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                             </Text>
                                         </View>
                                         <Ionicons name="chevron-forward" size={22} color="#666" />

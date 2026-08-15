@@ -8,35 +8,46 @@ const route = new Hono();
 
 route.use('*', auth, groupAuth, groupOwnerAuth);
 
+/**
+ * PUT /api/group/:id
+ * Body: { name?, addMembers?: string[], removeMembers?: string[] }
+ *
+ * Membership is applied as a DELTA via per-uid paths. It used to accept an
+ * absolute `members` array and replace the whole map, so anyone who accepted an
+ * invitation while the owner had the editor open was silently ejected — the
+ * owner only had to rename the group to wipe them out.
+ */
 route.put('/', async (c) => {
   const groupId = c.req.param('id');
-  // Expect name and/or members in the request body
-  const { name, members } = await c.req.json<{ name?: string; members?: string[] }>();
+  const { name, addMembers, removeMembers } = await c.req.json<{
+    name?: string;
+    addMembers?: string[];
+    removeMembers?: string[];
+  }>();
 
-  // Ensure at least one field is being updated
-  if (!name && !members) {
-    return c.json({ error: 'Name or members is required for an update' }, 400);
+  const toAdd = Array.isArray(addMembers) ? addMembers : [];
+  const toRemove = Array.isArray(removeMembers) ? removeMembers : [];
+
+  if (!name && toAdd.length === 0 && toRemove.length === 0) {
+    return c.json({ error: 'Name, addMembers or removeMembers is required for an update' }, 400);
   }
 
-  const updates: { [key: string]: any } = {};
-
-  if (name) {
-    updates.name = name;
-  }
-
-  if (members) {
-    // CORRECT: Transform the array of member UIDs into the required Firebase structure:
-    // from: ["uid1", "uid2"]
-    // to:   { "uid1": true, "uid2": true }
-    const membersMap = members.reduce((acc, uid) => {
-      acc[uid] = true;
-      return acc;
-    }, {} as Record<string, boolean>);
-    updates.members = membersMap;
-  }
+  const groupRef = adminRtdb.ref(`groups/${groupId}`);
 
   try {
-    await adminRtdb.ref(`groups/${groupId}`).update(updates);
+    const ownerSnap = await groupRef.child('owner').once('value');
+    const owner = ownerSnap.val();
+    if (toRemove.includes(owner)) {
+      return c.json({ error: 'Cannot remove the group owner' }, 400);
+    }
+
+    const updates: { [key: string]: any } = {};
+    if (name) updates.name = name;
+    for (const uid of toAdd) updates[`members/${uid}`] = true;
+    // null deletes just this child, leaving every other member untouched.
+    for (const uid of toRemove) updates[`members/${uid}`] = null;
+
+    await groupRef.update(updates);
     return c.json({ success: true });
   } catch (error) {
     console.error(`Failed to update group ${groupId}:`, error);

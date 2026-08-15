@@ -14,6 +14,7 @@ export {
   parseQuantity,
   parseQuantityAndText,
   preNormalize,
+  quantitiesEquivalent,
   singularizeUnit,
 } from '@fridgie/shared/quantity'
 

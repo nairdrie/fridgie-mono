@@ -154,7 +154,13 @@ export default function RateMealScreen() {
         router.replace('/list');
     };
 
+    // POST /recipe FORKS a recipe you don't own, returning a new id. This screen
+    // has no group/list context to re-point the meal at that fork, so the photo
+    // would land on a copy nobody ever sees. Only the owner can add one here.
+    const canEditPhoto = !!recipe && !!user && recipe.createdBy === user.uid;
+
     const handlePickImage = async () => {
+        if (!canEditPhoto) return;
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
             Alert.alert('Sorry, we need camera roll permissions to make this work!');
@@ -282,14 +288,14 @@ export default function RateMealScreen() {
                                 <Text style={styles.title}>Glad you liked it!</Text>
                                 {recipe.photoURL ? (
                                     <Image source={{ uri: recipe.photoURL }} style={styles.mainImage} />
-                                ) : (
+                                ) : canEditPhoto ? (
                                     <View style={styles.mainImage}>
                                         <TouchableOpacity style={styles.actionChip} onPress={handlePickImage}>
                                             <Ionicons name="camera-outline" size={16} color="white" />
                                             <Text style={styles.actionChipText}>Add a Photo</Text>
                                         </TouchableOpacity>
                                     </View>
-                                )}
+                                ) : null}
                                 {!isInCookbook && (
                                     <>
                                         <Text style={styles.subtitle}>Would you like to add it to your personal cookbook for next time?</Text>

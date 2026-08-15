@@ -57,10 +57,18 @@ export function nextRank(items: RankableItem[], field: RankField = 'listOrder'):
 function repairRanksInPlace(items: RankableItem[], field: RankField): boolean {
   let changed = false;
   let prev: LexoRank | null = null;
+  const seen = new Set<string>();
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i]!;
     let rank = safeParseRank(item[field]);
+
+    // A rank already taken by an earlier item is as broken as an unparseable
+    // one: the tie falls back to array order, which differs per client, so two
+    // devices render the list differently and never converge. Note we only
+    // reject exact DUPLICATES — a rank that merely sorts before its predecessor
+    // is fine, because the stored array is not guaranteed to be in rank order.
+    if (rank && seen.has(rank.toString())) rank = null;
 
     if (!rank) {
       let next: LexoRank | null = null;
@@ -80,6 +88,7 @@ function repairRanksInPlace(items: RankableItem[], field: RankField): boolean {
       changed = true;
     }
 
+    seen.add(rank.toString());
     if (!prev || rank.compareTo(prev) > 0) prev = rank;
   }
 

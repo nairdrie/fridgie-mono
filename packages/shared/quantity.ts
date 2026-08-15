@@ -272,6 +272,30 @@ export function aggregateQuantities(rawQuantities: (string | undefined)[]): stri
 }
 
 /**
+ * True when two quantity strings mean the same thing.
+ *
+ * Compare with this rather than `a === b` when deciding whether a stored
+ * snapshot is still current: string equality also fails on cosmetic differences
+ * ("2 cup" vs "2 cups", "0.5" vs ".5"), which would mark a perfectly valid
+ * quantity override stale and silently discard the user's edit.
+ */
+export function quantitiesEquivalent(a?: string | null, b?: string | null): boolean {
+  const rawA = (a ?? '').trim();
+  const rawB = (b ?? '').trim();
+  if (rawA === rawB) return true;
+
+  const pa = parseQuantity(rawA);
+  const pb = parseQuantity(rawB);
+  if (!pa || !pb) return false;
+
+  const unitA = pa.unit ? singularizeUnit(pa.unit) : null;
+  const unitB = pb.unit ? singularizeUnit(pb.unit) : null;
+  if (unitA !== unitB) return false;
+
+  return Math.abs(pa.value - pb.value) < 0.005;
+}
+
+/**
  * Splits an item's text into a quantity and the remaining name.
  * "2 cups flour" → { quantity: "2 cup", text: "flour" }
  * "2 chicken breasts" → { quantity: "2", text: "chicken breasts" }

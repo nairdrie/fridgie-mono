@@ -80,6 +80,36 @@ describe('sanitizeItems', () => {
     expect(LexoRank.parse(broken.listOrder!).compareTo(c)).toBeGreaterThan(0)
   })
 
+  test('re-ranks exact duplicates so ordering never falls back to array position', () => {
+    // The drag handler used to hand two items byte-identical ranks; a tie is
+    // then broken by array order, which differs per device.
+    const a = LexoRank.middle()
+    const items = [
+      { id: '1', listOrder: rank(a) },
+      { id: '2', listOrder: rank(a) },
+      { id: '3', listOrder: rank(a.genNext()) },
+    ]
+    const { items: fixed, changed } = sanitizeItems(items)
+    expect(changed).toBe(true)
+
+    const ranks = fixed.map((i) => i.listOrder)
+    expect(new Set(ranks).size).toBe(3)
+  })
+
+  test('leaves a legitimately unsorted array alone', () => {
+    // Array order is NOT rank order, so a rank that merely sorts before its
+    // predecessor is valid and must not be rewritten.
+    const a = LexoRank.middle()
+    const b = a.genNext()
+    const items = [
+      { id: 'b', listOrder: rank(b) },
+      { id: 'a', listOrder: rank(a) },
+    ]
+    const { items: fixed, changed } = sanitizeItems(items)
+    expect(changed).toBe(false)
+    expect(fixed.map((i) => i.listOrder)).toEqual([rank(b), rank(a)])
+  })
+
   test('migrates the legacy order key', () => {
     const items = [{ id: '1', text: '', checked: false, order: LexoRank.middle().toString() }]
     const { items: fixed, changed } = sanitizeItems(items)

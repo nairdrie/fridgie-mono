@@ -1,7 +1,7 @@
 import { Item, Meal } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
 import { parseQuantityAndText } from "@/utils/quantity";
-import { nextListRank, safeParseRank } from "@/utils/rank";
+import { nextListRank, rankAfter, safeParseRank } from "@/utils/rank";
 import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
@@ -159,14 +159,13 @@ function MealCard({
 
     const handleAddIngredient = (afterIndex: number | undefined) => {
         if(afterIndex === undefined) afterIndex = ingredients.length -1;
-        let mealRank: LexoRank;
-        if (afterIndex < 0 || ingredients.length === 0) {
-            mealRank = LexoRank.middle();
-        } else {
-            const current = safeParseRank(ingredients[afterIndex].mealOrder) ?? LexoRank.middle();
-            const next = safeParseRank(ingredients[afterIndex + 1]?.mealOrder);
-            mealRank = next && current.compareTo(next) < 0 ? current.between(next) : current.genNext();
-        }
+        // rankAfter scans outward to the nearest ingredient that actually has a
+        // parseable mealOrder. The old code fell back to LexoRank.middle() when
+        // the anchor's rank was missing, which turned "insert after this one"
+        // into "jump to the middle of the meal".
+        const mealRank = afterIndex < 0 || ingredients.length === 0
+            ? LexoRank.middle()
+            : rankAfter(ingredients, afterIndex, 'mealOrder');
 
         const listRank = nextListRank(allItems);
 

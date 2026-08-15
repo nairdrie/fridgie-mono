@@ -1,4 +1,4 @@
-import { endOfWeek, format, parse, startOfWeek, subWeeks } from 'date-fns';
+import { addDays, endOfWeek, format, parse, startOfWeek, subWeeks } from 'date-fns';
 import { List } from '../types/types';
 
 /**
@@ -9,6 +9,17 @@ import { List } from '../types/types';
  */
 export function parseWeekStart(weekStart: string): Date {
   return parse(weekStart.slice(0, 10), 'yyyy-MM-dd', new Date());
+}
+
+/**
+ * The Saturday ending the week that starts at `weekStart`.
+ *
+ * Use this rather than adding 6 * 24 * 60 * 60 * 1000 to the parsed start: a
+ * fixed 518400000 ms is not six calendar days across a DST transition, so in
+ * DST-ending weeks the range subtitle rendered a day short ("Nov 1 - Nov 6").
+ */
+export function parseWeekEnd(weekStart: string): Date {
+  return addDays(parseWeekStart(weekStart), 6);
 }
 
 export function getWeekLabel(date: Date | string = new Date()) {

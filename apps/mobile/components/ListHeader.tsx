@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import Modal from 'react-native-modal';
 import Animated, { interpolate, interpolateColor, useAnimatedStyle, useDerivedValue, withTiming } from 'react-native-reanimated';
-import { getWeekLabel, parseWeekStart } from '../utils/date';
+import { getWeekLabel, parseWeekEnd, parseWeekStart } from '../utils/date';
 import GroupIndicator from './GroupIndicator';
 
 const DEVICE_HEIGHT =
@@ -110,7 +110,7 @@ export default function ListHeader() {
                   <View style={styles.weekSelectorText}>
                     <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
                     <Text style={styles.subtitle}>
-                      {parseWeekStart(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {new Date(parseWeekStart(selectedList.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      {parseWeekStart(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {parseWeekEnd(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     </Text>
                   </View>
                   
@@ -178,7 +178,7 @@ export default function ListHeader() {
                         <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
                         <Text style={styles.weekRange}>
                           {parseWeekStart(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
-                          {new Date(parseWeekStart(item.weekStart).getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString(
+                          {parseWeekEnd(item.weekStart).toLocaleDateString(
                             undefined,
                             { month: 'short', day: 'numeric' }
                           )}

@@ -229,8 +229,15 @@ export async function getPendingInvitations(groupId: string): Promise<PendingInv
     return res.json();
 }
 
-export async function updateGroup(groupId: string, updates: { name?: string; members?: string[] }): Promise<void> {
-    // Placeholder for updating group name or removing a member
+/**
+ * Membership is sent as a DELTA, never as an absolute list — an absolute list
+ * computed when the editor opened would silently eject anyone who accepted an
+ * invitation while it was open.
+ */
+export async function updateGroup(
+    groupId: string,
+    updates: { name?: string; addMembers?: string[]; removeMembers?: string[] }
+): Promise<void> {
     await authorizedFetch(`${BASE_URL}/group/${groupId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

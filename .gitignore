@@ -16,3 +16,6 @@ node_modules/
 # env
 .env
 .env.*.local
+
+# local verification output
+apps/mobile/.expo-export-check/

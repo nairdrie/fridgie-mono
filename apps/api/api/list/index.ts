@@ -117,7 +117,11 @@ route.get('/', async (c) => {
 
   const formatted = allLists.map(list => {
     const items = list.items || []
-    const hasContent = items.length > 1 || (items.length === 1 && items[0]?.text !== '')
+    // Meals count as content too. Deriving this from grocery items alone meant a
+    // week with a meal plan but no groceries looked empty, so the app skipped
+    // past it on launch and the user's planning appeared lost.
+    const hasMeals = Array.isArray(list.meals) ? list.meals.length > 0 : !!list.meals
+    const hasContent = items.length > 1 || (items.length === 1 && items[0]?.text !== '') || hasMeals
 
     return {
       id: list.id,

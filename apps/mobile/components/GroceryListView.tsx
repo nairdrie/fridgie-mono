@@ -7,6 +7,7 @@ import {
     formatQuantity,
     parseQuantity,
     parseQuantityAndText,
+    quantitiesEquivalent,
 } from '@/utils/quantity';
 import { nextListRank, safeParseRank } from '@/utils/rank';
 import { primary } from '@/utils/styles';
@@ -87,10 +88,13 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
             // the live computed total wins.
             const overrideSource = sources.find(s => s.overrideQuantity);
             const overrideIsFresh = overrideSource
-                && (overrideSource.overrideBase === undefined || overrideSource.overrideBase === computedTotal);
+                && (overrideSource.overrideBase === undefined
+                    || quantitiesEquivalent(overrideSource.overrideBase, computedTotal));
             const totalQuantity = overrideIsFresh
                 ? overrideSource!.overrideQuantity!
-                : computedTotal;
+                // If nothing aggregated cleanly, fall back to the base item's own
+                // quantity so the chip stays visible and tappable.
+                : (computedTotal || baseItem.quantity || '');
 
             result.push({
                 ...baseItem,
@@ -200,17 +204,20 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         setSort('custom');
         let rank = LexoRank.middle();
         const rankMap = new Map<string, string>();
+        // Advance once per assigned id. genNext() is pure, so the old code gave
+        // every extra source of row k the same rank that row k+1's base item
+        // then got — byte-identical duplicates whose order fell back to array
+        // position, which differs per device.
+        const assign = (id: string) => {
+            rankMap.set(id, rank.toString());
+            rank = rank.genNext();
+        };
         data.forEach(item => {
             if ('sourceIds' in item) {
-                const baseItemId = item.sourceIds[0];
-                rankMap.set(baseItemId, rank.toString());
-                for (let i = 1; i < item.sourceIds.length; i++) {
-                    rankMap.set(item.sourceIds[i], rank.genNext().toString());
-                }
+                item.sourceIds.forEach(assign);
             } else {
-                rankMap.set(item.id, rank.toString());
+                assign(item.id);
             }
-            rank = rank.genNext();
         });
         setItems(prev => prev.map(originalItem => ({ ...originalItem, listOrder: rankMap.get(originalItem.id) || originalItem.listOrder })));
         markDirty();

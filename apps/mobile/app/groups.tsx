@@ -165,10 +165,14 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
             const nameChanged = editedName.trim() !== group.name;
 
             if (nameChanged || membersChanged) {
+                // Send only what the user explicitly removed. An absolute member
+                // list would revert any invitation accepted while this editor
+                // was open, silently ejecting that person from the group.
+                const removeMembers = [...initialMemberUids].filter(uid => !currentMemberUids.has(uid));
                 promises.push(
                     updateGroup(group.id, {
                         name: editedName.trim(),
-                        members: members.map(m => m.uid)
+                        ...(removeMembers.length > 0 ? { removeMembers } : {}),
                     })
                 );
             }
