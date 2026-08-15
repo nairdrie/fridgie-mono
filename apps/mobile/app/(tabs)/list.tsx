@@ -1,0 +1,868 @@
+// ListScreen.tsx
+
+import AddEditRecipeModal from '@/components/AddEditRecipeModal';
+import GroceryListView from '@/components/GroceryListView'; // Import the new component
+import MealPlanView from '@/components/MealPlanView';
+import MealSuggestionsModal from '@/components/MealSuggestionsModal';
+import ViewRecipeModal from '@/components/ViewRecipeModal';
+import { useAuth } from '@/context/AuthContext';
+import { useLists } from '@/context/ListContext';
+import { Item, List, ListView, Meal, Recipe } from '@/types/types';
+import { primary } from '@/utils/styles';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { LexoRank } from 'lexorank';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
+} from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import uuid from 'react-native-uuid';
+import { addUserCookbookRecipe, categorizeList, getUserCookbook, listenToList, removeUserCookbookRecipe, scheduleMealRating, updateList } from '../../utils/api';
+import { parseWeekStart } from '../../utils/date';
+import { nextListRank, sanitizeListOrders } from '../../utils/rank';
+
+export default function HomeScreen() {
+    const router = useRouter();
+    const { selectedList, isLoading, selectedGroup, selectedView, allLists } = useLists();
+    const { user } = useAuth();
+    
+    const [meals, setMeals] = useState<Meal[]>([]);
+    const [items, setItems] = useState<Item[]>([]);
+    const [sort, setSort] = useState<List['sort']>('custom');
+
+    const [editingId, setEditingId] = useState<string>('');
+    const [isCategorizing, setIsCategorizing] = useState(false);
+    const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+    const inputRefs = useRef<Record<string, TextInput | null>>({});
+
+    const [isSuggestionModalVisible, setSuggestionModalVisible] = useState(false);
+
+
+    const [collapsedMeals, setCollapsedMeals] = useState<Record<string, boolean>>({});
+
+    const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
+    const [recipeToEdit, setRecipeToEdit] = useState<Meal | null>(null);
+
+    const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
+    const fabAnimation = useSharedValue(0);
+
+    const [cookbookRecipeIds, setCookbookRecipeIds] = useState<Set<string>>(new Set());
+
+    const hasCheckedForUnratedMeals = useRef(false);
+
+    const [isFocused, setIsFocused] = useState(false);
+
+    const listRef = useRef<any>(null); 
+    
+    // --- Start of new/moved code ---
+    const [isSortModalVisible, setIsSortModalVisible] = useState(false);
+    // --- End of new/moved code ---
+
+    useFocusEffect(
+        useCallback(() => {
+            setIsFocused(true); // Screen is focused
+            return () => {
+                setIsFocused(false); // Screen is unfocused
+            };
+        }, [])
+    );
+
+    useEffect(() => {
+        // 1. Directly command the animation to close. This is the key fix.
+        fabAnimation.value = withTiming(0, { duration: 150 });
+        // 2. Sync the React state to ensure consistency.
+        setIsFabMenuOpen(false);
+    }, [selectedView]);
+
+    const dirtyUntilRef = useRef<number>(0);
+    const markDirty = () => {
+        const until = Date.now() + 1200;
+        dirtyUntilRef.current = until;
+    };
+
+    // Animate FAB menu
+    useEffect(() => {
+        fabAnimation.value = withTiming(isFabMenuOpen ? 1 : 0, { duration: 250 });
+    }, [isFabMenuOpen]);
+
+
+    const fabRotation = useAnimatedStyle(() => ({
+        transform: [{ rotate: `${fabAnimation.value * 45}deg` }],
+    }));
+
+    const fabStyle0 = useAnimatedStyle(() => ({
+        transform: [{ translateY: fabAnimation.value * -80 }],
+        opacity: fabAnimation.value,
+    }));
+    const fabStyle1 = useAnimatedStyle(() => ({
+        transform: [{ translateY: fabAnimation.value * -145 }],
+        opacity: fabAnimation.value,
+    }));
+
+
+    // True while the latest items/meals/sort state came from the server (WS or
+    // categorize) rather than a local edit — those changes must NOT be saved
+    // back, or every broadcast would trigger a write and clients would
+    // ping-pong saves at each other.
+    const applyingRemoteRef = useRef(false);
+    // No saves until the first server snapshot for the current list has
+    // arrived; otherwise the debounced save could overwrite the list with the
+    // initial empty state.
+    const hasLoadedRef = useRef(false);
+
+    const applyRemoteList = (list: List) => {
+        applyingRemoteRef.current = true;
+        hasLoadedRef.current = true;
+
+        const rawItems = Array.isArray(list.items) ? list.items : [];
+        // Repair missing/invalid LexoRanks (e.g. legacy 'NEEDS-RANK' rows).
+        const withOrder = sanitizeListOrders(rawItems)
+            .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
+
+        setItems(withOrder.length > 0 ? withOrder : [{ id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false }]);
+        setMeals(Array.isArray(list.meals) ? list.meals : []);
+        setSort(list.sort || 'custom');
+    };
+
+    // Handles ALL incoming data (Initial Fetch + Real-time Updates)
+    useEffect(() => {
+        if (!selectedList?.id || !selectedGroup?.id) {
+            setItems([]);
+            setMeals([]);
+            return;
+        }
+        hasLoadedRef.current = false;
+
+        let unsubscribe: () => void;
+        const setupListener = async () => {
+            try {
+                unsubscribe = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
+                    if (!list) return;
+                    if (Date.now() < dirtyUntilRef.current) return;
+                    applyRemoteList(list);
+                });
+            } catch (error) {
+                console.error("Failed to set up list listener:", error);
+            }
+        };
+        setupListener();
+        return () => {
+            if (unsubscribe) unsubscribe();
+        };
+        // Depend on stable IDs: presence updates re-create the group object and
+        // would otherwise tear the socket down on every status change.
+    }, [selectedList?.id, selectedGroup?.id]);
+
+    // Handles ALL outgoing data (Debounced Saving)
+     useEffect(() => {
+        if (!selectedList?.id || !selectedGroup?.id) return;
+        if (!hasLoadedRef.current) return;
+        if (applyingRemoteRef.current) {
+            applyingRemoteRef.current = false;
+            return;
+        }
+        const groupId = selectedGroup.id;
+        const listId = selectedList.id;
+        const timeout = setTimeout(() => {
+            updateList(groupId, listId, { items, meals, sort }).catch(console.error);
+        }, 500);
+        return () => clearTimeout(timeout);
+    }, [items, meals, sort, selectedList?.id, selectedGroup?.id]);
+
+    const focusAtEnd = (id: string) => {
+        const ref = inputRefs.current[id];
+        if (!ref) return;
+        ref.focus?.();
+
+        const len = (items.find(i => i.id === id)?.text || '').length;
+        setTimeout(() => {
+            // @ts-ignore
+            ref.setNativeProps?.({ selection: { start: len, end: len } });
+        }, 0);
+    };
+
+    useEffect(() => {
+        if (!editingId) return;
+        requestAnimationFrame(() => focusAtEnd(editingId));
+
+        // --- START OF FIX ---
+    // After focusing, also scroll the item into view
+    const findAndScrollToItem = () => {
+        // Find the index of the item (or its aggregate) in the currently rendered list
+        const index = items.findIndex(i => i.id === editingId);
+
+        // Check if the listRef and index are valid
+        if (listRef.current && index > -1) {
+            listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+        }
+    };
+
+    // Add a small delay to ensure the keyboard is fully visible before scrolling
+    setTimeout(findAndScrollToItem, 100); 
+    // --- END OF FIX ---
+    }, [editingId, items]);
+
+    useEffect(() => {
+        const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
+        const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+        return () => {
+            keyboardDidHideListener.remove();
+            keyboardDidShowListener.remove();
+        };
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            const fetchCookbook = async () => {
+                try {
+                    if(!user) return;
+                    const cookbookRecipes = await getUserCookbook(user.uid);
+                    const recipeIds = new Set(cookbookRecipes.map(r => r.id));
+                    setCookbookRecipeIds(recipeIds);
+                } catch (error) {
+                    console.error("Failed to fetch user cookbook:", error);
+                }
+            };
+            fetchCookbook();
+        }, [])
+    );
+
+    useEffect(() => {
+        const loadCollapsedState = async () => {
+            try {
+                const storedState = await AsyncStorage.getItem('collapsedMealState');
+                if (storedState) setCollapsedMeals(JSON.parse(storedState));
+            } catch (e) {
+                console.error("Failed to load collapsed meal state.", e);
+            }
+        };
+        loadCollapsedState();
+    }, []);
+
+    const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
+        setMeals(prevMeals => prevMeals.map(meal => (meal.id === updatedMeal.id ? updatedMeal : meal)));
+
+        // Add new items to the list
+        setItems(currentItems => {
+            const base = currentItems
+                .filter(item => item.mealId !== updatedMeal.id)
+                .filter(i => (i.text ?? '').trim() !== '' || i.isSection);
+            // Modal items arrive with placeholder orders ('NEEDS-RANK'); assign
+            // real ranks here or LexoRank.parse will throw on the next insert.
+            let listRank = nextListRank(base);
+            let mealRank = LexoRank.middle();
+            const rankedNewItems = newItems
+                .filter(i => (i.text ?? '').trim() !== '')
+                .map(i => {
+                    listRank = listRank.genNext();
+                    mealRank = mealRank.genNext();
+                    return { ...i, listOrder: listRank.toString(), mealOrder: i.mealOrder ?? mealRank.toString() };
+                });
+            return [...base, ...rankedNewItems];
+        });
+        markDirty();
+
+        // If the list is sorted by category, re-categorize after adding new items.
+        if (sort === 'category') {
+            setTimeout(async () => {
+                await handleAutoCategorize();
+            }, 100);
+        }
+    };
+
+    const handleViewRecipe = (meal: Meal) => {
+        if (!meal.recipeId) {
+            Alert.alert("No Recipe", "A recipe has not been added for this meal yet.");
+            return;
+        }
+        setRecipeToViewId(meal.recipeId);
+    };
+
+
+    const handleAddRecipe = (meal: Meal) => setRecipeToEdit(meal);
+
+    const handleAddMealsFromSuggestion = async (newMeals: Meal[], newItemsFromModal: Item[]) => {
+        // 1. Prepare the new state variables
+        const updatedMeals = [...meals, ...newMeals];
+
+        let lastRank = nextListRank(items);
+        let mealRank = LexoRank.middle();
+        const rankedNewItems = newItemsFromModal.map(item => {
+            lastRank = lastRank.genNext();
+            mealRank = mealRank.genNext();
+            return { ...item, listOrder: lastRank.toString(), mealOrder: item.mealOrder ?? mealRank.toString() };
+        });
+
+        const isSingleEmpty = items.length === 1 && (items[0].text ?? '') === '' && !items[0].isSection;
+        const finalNewItems = isSingleEmpty ? rankedNewItems : [...items, ...rankedNewItems];
+
+        // 2. Perform the optimistic UI update
+        setMeals(updatedMeals);
+        setItems(finalNewItems);
+        markDirty(); // Keep the dirty flag to prevent immediate listener overwrites
+
+        try {
+            // 3. Explicitly save the new, UNCATEGORIZED items to Firestore
+            if (selectedGroup && selectedList) {
+                await updateList(selectedGroup.id, selectedList.id, {
+                    items: finalNewItems,
+                    meals: updatedMeals,
+                    sort: sort,
+                });
+            }
+
+            // 4. AFTER saving is successful, categorize if needed
+            if (sort === 'category') {
+                // Now we call handleAutoCategorize with the items we know are saved
+                await handleAutoCategorize(finalNewItems);
+            }
+        } catch (error) {
+            console.error("Failed to add/categorize suggested meals:", error);
+            // Optional: Implement logic to revert the optimistic update on error
+            Alert.alert("Error", "Could not save new meals. Please try again.");
+        }
+    };
+
+    const handleAddMeal = () => {
+        if (!selectedGroup || !selectedList) return;
+        const newMeal: Meal = {
+            id: uuid.v4() as string,
+            listId: selectedList.id,
+            name: '',
+        };
+        setMeals(prev => [...prev, newMeal]);
+        setEditingId(newMeal.id);
+        markDirty();
+    };
+
+    const handleEditRecipe = (recipe: Recipe) => {
+        const meal = meals.find(m => m.recipeId === recipe.id);
+        if (meal) {
+            setRecipeToViewId(null);
+            setRecipeToEdit(meal);
+        }
+    };
+    
+    const handleUpdateMeal = (mealId: string, updates: Partial<Meal>) => {
+        setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
+        markDirty();
+        if (updates.dayOfWeek && selectedList) {
+            scheduleMealRating(mealId, selectedList.id, updates.dayOfWeek).catch(console.error);
+        }
+    };
+    
+    const handleDeleteMeal = (mealId: string) => {
+        setMeals(prev => prev.filter(meal => meal.id !== mealId));
+        setItems(prev => prev.filter(item => item.mealId !== mealId));
+        markDirty();
+    };
+
+    const handleAutoCategorize = async (itemsToCategorize?: Item[]) => {
+        if (!selectedGroup || !selectedList?.id) return;
+        setIsCategorizing(true);
+        markDirty();
+        
+        // Use the passed-in items, or fall back to the component's state
+        const currentItems = itemsToCategorize || items;
+
+        try {
+            const newItems = await categorizeList(selectedGroup.id, selectedList.id, currentItems);
+            setItems(sanitizeListOrders(newItems));
+            setSort('category'); // Set sort mode to category
+            setEditingId('');
+        } catch (err) {
+            console.error('Auto-categorization failed', err);
+        } finally {
+            setIsCategorizing(false);
+        }
+    };
+
+    const handleToggleCookbookById = async (recipeId: string) => {
+        const isInCookbook = cookbookRecipeIds.has(recipeId);
+        const originalCookbookIds = new Set(cookbookRecipeIds);
+
+        setCookbookRecipeIds(prev => {
+            const newSet = new Set(prev);
+            if (isInCookbook) {
+                newSet.delete(recipeId);
+            } else {
+                newSet.add(recipeId);
+            }
+            return newSet;
+        });
+
+        try {
+            if (isInCookbook) {
+                await removeUserCookbookRecipe(recipeId);
+            } else {
+                await addUserCookbookRecipe(recipeId);
+            }
+        } catch (error) {
+            console.error(`Failed to ${isInCookbook ? 'remove from' : 'add to'} cookbook:`, error);
+            Alert.alert("Error", `Could not update your cookbook. Please try again.`);
+            setCookbookRecipeIds(originalCookbookIds);
+        }
+    };
+
+    const handleToggleCookbook = async (meal: Meal) => {
+        if(!user || user.isAnonymous) {
+            router.navigate('/profile');
+            return;
+        }
+        if (!meal.recipeId) return;
+        await handleToggleCookbookById(meal.recipeId);
+    };
+    
+    const handleAddItem = (isSection = false) => {
+    if (sort === 'alphabetical') {
+        // This case should no longer be reachable, but as a safeguard,
+        // we'll switch to custom before adding.
+        setSort('custom');
+    }
+
+    if (!selectedList) return;
+    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: isSection };
+    const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
+    setItems(newItems);
+    setEditingId(newItem.id);
+    markDirty();
+};
+
+    useFocusEffect(
+        useCallback(() => {
+            const checkForPendingAction = async () => {
+                try {
+                    const pendingAction = await AsyncStorage.getItem('pendingAction');
+                    if (pendingAction === 'suggest-meals') {
+                        await AsyncStorage.removeItem('pendingAction');
+                        setSuggestionModalVisible(true); 
+                    }
+                } catch (e) { console.error("Failed to check for pending action:", e); }
+            };
+            checkForPendingAction();
+        }, [])
+    );
+
+    useFocusEffect(
+        useCallback(() => {
+            // Immediately return if the check has already been done for this session
+            if (hasCheckedForUnratedMeals.current) {
+                return;
+            }
+
+            const checkForPastUnratedMeals = async () => {
+                if (!meals.length || !selectedList) return;
+
+                // Mark that the check is being performed
+                hasCheckedForUnratedMeals.current = true;
+
+                try {
+                    const ratedMealsRaw = await AsyncStorage.getItem('ratedMeals');
+                    const ratedMealIds = ratedMealsRaw ? JSON.parse(ratedMealsRaw) : {};
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+
+                    // parseWeekStart interprets weekStart in LOCAL time; a bare
+                    // `new Date('yyyy-MM-dd')` would be UTC midnight (the
+                    // previous day across the Americas).
+                    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const mealDateOf = (dayOfWeek: string) => {
+                        const date = parseWeekStart(selectedList.weekStart);
+                        date.setDate(date.getDate() + DAY_NAMES.indexOf(dayOfWeek));
+                        return date;
+                    };
+                    const unratedPastMeals = meals.filter(meal => {
+                        if (!meal.dayOfWeek || !meal.recipeId || ratedMealIds[meal.id]) return false;
+                        return mealDateOf(meal.dayOfWeek) < today;
+                    });
+
+                    if (unratedPastMeals.length > 0) {
+                        const mealToRate = unratedPastMeals.sort((a, b) =>
+                            mealDateOf(b.dayOfWeek!).getTime() - mealDateOf(a.dayOfWeek!).getTime()
+                        )[0];
+
+                        router.push({
+                            pathname: '/rate-meal',
+                            params: { recipeId: mealToRate.recipeId, mealId: mealToRate.id },
+                        });
+                    }
+                } catch (error) {
+                    console.error("Failed to check for unrated meals:", error);
+                }
+            };
+
+            // Delay the check slightly to ensure data is stable
+            const timer = setTimeout(checkForPastUnratedMeals, 1000);
+
+            // Cleanup the timer
+            return () => clearTimeout(timer);
+        }, [meals, selectedList, router]) // Dependencies are still needed to get the correct values
+    );
+
+    const onToggleMealCollapse = async (mealId: string) => {
+        const updatedStates = { ...collapsedMeals, [mealId]: !collapsedMeals[mealId] };
+        setCollapsedMeals(updatedStates);
+        try {
+            await AsyncStorage.setItem('collapsedMealState', JSON.stringify(updatedStates));
+        } catch (e) { console.error("Failed to save collapsed meal state.", e); }
+    };
+    
+    // --- Start of new/moved code ---
+    const reRankAlphabetically = (currentItems: Item[]) => {
+        const itemsWithoutSections = currentItems.filter(item => !item.isSection);
+        const sortedAlphabetically = [...itemsWithoutSections].sort((a, b) => a.text.localeCompare(b.text));
+        
+        let rank = LexoRank.middle();
+        const rankMap = new Map<string, string>();
+        sortedAlphabetically.forEach(item => {
+            rank = rank.genNext();
+            rankMap.set(item.id, rank.toString());
+        });
+
+        return currentItems
+            .filter(item => !item.isSection) // ensure sections are removed
+            .map(item => ({
+                ...item,
+                listOrder: rankMap.get(item.id) || item.listOrder
+            }));
+    };
+
+    const handleSelectSort = (selectedMode: List['sort']) => {
+        if (selectedMode === 'category') {
+            handleAutoCategorize();
+        } else if (selectedMode === 'alphabetical') {
+            const newRankedItems = reRankAlphabetically(items);
+            setItems(newRankedItems);
+            setSort('custom'); // Immediately set the mode to custom, locking in the new order.
+        } else {
+            // This case handles selecting "Custom" which does nothing but close the modal.
+            setSort('custom');
+        }
+        setIsSortModalVisible(false);
+    };
+
+    const getSortIconText = () => {
+        switch (sort) {
+            case 'alphabetical': return "Alpha";
+            case 'category': return "Category";
+            default: return "Sort";
+        }
+    };
+    // --- End of new/moved code ---
+
+    const mealsWithCookbookStatus = React.useMemo(() => {
+        return meals.map(meal => ({
+            ...meal,
+            addedToCookbook: meal.recipeId ? cookbookRecipeIds.has(meal.recipeId) : false,
+        }));
+    }, [meals, cookbookRecipeIds]);
+
+    if (isLoading) {
+        return <View style={styles.container}><ActivityIndicator /></View>;
+    }
+
+    return (
+        <>
+        {isFocused && <StatusBar style="dark" />}
+        <View style={{ paddingTop: 12, paddingBottom: 12,flex: 1, backgroundColor: '#fff' }}>
+            <KeyboardAvoidingView
+                style={styles.container}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={100}
+            >
+                {/* TODO: the keyboardavoiding here is not as good as on login page now. also add/edit recipe one is good. (CHECK IOS) */}
+                {/* TODO: on IOS, any action outside the keyboard should minimize it (unless its a click to another input). basically we want the keyboard to be smart enough to close when were not using it (on scroll)*/}
+                {/* TODO: on android, any action outside the keyboard should not minimize it, we use the back swipe to do this. */}
+                { selectedView == ListView.GroceryList ? (
+                    <GroceryListView
+                        items={items}
+                        setItems={setItems}
+                        sort={sort}
+                        setSort={setSort}
+                        onCategorize={handleAutoCategorize}
+                        editingId={editingId}
+                        setEditingId={setEditingId}
+                        inputRefs={inputRefs}
+                        isKeyboardVisible={isKeyboardVisible}
+                        markDirty={markDirty}
+                        ref={listRef} 
+                    />
+                ) : (
+                    <MealPlanView
+                        meals={mealsWithCookbookStatus}
+                        items={items}
+                        setAllItems={setItems}
+                        onUpdateMeal={handleUpdateMeal}
+                        onDeleteMeal={handleDeleteMeal}
+                        onAddMeal={handleAddMeal}
+                        onViewRecipe={handleViewRecipe}
+                        onAddRecipe={handleAddRecipe}
+                        collapsedMeals={collapsedMeals}
+                        onToggleMealCollapse={onToggleMealCollapse}
+                        editingId={editingId}
+                        setEditingId={setEditingId}
+                        inputRefs={inputRefs}
+                        isKeyboardVisible={isKeyboardVisible}
+                        markDirty={markDirty}
+                        onToggleCookbook={handleToggleCookbook}
+                    />
+                )}
+            </KeyboardAvoidingView>
+
+            {isFabMenuOpen && (
+                <Pressable style={StyleSheet.absoluteFill} onPress={() => setIsFabMenuOpen(false)} />
+            )}
+
+            <View style={styles.bottomActionContainer}>
+                 {/* --- Start of new/moved code: Sort Button --- */}
+                 {selectedView === ListView.GroceryList && (
+                    <TouchableOpacity style={styles.sortButton} onPress={() => setIsSortModalVisible(true)} disabled={isCategorizing}>
+                        {isCategorizing ? (
+                            <>
+                                <ActivityIndicator size="small" color={primary} />
+                                <Text style={styles.sortButtonText}>Sorting…</Text>
+                            </>
+                        ) : (
+                            <>
+                                <Ionicons name={'swap-vertical-outline'} size={20} color={primary} />
+                                <Text style={styles.sortButtonText}>{getSortIconText()}</Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                 )}
+                 { selectedView != ListView.GroceryList && (
+                    <TouchableOpacity>
+                        <Text style={styles.sortButtonText}>&nbsp;</Text>
+                    </TouchableOpacity>
+                 )}
+                 {/* --- End of new/moved code --- */}
+
+                <View style={styles.fabContainer}>
+                    {isFabMenuOpen && (
+                        <>
+                            {selectedView === ListView.MealPlan ? (
+                                <>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Suggest</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Meal</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                </>
+                            ) : (
+                                <>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Category</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>Item</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                </>
+                            )}
+                        </>
+                    )}
+                    <TouchableOpacity style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)}>
+                        <Animated.View style={fabRotation}>
+                            <Ionicons name="add" size={32} color="white" />
+                        </Animated.View>
+                    </TouchableOpacity>
+                </View>
+            </View>
+            <ViewRecipeModal
+                isVisible={!!recipeToViewId}
+                onClose={() => setRecipeToViewId(null)}
+                recipeId={recipeToViewId}
+                onEdit={handleEditRecipe}
+                isInCookbook={recipeToViewId ? cookbookRecipeIds.has(recipeToViewId) : false}
+                onCookbookUpdate={() => {
+                    if (recipeToViewId) handleToggleCookbookById(recipeToViewId);
+                }}
+            />
+            <AddEditRecipeModal isVisible={!!recipeToEdit} onClose={() => setRecipeToEdit(null)} mealForRecipe={recipeToEdit} onRecipeSave={handleRecipeSaved} />
+            <MealSuggestionsModal isVisible={isSuggestionModalVisible} onClose={() => setSuggestionModalVisible(false)} onAddSelectedMeals={handleAddMealsFromSuggestion} listId={selectedList?.id ?? ''} />
+            
+            {/* --- Start of new/moved code: Sort Modal --- */}
+            <Modal
+                transparent={true}
+                visible={isSortModalVisible}
+                onRequestClose={() => setIsSortModalVisible(false)}
+                animationType="fade"
+            >
+                <Pressable style={styles.modalOverlay} onPress={() => setIsSortModalVisible(false)}>
+                    <View style={styles.sortModalContent}>
+                        <Text style={styles.sortModalTitle}>Sort List By</Text>
+                        
+                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('custom')}>
+                            <Ionicons name="swap-vertical-outline" size={24} color={primary} style={styles.sortIcon}/>
+                            <Text style={styles.sortOptionText}>Custom</Text>
+                            {sort === 'custom' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('alphabetical')}>
+                            <Ionicons name="text-outline" size={24} color={primary} style={styles.sortIcon}/>
+                            <Text style={styles.sortOptionText}>Alphabetical</Text>
+                            {sort === 'alphabetical' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('category')}>
+                            <Ionicons name="sparkles-outline" size={24} color={primary} style={styles.sortIcon}/>
+                            <Text style={styles.sortOptionText}>By Category</Text>
+                            {sort === 'category' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
+                        </TouchableOpacity>
+                    </View>
+                </Pressable>
+            </Modal>
+             {/* --- End of new/moved code --- */}
+        </View>
+        </>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: '#fff' },
+    backdrop: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.2)',
+    },
+    // --- Start of new/moved code ---
+    bottomActionContainer: {
+        position: 'absolute',
+        bottom: 30,
+        paddingHorizontal: 20,
+        width: '100%',
+        flexDirection: 'row',
+        justifyContent:'space-between',
+        alignItems: 'flex-end',
+        gap: 16
+    },
+    sortButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        height: 50,
+        borderRadius: 25,
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+    },
+    sortButtonText: {
+        marginLeft: 6,
+        color: primary,
+        fontWeight: '600',
+        fontSize: 16,
+    },
+    // --- End of new/moved code ---
+    fabContainer: {
+        alignItems: 'flex-end',
+        width: 80,
+    },
+    fab: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: primary,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+    },
+    secondaryFabContainer: {
+        position: 'absolute',
+        alignItems: 'center',
+        right: 6,
+    },
+    secondaryButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 25,
+        paddingVertical: 10,
+        paddingHorizontal: 15,
+        marginBottom: 10,
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3,
+    },
+    secondaryButtonIcon: {
+        marginRight: 8,
+    },
+    secondaryButtonText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333'
+    },
+    // --- Start of new/moved code ---
+    modalOverlay: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(0,0,0,0.4)',
+    },
+    sortModalContent: {
+        backgroundColor: 'white',
+        borderRadius: 12,
+        padding: 20,
+        width: '80%',
+        elevation: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+    },
+    sortModalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginBottom: 20,
+        textAlign: 'center',
+        color: '#333',
+    },
+    sortOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 15,
+    },
+    sortIcon: {
+        marginRight: 15,
+    },
+    sortOptionText: {
+        fontSize: 16,
+        flex: 1,
+        color: '#333',
+    },
+     // --- End of new/moved code ---
+});
