@@ -7,7 +7,7 @@ apps/
   api/      Bun + Hono API      → deployed via Docker (api.fridgie.ca)
   mobile/   Expo / React Native → built via EAS
 packages/
-  shared/   Types shared across both apps (compile-time only)
+  shared/   The client/server contract, plus the logic both sides need
 ```
 
 ## Layout notes
@@ -35,17 +35,28 @@ cd apps/mobile && npm install && npx expo start
 
 ## packages/shared
 
-Holds the request/response contract used by both sides. It is imported with
-`import type` **only**, so the whole thing is erased at compile time and never
-becomes a runtime dependency:
+Consumed as TypeScript **source** — no build step, nothing published. See
+[packages/shared/README.md](packages/shared/README.md) for the full rules.
 
-```ts
-import type { List, Item, Meal } from '@fridgie/shared';
-```
+| File | Reaches the bundler? |
+|---|---|
+| `types.ts` | No — re-exported via `export type *`, fully erased |
+| `quantity.ts` | Yes |
+| `rank.ts` | Yes |
 
-Because of that, `packages/shared` must not contain runtime values — no `enum`,
-no `const`, no functions. Use `as const` objects declared locally in the app that
-needs them, or a plain union type.
+`types.ts` must stay **type-only** (no `enum`, no `const`, no functions), which
+is why `ListView` lives in each app rather than here.
+
+Because `quantity.ts` and `rank.ts` are real runtime modules, the mobile app
+lists `packages/shared` in `metro.config.js` `watchFolders` — Metro does not
+watch or resolve anything outside the app directory. Everything here must be
+environment-neutral: no Bun APIs, no Node built-ins, no `react-native`, no
+`firebase`.
+
+These exist because both apps previously had their own copies that drifted: the
+two rank modules repaired invalid ranks differently, producing conflicting
+orderings for the same list, and the two quantity modules disagreed on plurals,
+unit aliases, trailing periods, and rounding.
 
 ## Deploying
 
