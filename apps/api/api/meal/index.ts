@@ -2,17 +2,23 @@
 import { Hono } from 'hono'
 import { v4 as uuidv4 } from 'uuid'
 import { LexoRank } from 'lexorank'
-import { adminRtdb } from '@/utils/firebase'
 import { auth } from '@/middleware/auth'
 import { groupAuth } from '@/middleware/groupAuth'
-import { type Item, type List, type Meal, type Recipe } from '@/utils/types'
+import { type Item, type Meal, type Recipe } from '@/utils/types'
+import { mutateList } from '@/utils/listStore'
+import { safeParseRank, sanitizeItems } from '@/utils/rank'
+import { normalizeQuantity } from '@/utils/quantity'
 
 const route = new Hono()
 
 route.use('*', auth)
 
 /**
- * Creates a new Meal on a List from a Recipe using a manual read-then-write operation.
+ * Creates a new Meal on a List from a Recipe.
+ * The write goes through the shared list mutator (an RTDB transaction), so
+ * concurrent client saves are not clobbered and the doc's rev is bumped —
+ * the websocket broadcast for this change happens automatically via the
+ * RTDB listener.
  */
 route.post('/', groupAuth, async (c) => {
     const { groupId, listId, recipe } = await c.req.json<{
@@ -25,59 +31,56 @@ route.post('/', groupAuth, async (c) => {
         return c.json({ error: 'Missing required fields' }, 400)
     }
 
-    const listRef = adminRtdb.ref(`lists/${groupId}/${listId}`)
+    const newMeal: Meal = {
+        id: uuidv4(),
+        listId: listId,
+        name: recipe.name,
+        recipeId: recipe.id,
+    }
 
     try {
-        // Step 1: Read the current list using .once('value') which we know works.
-        const snapshot = await listRef.once('value');
-        const currentList = snapshot.val() as List | null;
+        const result = await mutateList(groupId, listId, (current) => {
+            const currentMeals: Meal[] = Array.isArray(current.meals)
+                ? current.meals
+                : (current.meals ? Object.values(current.meals) : [])
 
-        if (currentList === null) {
-            return c.json({ error: 'List not found' }, 404);
-        }
+            // Repairs legacy/bad ranks (e.g. 'NEEDS-RANK') so rank generation
+            // below can't crash, and keeps unknown item fields intact.
+            const { items: currentItems } = sanitizeItems(current.items)
 
-        // Step 2: Modify the data in memory.
-        const currentMeals: Meal[] = Array.isArray(currentList.meals)
-            ? currentList.meals
-            : (currentList.meals ? Object.values(currentList.meals) : []);
+            const lastOrder = currentItems[currentItems.length - 1]?.listOrder
+            let listRank = safeParseRank(lastOrder) ?? LexoRank.middle()
+            let mealRank = LexoRank.middle()
 
-        const currentItems: Item[] = Array.isArray(currentList.items)
-            ? currentList.items
-            : (currentList.items ? Object.values(currentList.items) : []);
+            const newItems: Item[] = (recipe.ingredients || []).map((ingredient) => {
+                listRank = listRank.genNext()
+                const item: Item = {
+                    id: uuidv4(),
+                    mealId: newMeal.id,
+                    text: ingredient.name ?? '',
+                    checked: false,
+                    isSection: false,
+                    listOrder: listRank.toString(),
+                    mealOrder: mealRank.toString(),
+                }
+                mealRank = mealRank.genNext()
+                // RTDB rejects undefined values, so only set quantity when present
+                const quantity = normalizeQuantity(ingredient.quantity)
+                if (quantity) item.quantity = quantity
+                return item
+            })
 
-        const newMeal: Meal = {
-            id: uuidv4(),
-            listId: listId,
-            name: recipe.name,
-            recipeId: recipe.id,
-        }
-
-        const lastOrder = currentItems?.[currentItems.length - 1]?.listOrder;
-        let lastRank = lastOrder ? LexoRank.parse(lastOrder) : LexoRank.middle();
-
-        const newItems: Item[] = (recipe.ingredients || []).map((ingredient) => {
-            lastRank = lastRank.genNext()
             return {
-                id: uuidv4(),
-                mealId: newMeal.id,
-                text: ingredient.name,
-                quantity: ingredient.quantity || undefined,
-                checked: false,
-                isSection: false,
-                listOrder: lastRank.toString(),
+                ...current,
+                meals: [...currentMeals, newMeal],
+                items: [...currentItems, ...newItems],
             }
         })
 
-        // Construct the full, updated list object
-        const updatedList: List = {
-            ...currentList,
-            meals: [...currentMeals, newMeal],
-            items: [...currentItems, ...newItems],
-        };
-        
-        // Step 3: Write the entire updated object back to the database using .set()
-        await listRef.set(updatedList);
-        
+        if (result.status === 'missing') {
+            return c.json({ error: 'List not found' }, 404)
+        }
+
         // Respond with 201 Created and the new meal object
         return c.json(newMeal, 201)
 

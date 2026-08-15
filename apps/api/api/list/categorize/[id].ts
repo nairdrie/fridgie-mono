@@ -5,6 +5,7 @@ import { v4 as uuid } from 'uuid';
 import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';
 import { groupAuth } from '@/middleware/groupAuth';
+import { mutateList } from '@/utils/listStore';
 
 const route = new Hono();
 
@@ -60,7 +61,7 @@ route.post('/', async (c) => {
   // ✅ 3. Create a lookup map from the now-correctly-sourced originalItems.
   const itemMap = new Map<string, any[]>();
   for (const item of originalItems) {
-    const key = item.text.toLowerCase();
+    const key = String(item.text ?? '').toLowerCase();
     if (!itemMap.has(key)) {
       itemMap.set(key, []);
     }
@@ -77,7 +78,7 @@ route.post('/', async (c) => {
   const allCategorizedItems = new Map<string, string[]>();
 
   for (const item of originalItems) {
-    const normalizedText = normalizeItemText(item.text);
+    const normalizedText = normalizeItemText(String(item.text ?? ''));
     const cachedCategory = cache[normalizedText];
 
     if (cachedCategory) {
@@ -158,7 +159,7 @@ route.post('/', async (c) => {
     for (const text of itemsInSection) {
       const key = text.toLowerCase();
       const matchingItems = itemMap.get(key);
-      
+
       if (matchingItems && matchingItems.length > 0) {
         const originalItem = matchingItems.shift();
         newItems.push({
@@ -172,7 +173,31 @@ route.post('/', async (c) => {
     }
   }
 
-  await adminRtdb.ref(`lists/${groupId}/${id}/items`).set(newItems);
+  // Items the AI renamed or skipped never matched the map above; they must not
+  // vanish from the user's list, so append them under an "Other" section.
+  const leftovers: any[] = [];
+  for (const remaining of itemMap.values()) {
+    leftovers.push(...remaining);
+  }
+  if (leftovers.length > 0) {
+    newItems.push({
+      id: uuid(),
+      text: 'Other',
+      checked: false,
+      isSection: true,
+      listOrder: rank.toString(),
+    });
+    rank = rank.genNext();
+    for (const item of leftovers) {
+      newItems.push({ ...item, listOrder: rank.toString() });
+      rank = rank.genNext();
+    }
+  }
+
+  // Write through the shared list mutator so the doc's rev is bumped and
+  // websocket consumers see this as a server-initiated change.
+  const result = await mutateList(groupId!, id, (current) => ({ ...current, items: newItems }));
+  if (result.status === 'missing') return c.text('List not found', 404);
   return c.json(newItems);
 });
 

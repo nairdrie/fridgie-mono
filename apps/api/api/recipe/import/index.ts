@@ -3,6 +3,17 @@ import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { normalizeIngredients } from '@/utils/quantity';
+
+// Shared quantity contract with the client quantity engine (handoff §3.4)
+const quantityFormatRules = `
+Quantity format rules (apply to every ingredient's "quantity" field):
+- Express each quantity as "<decimal number> <unit>", where the unit is one of: g, kg, oz, lb, ml, l, tsp, tbsp, cup — or a bare number for countable items (e.g. "2" for 2 eggs, with the ingredient name "eggs").
+- Convert all fractions (including unicode like ½) to decimals: "1 1/2 cups" → "1.5 cup", "½ tsp" → "0.5 tsp".
+- For ranges, use the smaller value: "2-3 cloves" → "2".
+- If an amount is listed with multiple units (e.g. "200g / 7 oz"), use only the first value and unit: "200 g".
+- If the amount is not measurable, use "to taste" or an empty string.
+`;
 
 const route = new Hono();
 
@@ -18,7 +29,7 @@ You MUST return a single raw JSON object matching this exact structure. Do not i
 {
   "name": "Recipe Name",
   "description": "A short, engaging description of the dish. Paraphrase or make up your own to avoid copyright infringement.",
-  "ingredients": [ { "name": "Ingredient Name", "quantity": "e.g., 1 cup or 200g" } ],
+  "ingredients": [ { "name": "Ingredient Name", "quantity": "e.g., '1.5 cup' or '200 g'" } ],
   "instructions": [ "Step 1...", "Step 2..." ],
   "tags": [ "Tag 1", "Tag 2" ],
   "photoURL": "the photo URL of the recipe, if available"
@@ -27,9 +38,8 @@ Add some relevant tags to the recipe in the "tags" array. Use the following tags
 'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese', (or other cuisine type if it doesn't fit in one of these)
 DO NOT include markdown, code fences, or any text outside of the JSON object.
 Separate preparation methods from ingredient names. For example, if you find "1 cup butter, melted", the ingredient name should be just "butter", and you must create a new first step in the instructions array, eg: "Melt the butter."
-If an ingredient's quantity is listed with multiple units (e.g., '200g / 7 oz'), you must only use the first value and unit listed. The output for the example should be '200g'.
-
-If the webpage does not contain a culinary recipe, return only string "RECIPE_NOT_FOUND".
+${quantityFormatRules}
+If the webpage does not contain a culinary recipe, return {"error": "RECIPE_NOT_FOUND"}.
 `;
 
 const transcriptParsingSystemPrompt = `
@@ -39,7 +49,7 @@ You MUST return a single raw JSON object matching this exact structure. Do not i
 {
   "name": "Recipe Name (e.g., 'Spicy Chicken Stir-Fry')",
   "description": "A short, engaging description of the dish. Create a suitable description based on the ingredients and instructions.",
-  "ingredients": [ { "name": "Ingredient Name", "quantity": "e.g., '1 cup' or '200g'" } ],
+  "ingredients": [ { "name": "Ingredient Name", "quantity": "e.g., '1.5 cup' or '200 g'" } ],
   "instructions": [ "Step 1...", "Step 2..." ],
   "tags": [ "Tag 1", "Tag 2" ],
   "photoURL": null
@@ -47,8 +57,8 @@ You MUST return a single raw JSON object matching this exact structure. Do not i
 Add some relevant tags to the recipe in the "tags" array. Use the following tags and add them as applicable to the recipe:
 'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese', (or other cuisine type if it doesn't fit in one of these)
 DO NOT include markdown, code fences, or any text outside of the JSON object. The video won't have a photo, so always set photoURL to null.
-
-If the transcript or description do not contain a culinary recipe, return only string "RECIPE_NOT_FOUND".
+${quantityFormatRules}
+If the transcript or description do not contain a culinary recipe, return {"error": "RECIPE_NOT_FOUND"}.
 `;
 
 
@@ -146,9 +156,11 @@ route.post('/', async (c) => {
     }
 
     const recipe = JSON.parse(content);
-    if(recipe.name == 'RECIPE_NOT_FOUND') {
+    if (recipe === 'RECIPE_NOT_FOUND' || recipe.error === 'RECIPE_NOT_FOUND' || recipe.name === 'RECIPE_NOT_FOUND') {
       throw new Error('No recipe found in the provided content.')
     }
+    // Belt-and-braces: canonicalize whatever quantity strings the model produced
+    recipe.ingredients = normalizeIngredients(recipe.ingredients);
     return c.json(recipe);
   } catch (error) {
     console.error('Recipe import failed:', error);

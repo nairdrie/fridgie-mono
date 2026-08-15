@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';
 import { fs } from '@/utils/firebase';
+import { normalizeIngredients } from '@/utils/quantity';
 
 // --- Types ---
 export interface Ingredient {
@@ -51,7 +52,7 @@ You MUST return a raw JSON array with exactly 3 recipe objects, matching this st
         "name": "Recipe Name",
         "description": "A short, enticing description that highlights the main flavors or ingredients.",
         "ingredients": [
-            { "name": "Ingredient Name", "quantity": "e.g., 1 cup or 200g" }
+            { "name": "Ingredient Name", "quantity": "e.g., '1.5 cup' or '200 g'" }
         ],
         "instructions": [
             "Step 1...",
@@ -68,8 +69,14 @@ You MUST return a raw JSON array with exactly 3 recipe objects, matching this st
 Add some relevant tags to the recipe in the "tags" array. Use the following tags and add them as applicable to the recipe:
 'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 
 'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 
-'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese', 
+'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese',
 (or other cuisine type if it doesn't fit in one of these)
+
+Quantity format rules (apply to every ingredient's "quantity" field):
+- Express each quantity as "<decimal number> <unit>", where the unit is one of: g, kg, oz, lb, ml, l, tsp, tbsp, cup — or a bare number for countable items (e.g. "2" for 2 eggs).
+- Convert all fractions to decimals: "1 1/2 cups" → "1.5 cup", "½ tsp" → "0.5 tsp".
+- For ranges, use the smaller value: "2-3 cloves" → "2".
+- If the amount is not measurable, use "to taste" or an empty string.
 
 DO NOT include markdown, code fences, or any text outside of the JSON array.
 `;
@@ -145,7 +152,10 @@ route.post('/', async (c) => {
         }
 
         if (recipes.length === 0) throw new Error('Failed to parse a valid recipe array from AI response.');
-        
+
+        // Canonicalize whatever quantity strings the model produced
+        recipes = recipes.map((r) => ({ ...r, ingredients: normalizeIngredients(r.ingredients) }));
+
     return c.json(recipes);
 
     } catch (error) {
