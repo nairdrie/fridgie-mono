@@ -1,0 +1,32 @@
+# Build context is the REPO ROOT (see apps/api/Dockerfile), so this file — not
+# apps/api/.dockerignore — is what Docker reads. Without it the context would
+# include the mobile app's node_modules and native build output.
+
+**/node_modules
+.git
+.gitignore
+
+# the entire mobile app is irrelevant to the API image
+apps/mobile
+
+# docker meta
+**/Dockerfile*
+**/docker-compose*
+**/.dockerignore
+
+# editors / os
+.vscode
+.idea
+.DS_Store
+.editorconfig
+
+# secrets and local env
+**/.env
+**/.env.*
+**/firebase-service-account.json
+
+# docs, tests, coverage
+**/README.md
+LICENSE
+**/coverage*
+**/*.log
