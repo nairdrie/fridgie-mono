@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: api — typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      # packages/shared is source-only but declares its own dependency, and the
+      # API imports from it — so it has to be installed for resolution to work.
+      - name: Install shared
+        working-directory: packages/shared
+        run: npm ci --no-audit --no-fund
+
+      - name: Install api
+        working-directory: apps/api
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: apps/api
+        run: bunx tsc --noEmit
+
+      - name: Test
+        working-directory: apps/api
+        run: bun test
+
+  mobile:
+    name: mobile — typecheck & bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install shared
+        working-directory: packages/shared
+        run: npm ci --no-audit --no-fund
+
+      - name: Install mobile
+        working-directory: apps/mobile
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: apps/mobile
+        run: npx tsc --noEmit
+
+      # Typechecking alone would not catch a broken Metro resolution of
+      # packages/shared — the runtime shared modules only fail at bundle time.
+      - name: Bundle
+        working-directory: apps/mobile
+        run: npx expo export --platform ios --output-dir .ci-bundle-check
+
+  docker:
+    name: api — docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build context is the repo root, not apps/api — the image needs
+      # packages/shared. Building from apps/api would fail.
+      - name: Build image
+        run: docker build -f apps/api/Dockerfile -t fridgie-api .
