@@ -71,14 +71,37 @@ you don't *need* to do anything. To fix it properly:
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 ```
 
-`ios/` is not committed (unlike `android/`); `make ios` generates it via prebuild
-on first run, which also means the first build is slow — prebuild, then
-`pod install`, then a full compile. After that `make dev` alone is enough: Fast
-Refresh handles JS, and you only need to rebuild natively when a native
-dependency or `app.json` changes.
+The first build is slow — prebuild, then `pod install`, then a full compile.
+After that `make dev` alone is enough: Fast Refresh handles JS, and you only need
+to rebuild natively when a native dependency or `app.json` changes.
 
 Run `make doctor` if any of this looks wrong — it reports what's actually
 resolvable rather than what's installed.
+
+### Native projects are generated
+
+`ios/` and `android/` are **not** tracked. They're built from `app.json` and the
+config plugins by `expo prebuild` (Expo's Continuous Native Generation), which
+`make ios` / `make android` run for you. To regenerate both by hand:
+
+```bash
+make prebuild
+```
+
+**Never hand-edit anything under `ios/` or `android/`** — the next prebuild
+discards it. Native config goes in `app.json`, or in a config plugin. For
+example, iOS pods have to build as static frameworks (otherwise `AppCheckCore`,
+pulled in by Google Sign-In, can't import the non-modular `GoogleUtilities`),
+and that's expressed as:
+
+```jsonc
+["expo-build-properties", { "ios": { "useFrameworks": "static" } }]
+```
+
+not as an edit to `ios/Podfile`.
+
+`android/app/debug.keystore` is regenerated identically every time, so the debug
+signing SHA-1 registered in Firebase for Google Sign-In stays stable.
 
 Without Xcode, `make ios-build-cloud` builds a dev client through EAS that you
 install on a physical iPhone; `make dev` then live-reloads it over the LAN. Note

@@ -108,6 +108,10 @@ ios-build-cloud: ## Build a dev client via EAS (no local Xcode needed)
 android: ## Build and launch the Android dev client
 	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:android
 
+.PHONY: prebuild
+prebuild: ## Regenerate both native projects from app.json (discards local edits)
+	@cd $(MOBILE_DIR) && npx expo prebuild --clean
+
 # ── quality ──────────────────────────────────────────────────────────────────
 
 .PHONY: check
