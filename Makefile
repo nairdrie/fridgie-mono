@@ -23,6 +23,22 @@ API_URL ?= http://$(LAN_IP):$(API_PORT)/api
 
 BUN := $(shell command -v bun 2>/dev/null || echo /opt/homebrew/bin/bun)
 
+# `xcode-select` commonly points at the Command Line Tools even when Xcode is
+# installed, which makes xcodebuild refuse to run. Repointing it needs sudo, so
+# rather than demand that, just aim DEVELOPER_DIR at Xcode ourselves when we can
+# see it. Set DEVELOPER_DIR yourself to override.
+# CocoaPods aborts on a non-UTF-8 locale, which is easy to hit in a bare shell.
+export LANG ?= en_US.UTF-8
+
+XCODE_APP ?= /Applications/Xcode.app
+# Captured before the export below, or it would report the value we just set.
+XCODE_SELECTED := $(shell xcode-select -p 2>/dev/null)
+XCODE_FALLBACK := $(shell if ! xcodebuild -version >/dev/null 2>&1 && [ -d "$(XCODE_APP)/Contents/Developer" ]; \
+	then echo "$(XCODE_APP)/Contents/Developer"; fi)
+ifneq ($(XCODE_FALLBACK),)
+export DEVELOPER_DIR := $(XCODE_FALLBACK)
+endif
+
 CYAN := \033[36m
 DIM  := \033[2m
 BOLD := \033[1m
@@ -163,16 +179,26 @@ check-env: check-bun
 .PHONY: check-xcode
 check-xcode:
 	@if ! xcodebuild -version >/dev/null 2>&1; then \
-		printf "\033[31mFull Xcode is required to build for iOS.\033[0m\n\n"; \
-		printf "You currently have only the Command Line Tools:\n"; \
-		printf "  $$(xcode-select -p)\n\n"; \
-		printf "  1. Install Xcode from the App Store\n"; \
-		printf "  2. sudo xcode-select -s /Applications/Xcode.app/Contents/Developer\n"; \
-		printf "  3. xcodebuild -runFirstLaunch\n\n"; \
-		printf "No Xcode? Use $(BOLD)make ios-build-cloud$(OFF) to build a dev client with EAS,\n"; \
-		printf "install it on a physical iPhone, then run $(BOLD)make dev$(OFF) for live reload.\n"; \
+		printf "\033[31mCannot find a usable Xcode.\033[0m\n\n"; \
+		printf "xcode-select points at:  $$(xcode-select -p)\n"; \
+		printf "and $(XCODE_APP) is not present either.\n\n"; \
+		printf "Install Xcode from the App Store, then:\n"; \
+		printf "  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer\n"; \
+		printf "  xcodebuild -runFirstLaunch\n\n"; \
+		printf "Or skip local builds: $(BOLD)make ios-build-cloud$(OFF) builds a dev client with\n"; \
+		printf "EAS to install on a physical iPhone, then $(BOLD)make dev$(OFF) live-reloads it.\n"; \
 		exit 1; \
 	fi
+	@if [ -n "$(XCODE_FALLBACK)" ]; then \
+		printf "$(DIM)note: xcode-select points at $(XCODE_SELECTED), so this build\n"; \
+		printf "      uses DEVELOPER_DIR=$(XCODE_FALLBACK) instead.\n"; \
+		printf "      To fix it permanently (needs your password):\n"; \
+		printf "        sudo xcode-select -s $(XCODE_APP)/Contents/Developer$(OFF)\n\n"; \
+	fi
+	@command -v pod >/dev/null 2>&1 || { \
+		printf "\033[31mCocoaPods is required to build for iOS.\033[0m\n\n"; \
+		printf "  brew install cocoapods\n\n"; \
+		exit 1; }
 
 .PHONY: doctor
 doctor: ## Report on the local toolchain
