@@ -51,20 +51,34 @@ your current LAN IP automatically, which is what a physical device needs — pas
 
 ### iOS
 
-`make ios` builds and launches the dev client in the simulator. It needs **full
-Xcode** — Command Line Tools alone are not enough:
+```bash
+make ios
+```
+
+Builds and launches the dev client in the simulator. It needs full Xcode (not
+just Command Line Tools) and CocoaPods:
 
 ```bash
-# once
+brew install cocoapods
+```
+
+If `xcode-select` points at the Command Line Tools — the default on many
+machines, and it makes `xcodebuild` refuse to run — the Makefile aims
+`DEVELOPER_DIR` at `/Applications/Xcode.app` on its own and prints a note, so
+you don't *need* to do anything. To fix it properly:
+
+```bash
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-xcodebuild -runFirstLaunch
-sudo gem install cocoapods
 ```
 
 `ios/` is not committed (unlike `android/`); `make ios` generates it via prebuild
-on first run. After the dev client is installed, `make dev` alone is enough —
-Fast Refresh handles JS changes, and you only need to rebuild natively when a
-native dependency or `app.json` changes.
+on first run, which also means the first build is slow — prebuild, then
+`pod install`, then a full compile. After that `make dev` alone is enough: Fast
+Refresh handles JS, and you only need to rebuild natively when a native
+dependency or `app.json` changes.
+
+Run `make doctor` if any of this looks wrong — it reports what's actually
+resolvable rather than what's installed.
 
 Without Xcode, `make ios-build-cloud` builds a dev client through EAS that you
 install on a physical iPhone; `make dev` then live-reloads it over the LAN. Note
