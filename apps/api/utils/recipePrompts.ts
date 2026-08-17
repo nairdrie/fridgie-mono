@@ -1,7 +1,11 @@
-// Prompt fragments shared by every recipe importer (URL, video transcript,
-// photo). Kept in one place because these encode the contract with the shared
-// quantity engine — three copies of "how to write a quantity" is exactly the
-// kind of drift that produced the client/server split in the first place.
+// Prompt fragments and the JSON schema shared by everything that produces a
+// recipe (URL import, video transcript, photo, meal suggestions). Kept in one
+// place because these encode the contract with the shared quantity engine —
+// three copies of "how to write a quantity" is exactly the kind of drift that
+// produced the client/server split in the first place.
+//
+// Structure is now enforced by `recipeSchema` via structured outputs, so the
+// prose below only has to carry what a schema can't: meaning, not shape.
 
 /** Must stay in step with packages/shared/quantity.ts. */
 export const quantityFormatRules = `
@@ -14,25 +18,81 @@ Quantity format rules (apply to every ingredient's "quantity" field):
 - If the amount is not measurable, use "to taste" or an empty string.
 `;
 
+/** The closed vocabulary the app's tag filters understand. */
+export const TAGS = [
+  'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian',
+  'quick & easy', 'healthy & light', 'family friendly', 'comfort food',
+  'budget-friendly', 'adventurous', 'italian', 'mexican', 'american',
+  'mediterranean', 'indian', 'thai', 'japanese', 'chinese',
+] as const;
+
 export const tagVocabulary = `
 Add relevant tags in the "tags" array, drawn from this list where applicable:
-'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese' (or another cuisine if none of these fit).
+${TAGS.map((t) => `'${t}'`).join(', ')} (or another cuisine if none of these fit).
 `;
 
-export const recipeJsonShape = `
-You MUST return a single raw JSON object matching this exact structure, with no
-markdown, code fences, or any text outside the JSON:
-{
-  "name": "Recipe Name",
-  "description": "A short, engaging description of the dish. Paraphrase or write your own to avoid reproducing copyrighted text.",
-  "ingredients": [ { "name": "Ingredient Name", "quantity": "e.g. '1.5 cup' or '200 g' or '2-3 clove'" } ],
-  "instructions": [ "Step 1...", "Step 2..." ],
-  "tags": [ "Tag 1", "Tag 2" ],
-  "photoURL": "the photo URL of the recipe, if available, else null"
-}
+/** Semantics the schema can't express. The shape itself is enforced, not asked for. */
+export const recipeWritingRules = `
+Write the description yourself — a short, engaging line about the dish. Paraphrase
+rather than reproducing text from the source.
 Separate preparation methods from ingredient names. "1 cup butter, melted" gives
 the ingredient name "butter" and adds an instruction step such as "Melt the butter."
 `;
+
+const ingredientSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', description: 'The ingredient alone, with no preparation or quantity.' },
+    quantity: { type: 'string', description: "e.g. '1.5 cup', '200 g', '2-3 clove', '2', 'to taste'." },
+  },
+  required: ['name', 'quantity'],
+  additionalProperties: false,
+} as const;
+
+/** The recipe object every AI route produces. */
+export const recipeSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    description: { type: 'string' },
+    ingredients: { type: 'array', items: ingredientSchema },
+    instructions: { type: 'array', items: { type: 'string' } },
+    tags: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['name', 'description', 'ingredients', 'instructions', 'tags'],
+  additionalProperties: false,
+} as const;
+
+/**
+ * An import either found a recipe or it didn't. Modelling that as a field beats
+ * the old sentinel — the importers used to hunt for the literal string
+ * "RECIPE_NOT_FOUND" in three different places on the parsed object because
+ * the model could put it anywhere.
+ */
+export const importedRecipeSchema = {
+  type: 'object',
+  properties: {
+    found: { type: 'boolean', description: 'False if the source contains no culinary recipe.' },
+    recipe: {
+      anyOf: [
+        {
+          ...recipeSchema,
+          properties: {
+            ...recipeSchema.properties,
+            photoURL: {
+              anyOf: [{ type: 'string' }, { type: 'null' }],
+              description: 'A photo of the finished dish if the source has one, else null.',
+            },
+          },
+          required: [...recipeSchema.required, 'photoURL'],
+        },
+        { type: 'null' },
+      ],
+    },
+  },
+  required: ['found', 'recipe'],
+  additionalProperties: false,
+} as const;
 
 /** Photographs of a printed or handwritten recipe — a page, card, or book. */
 export const photoParsingSystemPrompt = `
@@ -47,9 +107,9 @@ Transcribe what is actually written. Read carefully:
 - Never invent an ingredient or a step you cannot actually read. If a quantity
   is illegible, use an empty string rather than guessing a number.
 
-${recipeJsonShape}
+${recipeWritingRules}
 ${tagVocabulary}
 ${quantityFormatRules}
 Set "photoURL" to null — a photo of a page is not a photo of the finished dish.
-If the image does not contain a culinary recipe, return {"error": "RECIPE_NOT_FOUND"}.
+If the image does not contain a culinary recipe, set "found" to false and "recipe" to null.
 `;

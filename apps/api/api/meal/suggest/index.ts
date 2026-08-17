@@ -1,167 +1,320 @@
-// TODO: inject random themes into the prompt to introduce variability.
-// TODO: check the users cookbook to get more personalized results. 
-
 import { Hono } from 'hono';
-import OpenAI from 'openai';
+import { FieldPath } from 'firebase-admin/firestore';
 import { auth } from '@/middleware/auth';
 import { fs } from '@/utils/firebase';
 import { normalizeIngredients } from '@/utils/quantity';
+import { completeJson, models } from '@/utils/claude';
+import {
+  quantityFormatRules,
+  recipeSchema,
+  recipeWritingRules,
+  tagVocabulary,
+} from '@/utils/recipePrompts';
 
 // --- Types ---
 export interface Ingredient {
-    name: string;
-    quantity: string;
+  name: string;
+  quantity: string;
 }
 
 export interface Recipe {
-    id: string;
-    photoURL?: string;
-    name: string;
-    description: string;
-    ingredients: Ingredient[];
-    instructions: string[];
+  id: string;
+  photoURL?: string;
+  name: string;
+  description: string;
+  ingredients: Ingredient[];
+  instructions: string[];
 }
 
 interface MealPreferences {
-    dietaryNeeds?: string[];
-    cookingStyles?: string[];
-    cuisines?: string[];
-    dislikedIngredients?: string[];
-    query?: string;
+  dietaryNeeds?: string[];
+  cookingStyles?: string[];
+  cuisines?: string[];
+  dislikedIngredients?: string[] | string;
+  query?: string;
 }
 
 interface SuggestionRequestBody {
-    vetoedTitles?: string[];
+  vetoedTitles?: string[];
 }
 
-// --- Hono Route Setup ---
 const route = new Hono();
 
-const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
-const openai = new OpenAI({
-  apiKey
-});
+// ---------------------------------------------------------------------------
+// Variety
+//
+// Temperature was never the constraint here (it defaults to 1.0 and the old
+// code never touched it). The constraint was that every request sent a prompt
+// with no distinguishing features, so the model landed in the same
+// neighbourhood of dish-space every time. Sampling a few axes server-side and
+// stating them in one line moves the starting point without growing the prompt.
+// ---------------------------------------------------------------------------
 
+const COOKING_METHODS = [
+  'sheet-pan roasting', 'a single skillet', 'braising', 'grilling or broiling',
+  'stir-frying', 'a soup or stew pot', 'the slow cooker', 'baking',
+  'poaching or steaming', 'no cooking at all (assembly only)', 'pan-searing then finishing in the oven',
+];
+
+const EFFORT_LEVELS = [
+  'a 30-minute weeknight, minimal prep',
+  'about an hour, some chopping',
+  'mostly hands-off — the oven or pot does the work',
+  'a weekend cook worth taking time over',
+];
+
+const CUISINE_POOL = [
+  'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai',
+  'japanese', 'chinese', 'korean', 'middle eastern', 'french', 'greek',
+  'spanish', 'vietnamese', 'caribbean', 'north african',
+];
+
+/**
+ * Protein slots, one per suggested recipe.
+ *
+ * The model left to itself skews vegetarian well past what this app's own
+ * corpus looks like (37 of 143 recipes are tagged vegetarian; 117 are comfort
+ * food). Naming the slot for each recipe fixes the mix instead of hoping for
+ * it — and keeps the plant-forward option present rather than absent.
+ */
+const PROTEIN_SLOTS: Record<string, string[][]> = {
+  omnivore: [
+    ['chicken thighs', 'chicken breast', 'a whole roast chicken', 'turkey'],
+    ['ground beef', 'a beef steak or roast', 'pork chops', 'pork shoulder', 'sausage'],
+    ['white fish', 'salmon', 'shrimp', 'beans or lentils', 'eggs', 'tofu or paneer'],
+  ],
+  pescatarian: [
+    ['white fish', 'salmon', 'tuna'],
+    ['shrimp', 'mussels or clams', 'squid', 'crab'],
+    ['beans or lentils', 'eggs', 'tofu or paneer', 'a vegetable as the centrepiece'],
+  ],
+  vegetarian: [
+    ['beans, lentils or chickpeas', 'eggs', 'paneer or halloumi'],
+    ['tofu or tempeh', 'mushrooms as the centrepiece', 'a hearty grain'],
+    ['a roasted vegetable as the centrepiece', 'cheese-forward', 'nuts or seeds for substance'],
+  ],
+  vegan: [
+    ['beans, lentils or chickpeas', 'tofu or tempeh'],
+    ['mushrooms as the centrepiece', 'a hearty grain', 'nuts or seeds for substance'],
+    ['a roasted vegetable as the centrepiece', 'squash or root vegetables', 'cauliflower or aubergine'],
+  ],
+};
+
+const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)]!;
+
+/** vegan beats vegetarian beats pescatarian — the strictest wins. */
+function dietOf(needs: string[] = []): keyof typeof PROTEIN_SLOTS {
+  const lower = needs.map((n) => n.toLowerCase());
+  if (lower.some((n) => n.includes('vegan'))) return 'vegan';
+  if (lower.some((n) => n.includes('vegetarian'))) return 'vegetarian';
+  if (lower.some((n) => n.includes('pescatarian'))) return 'pescatarian';
+  return 'omnivore';
+}
+
+// ---------------------------------------------------------------------------
+// Corpus seeding
+//
+// The app already holds ~140 real recipes people chose to save. That
+// distribution is a better description of "what people round here cook" than
+// anything a prompt can assert, so a sample of it goes in as register — the
+// point is the neighbourhood, explicitly not the dishes themselves.
+// ---------------------------------------------------------------------------
+
+const CORPUS_SAMPLE = 8;
+const COOKBOOK_SAMPLE = 8;
+
+/** Random-cursor sample over document IDs — same trick /api/explore uses. */
+async function sampleCorpusNames(n: number): Promise<string[]> {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let randomKey = '';
+  for (let i = 0; i < 20; i++) randomKey += chars.charAt(Math.floor(Math.random() * chars.length));
+
+  const forward = await fs
+    .collection('recipes')
+    .where(FieldPath.documentId(), '>=', randomKey)
+    .select('name')
+    .limit(n)
+    .get();
+
+  const names = forward.docs.map((d) => d.data()?.name).filter(Boolean) as string[];
+
+  if (names.length < n) {
+    const wrap = await fs
+      .collection('recipes')
+      .where(FieldPath.documentId(), '<', randomKey)
+      .select('name')
+      .limit(n - names.length)
+      .get();
+    names.push(...(wrap.docs.map((d) => d.data()?.name).filter(Boolean) as string[]));
+  }
+  return names;
+}
+
+async function cookbookNames(uid: string, n: number): Promise<string[]> {
+  const snap = await fs
+    .collection('users').doc(uid).collection('cookbook')
+    .orderBy('addedAt', 'desc')
+    .select('name')
+    .limit(n)
+    .get();
+  return snap.docs.map((d) => d.data()?.name).filter(Boolean) as string[];
+}
+
+// ---------------------------------------------------------------------------
+// Recently suggested
+//
+// This list used to live in React state on the modal, which meant it emptied
+// every time the sheet closed: a daily user got the same three dinners every
+// day and the veto only held for as long as they kept re-rolling. Persisting it
+// on the user doc is what makes "don't show me that again" mean anything.
+// ---------------------------------------------------------------------------
+
+/** ~15 rounds of history. Long enough to force variety, short enough that a good dish can come back. */
+const RECENT_TITLES_CAP = 45;
+
+const suggestionsSchema = {
+  type: 'object',
+  properties: {
+    recipes: { type: 'array', items: recipeSchema },
+  },
+  required: ['recipes'],
+  additionalProperties: false,
+} as const;
+
+// Stable across every request, so it carries the prompt-cache breakpoint.
+// Everything that varies — seeds, slots, corpus sample, vetoes — goes in the
+// user turn, where a change costs one turn instead of the whole prefix.
 const systemPrompt = `
-You are a creative recipe assistant. Your task is to generate 3 unique and varied meal recipes based on user preferences.
-Ensure the recipes are distinct from one another (e.g., different primary proteins, cooking methods, or flavor profiles).
+You are a recipe assistant suggesting exactly 3 dinners someone will actually cook.
 
-You MUST return a raw JSON array with exactly 3 recipe objects, matching this structure:
-[
-    {
-        "name": "Recipe Name",
-        "description": "A short, enticing description that highlights the main flavors or ingredients.",
-        "ingredients": [
-            { "name": "Ingredient Name", "quantity": "e.g., '1.5 cup' or '200 g'" }
-        ],
-        "instructions": [
-            "Step 1...",
-            "Step 2...",
-            "Step 3..."
-        ],
-        "tags": [
-            "Tag 1",
-            "Tag 2"
-        ]
-    }
-]
+The three must be genuinely distinct from one another — different primary
+protein, different cooking method, different flavour profile. Three variations
+on a theme is a failed suggestion set.
 
-Add some relevant tags to the recipe in the "tags" array. Use the following tags and add them as applicable to the recipe:
-'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian', 
-'quick & easy', 'healthy & light', 'family friendly', 'comfort food', 'budget-friendly', 'adventurous', 
-'italian', 'mexican', 'american', 'mediterranean', 'indian', 'thai', 'japanese', 'chinese',
-(or other cuisine type if it doesn't fit in one of these)
+Aim for food that is appealing and specific rather than clever: a real dish with
+a real name, not a fusion invention. Assume an ordinary supermarket and an
+ordinary kitchen unless the request says otherwise.
 
-Quantity format rules (apply to every ingredient's "quantity" field):
-- Express each quantity as "<decimal number> <unit>", where the unit is one of: g, kg, oz, lb, ml, l, tsp, tbsp, cup — or a bare number for countable items (e.g. "2" for 2 eggs).
-- Convert all fractions to decimals: "1 1/2 cups" → "1.5 cup", "½ tsp" → "0.5 tsp".
-- For ranges, use the smaller value: "2-3 cloves" → "2".
-- If the amount is not measurable, use "to taste" or an empty string.
-
-DO NOT include markdown, code fences, or any text outside of the JSON array.
+${recipeWritingRules}
+${tagVocabulary}
+${quantityFormatRules}
 `;
 
-// --- Middleware ---
 route.use('*', auth);
 
-// --- Route Handler ---
 route.post('/', async (c) => {
-    const uid = c.get('uid') as string;
+  const uid = c.get('uid') as string;
 
-    // Read optional 'vetoedTitles' from the request body
-    let vetoedTitles: string[] = [];
-    try {
-        const body = await c.req.json<SuggestionRequestBody>();
-        if (body.vetoedTitles && Array.isArray(body.vetoedTitles)) {
-            vetoedTitles = body.vetoedTitles;
-        }
-    } catch (e) {
-        // Ignore errors if the body is empty or not valid JSON
-    }
-    
-    // Fetch user's meal preferences from their document in the 'users' collection
-    const userRef = fs.collection('users').doc(uid);
-    const userDoc = await userRef.get();
-    const userData = userDoc.data();
+  // Session vetoes from the current re-roll; merged with the persisted history.
+  let sessionVetoes: string[] = [];
+  try {
+    const body = await c.req.json<SuggestionRequestBody>();
+    if (Array.isArray(body?.vetoedTitles)) sessionVetoes = body.vetoedTitles.filter(Boolean);
+  } catch {
+    // Empty or invalid body is fine — there just aren't any vetoes.
+  }
 
-    // Check if the user document or the preferences field exists
-    if (!userDoc.exists || !userData?.preferences) {
-        return c.json({ error: 'Meal preferences not set.', action: 'redirect_to_preferences' }, 404);
-    }
+  const userRef = fs.collection('users').doc(uid);
+  const userDoc = await userRef.get();
+  const userData = userDoc.data();
 
-    // Construct the prompt for the AI based on the nested preferences object
-    const preferences = userData.preferences as MealPreferences;
-    const userPromptParts: string[] = ['Generate recipes based on these preferences:'];
+  if (!userDoc.exists || !userData?.preferences) {
+    return c.json({ error: 'Meal preferences not set.', action: 'redirect_to_preferences' }, 404);
+  }
 
-    if (preferences.dietaryNeeds?.length) userPromptParts.push(`- Dietary Needs: ${preferences.dietaryNeeds.join(', ')}.`);
-    if (preferences.cookingStyles?.length) userPromptParts.push(`- Preferred Cooking Styles: ${preferences.cookingStyles.join(', ')}.`);
-    if (preferences.cuisines?.length) userPromptParts.push(`- Preferred Cuisines: ${preferences.cuisines.join(', ')}.`);
-    if (preferences.dislikedIngredients?.length) userPromptParts.push(`- Must NOT contain: ${preferences.dislikedIngredients}.`);
-    
-    if (vetoedTitles.length > 0) {
-        userPromptParts.push(`- Do NOT suggest any recipes closely related to the following: ${vetoedTitles.join(', ')}.`);
-    }
+  const preferences = userData.preferences as MealPreferences;
+  const storedRecent: string[] = Array.isArray(userData?.mealSuggestions?.recentTitles)
+    ? userData.mealSuggestions.recentTitles
+    : [];
 
-    const userPrompt = userPromptParts.length > 1 ? userPromptParts.join('\n') : 'Generate any 3 varied recipes.';
+  // Dedupe case-insensitively; a re-roll and the stored history overlap heavily.
+  const avoid = [...storedRecent, ...sessionVetoes].reduce<string[]>((acc, title) => {
+    if (!acc.some((t) => t.toLowerCase() === title.toLowerCase())) acc.push(title);
+    return acc;
+  }, []);
 
-    try {
-        // Step 1: Generate recipe suggestions from OpenAI
-        const completion = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt }
-            ],
-            response_format: { type: "json_object" },
-        });
+  // Seeds. Cuisine leans on the user's stated preferences when they have any,
+  // and otherwise roams — a fixed pool of three preferred cuisines is its own
+  // kind of rut.
+  const cuisinePool = preferences.cuisines?.length ? preferences.cuisines : CUISINE_POOL;
+  const seeds = {
+    cuisine: pick(cuisinePool),
+    method: pick(COOKING_METHODS),
+    effort: pick(EFFORT_LEVELS),
+  };
 
-        const content = completion.choices?.[0]?.message?.content;
-        if (!content) throw new Error('AI returned empty content.');
-        
-        // Parse the AI's JSON response to get the recipes array
-        let recipes: Omit<Recipe, 'id'>[] = [];
-        const parsedContent = JSON.parse(content);
+  const slots = PROTEIN_SLOTS[dietOf(preferences.dietaryNeeds)]!;
+  const composition = slots.map((slot, i) => `  ${i + 1}. built around ${pick(slot)}`).join('\n');
 
-        // This logic handles cases where the AI might return an object with a 'recipes' key
-        // instead of a raw array, making parsing more robust.
-        if (Array.isArray(parsedContent)) {
-            recipes = parsedContent;
-        } else if (typeof parsedContent === 'object' && parsedContent !== null) {
-            const key = Object.keys(parsedContent).find(k => Array.isArray(parsedContent[k]));
-            if (key) recipes = parsedContent[key];
-        }
+  const [corpus, cookbook] = await Promise.all([
+    sampleCorpusNames(CORPUS_SAMPLE).catch(() => [] as string[]),
+    cookbookNames(uid, COOKBOOK_SAMPLE).catch(() => [] as string[]),
+  ]);
 
-        if (recipes.length === 0) throw new Error('Failed to parse a valid recipe array from AI response.');
+  const parts: string[] = ['Suggest 3 dinners.', ''];
 
-        // Canonicalize whatever quantity strings the model produced
-        recipes = recipes.map((r) => ({ ...r, ingredients: normalizeIngredients(r.ingredients) }));
+  parts.push('Compose the set like this:', composition, '');
+  parts.push(
+    `Let one of the three lean ${seeds.cuisine}. Somewhere in the set, use ${seeds.method}.`,
+    `Pitch the effort at: ${seeds.effort}.`,
+    '',
+  );
+
+  if (preferences.dietaryNeeds?.length) parts.push(`Dietary needs (hard constraints): ${preferences.dietaryNeeds.join(', ')}.`);
+  if (preferences.cookingStyles?.length) parts.push(`Preferred cooking styles: ${preferences.cookingStyles.join(', ')}.`);
+  if (preferences.cuisines?.length) parts.push(`Cuisines they like: ${preferences.cuisines.join(', ')}.`);
+
+  const disliked = Array.isArray(preferences.dislikedIngredients)
+    ? preferences.dislikedIngredients.join(', ')
+    : preferences.dislikedIngredients;
+  if (disliked) parts.push(`Must NOT contain: ${disliked}.`);
+
+  // Free text from the preferences screen. The old prompt builder declared this
+  // field and then never read it, so anything typed here was silently dropped.
+  if (preferences.query) parts.push(`In their words: ${preferences.query}`);
+
+  if (cookbook.length) {
+    parts.push('', `Dishes they have saved to their own cookbook: ${cookbook.join(', ')}.`);
+  }
+  if (corpus.length) {
+    parts.push(
+      `Dishes other people on this app save: ${corpus.join(', ')}.`,
+      'Those two lists are the register to aim for, not a menu to copy — do not suggest any of them.',
+    );
+  }
+
+  if (avoid.length) {
+    parts.push('', `Recently suggested to this person — do not repeat or closely echo: ${avoid.join(', ')}.`);
+  }
+
+  try {
+    const result = await completeJson<{ recipes: Omit<Recipe, 'id'>[] }>({
+      model: models.mealSuggest,
+      system: systemPrompt,
+      user: parts.join('\n'),
+      schema: suggestionsSchema,
+      effort: 'medium',
+    });
+
+    const recipes = (result.recipes ?? []).map((r) => ({
+      ...r,
+      ingredients: normalizeIngredients(r.ingredients),
+    }));
+
+    if (recipes.length === 0) throw new Error('Claude returned no recipes.');
+
+    // Roll the history forward. Best-effort: a failed write costs variety on
+    // the next call, which is not worth failing a good suggestion over.
+    const nextRecent = [...storedRecent, ...recipes.map((r) => r.name)].slice(-RECENT_TITLES_CAP);
+    userRef
+      .set({ mealSuggestions: { recentTitles: nextRecent } }, { merge: true })
+      .catch((e) => console.error('Failed to persist suggestion history:', e));
 
     return c.json(recipes);
-
-    } catch (error) {
+  } catch (error) {
     console.error('AI suggestion failed:', error);
-        return c.json({ error: 'Failed to generate a meal suggestion.' }, 500);
-    }
+    return c.json({ error: 'Failed to generate a meal suggestion.' }, 500);
+  }
 });
 
 export default route;

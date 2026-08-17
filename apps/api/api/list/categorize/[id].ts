@@ -2,19 +2,51 @@ import { Hono } from 'hono';
 import { adminRtdb } from '@/utils/firebase';
 import { LexoRank } from 'lexorank';
 import { v4 as uuid } from 'uuid';
-import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';
 import { groupAuth } from '@/middleware/groupAuth';
 import { mutateList } from '@/utils/listStore';
+import { completeJson, models } from '@/utils/claude';
 
 const route = new Hono();
 
 route.use('*', auth, groupAuth)
 
-const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
-const openai = new OpenAI({
-  apiKey
-});
+/** Supermarket aisles, in the order they tend to appear. */
+const SECTIONS = [
+  'Produce', 'Meat & Poultry', 'Seafood', 'Deli', 'Bakery', 'Dairy & Eggs',
+  'Frozen Foods', 'Pantry', 'Canned Goods', 'Baking', 'Beverages',
+  'Snacks & Candy', 'Health & Beauty', 'Household Essentials', 'Pet Supplies',
+  'International', 'Floral', 'Alcohol',
+] as const;
+
+// An invented section name used to fall through to the "Other" bucket at the
+// bottom of this file; as an enum the schema simply won't allow one.
+const categorizationSchema = {
+  type: 'object',
+  properties: {
+    sections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', enum: [...SECTIONS] },
+          items: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['name', 'items'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['sections'],
+  additionalProperties: false,
+} as const;
+
+const categorizeSystemPrompt = `
+You sort grocery items into supermarket sections.
+Copy each item's text through to the output exactly as given — do not rename,
+correct, pluralise, or tidy it. Every item must appear in exactly one section.
+Only include sections that end up with at least one item.
+`;
 
 // Helper to normalize text for consistent cache keys
 const normalizeItemText = (text: string) => {
@@ -102,31 +134,18 @@ route.post('/', async (c) => {
   }
 
   if (itemsForAI.length > 0) {
-    const prompt = [
-      `Group items:${JSON.stringify(itemsForAI)} into sections;`,
-      `Return only raw JSON—no markdown, no code fences—of the form`,
-      `{"sections":[{"name":string,"items":[string]}]}.`,
-      `Use sections:Produce,Meat & Poultry,Seafood,Deli,Bakery,Dairy & Eggs,Frozen Foods,Pantry,Canned Goods,Baking,Beverages,Snacks & Candy,Health & Beauty,Household Essentials,Pet Supplies,International,Floral,Alcohol.`,
-      `Only include sections that contain one or more items from the provided list.`
-    ].join(' ');
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    const content = completion.choices?.[0]?.message?.content;
-    if (!content) {
-      console.error('LLM returned empty content');
-      return c.text('Categorization failed: empty response', 500);
-    }
-
     let parsed: { sections: { name: string; items: string[] }[] };
     try {
-      parsed = JSON.parse(content);
+      parsed = await completeJson({
+        model: models.categorize,
+        system: categorizeSystemPrompt,
+        user: `Sort these items:\n${JSON.stringify(itemsForAI)}`,
+        schema: categorizationSchema,
+        effort: 'low',
+      });
     } catch (err) {
-      console.error('Failed to parse LLM JSON:', err);
-      return c.text('Categorization failed: invalid JSON', 500);
+      console.error('Categorization failed:', err);
+      return c.text('Categorization failed', 500);
     }
 
     const cacheUpdates: { [key: string]: string } = {};

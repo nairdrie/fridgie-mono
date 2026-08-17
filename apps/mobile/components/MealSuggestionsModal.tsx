@@ -21,6 +21,9 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
     const [mealSuggestions, setMealSuggestions] = useState<Recipe[]>([]);
     const [selectedSuggestions, setSelectedSuggestions] = useState<Record<string, boolean>>({});
     const [isSuggesting, setIsSuggesting] = useState(false);
+    // The server persists everything it has suggested to this user, so variety
+    // survives closing the sheet. This local copy only covers the gap before
+    // that write lands — a fast re-roll can outrun it.
     const [vetoedMeals, setVetoedMeals] = useState<string[]>([]);
     const [suggestionModalStep, setSuggestionModalStep] = useState<'confirm' | 'loading' | 'results'>('confirm');
     const [mealPreferences, setMealPreferences] = useState<MealPreferences | null>(null);

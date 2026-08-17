@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';
 import { normalizeIngredients } from '@/utils/quantity';
-import { photoParsingSystemPrompt } from '@/utils/recipePrompts';
+import { completeJson, models } from '@/utils/claude';
+import { importedRecipeSchema, photoParsingSystemPrompt } from '@/utils/recipePrompts';
 
 // POST /api/recipe/import/photo
 // Body: { image: "data:image/jpeg;base64,..." }
@@ -18,12 +18,14 @@ import { photoParsingSystemPrompt } from '@/utils/recipePrompts';
 
 const route = new Hono();
 
-const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
-const openai = new OpenAI({ apiKey });
-
 /** Generous enough for a high-quality page photo, small enough to reject abuse. */
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const DATA_URL_RE = /^data:image\/(jpeg|jpg|png|webp|heic|heif);base64,([A-Za-z0-9+/=]+)$/;
+
+/** The image block takes the raw base64 and its media type, not a data URL. */
+const MEDIA_TYPES = {
+  jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+} as const;
 
 route.use('*', auth);
 
@@ -42,7 +44,15 @@ route.post('/', async (c) => {
 
   const match = image.match(DATA_URL_RE);
   if (!match) {
-    return c.json({ error: 'image must be a base64 data URL of a jpeg, png, webp or heic' }, 400);
+    return c.json({ error: 'image must be a base64 data URL of a jpeg, png or webp' }, 400);
+  }
+
+  // Claude reads jpeg, png, gif and webp. HEIC has to be rejected here with a
+  // usable message rather than sent on to fail as an opaque 400 upstream.
+  const format = match[1]!.toLowerCase();
+  const mediaType = MEDIA_TYPES[format as keyof typeof MEDIA_TYPES];
+  if (!mediaType) {
+    return c.json({ error: 'HEIC photos are not supported. Please retake or export as JPEG.' }, 415);
   }
 
   // base64 is ~4/3 of the byte length; check before handing it to the model.
@@ -52,26 +62,20 @@ route.post('/', async (c) => {
   }
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: photoParsingSystemPrompt },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'Extract the recipe from this photo.' },
-            { type: 'image_url', image_url: { url: image, detail: 'high' } },
-          ],
-        },
+    // Reading a shadowed, angled page of someone's handwriting is a perception
+    // problem, not an extraction one — worth more thinking than the URL importer.
+    const { found, recipe } = await completeJson<{ found: boolean; recipe: any }>({
+      model: models.recipePhoto,
+      system: photoParsingSystemPrompt,
+      user: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: match[2]! } },
+        { type: 'text', text: 'Extract the recipe from this photo.' },
       ],
-      response_format: { type: 'json_object' },
+      schema: importedRecipeSchema,
+      effort: 'medium',
     });
 
-    const content = completion.choices?.[0]?.message?.content;
-    if (!content) throw new Error('AI returned empty content.');
-
-    const recipe = JSON.parse(content);
-    if (recipe?.error === 'RECIPE_NOT_FOUND' || recipe?.name === 'RECIPE_NOT_FOUND') {
+    if (!found || !recipe) {
       return c.json({ error: 'RECIPE_NOT_FOUND' }, 422);
     }
 

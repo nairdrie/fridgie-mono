@@ -125,9 +125,17 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       // On successful import, go to the manual editing mode with the imported data
       setEditingRecipe(prev => ({ ...importedRecipe, id: prev!.id }));
       setCreationMode('manual');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to import recipe", error);
-      Alert.alert("Import Failed", "Couldn't get the recipe from that URL. Please try a different link.");
+      // The URL importer now distinguishes "that page has no recipe" from
+      // "the import broke", the same way the photo importer does.
+      const notARecipe = typeof error?.message === 'string' && error.message.includes('RECIPE_NOT_FOUND');
+      Alert.alert(
+        notARecipe ? 'No recipe found' : 'Import failed',
+        notARecipe
+          ? "That page doesn't seem to have a recipe on it. Try a different link."
+          : "Couldn't get the recipe from that URL. Please try a different link."
+      );
     } finally {
       setIsImporting(false);
     }

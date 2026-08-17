@@ -1,56 +1,42 @@
 import { Hono } from 'hono';
-import OpenAI from 'openai';
 import { auth } from '@/middleware/auth';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { normalizeIngredients } from '@/utils/quantity';
+import { completeJson, models } from '@/utils/claude';
 // Shared with the photo importer so the quantity contract has one definition.
 // The old inline copy told the model to collapse ranges ("2-3" -> "2"), which
 // is now wrong: the quantity engine keeps both ends so totals don't under-buy.
-import { quantityFormatRules, tagVocabulary } from '@/utils/recipePrompts';
+import {
+  importedRecipeSchema,
+  quantityFormatRules,
+  recipeWritingRules,
+  tagVocabulary,
+} from '@/utils/recipePrompts';
 
 const route = new Hono();
 
-const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
-const openai = new OpenAI({ apiKey });
-
-// --- Your existing prompts remain the same ---
+// Both prompts below are constant, so each one caches independently on its own
+// prefix. Nothing per-request may be appended to them.
 
 const htmlParsingSystemPrompt = `
-You are an expert recipe parsing assistant. Your task is to analyze the provided HTML content from a recipe webpage and extract the recipe details.
-Pay attention to HTML tags like <h1>, <h2> for the name, <ul> and <li> for ingredients, and <ol> and <li> for instructions to identify the correct content.
-You MUST return a single raw JSON object matching this exact structure. Do not include any other text, markdown, or code fences.
-{
-  "name": "Recipe Name",
-  "description": "A short, engaging description of the dish. Paraphrase or make up your own to avoid copyright infringement.",
-  "ingredients": [ { "name": "Ingredient Name", "quantity": "e.g., '1.5 cup' or '200 g'" } ],
-  "instructions": [ "Step 1...", "Step 2..." ],
-  "tags": [ "Tag 1", "Tag 2" ],
-  "photoURL": "the photo URL of the recipe, if available"
-}
+You are an expert recipe parsing assistant. Analyze the provided HTML from a recipe webpage and extract the recipe.
+Pay attention to tags like <h1>/<h2> for the name, <ul>/<li> for ingredients, and <ol>/<li> for instructions.
+Set "photoURL" to the URL of a photo of the finished dish if the page has one, else null.
+${recipeWritingRules}
 ${tagVocabulary}
-DO NOT include markdown, code fences, or any text outside of the JSON object.
-Separate preparation methods from ingredient names. For example, if you find "1 cup butter, melted", the ingredient name should be just "butter", and you must create a new first step in the instructions array, eg: "Melt the butter."
 ${quantityFormatRules}
-If the webpage does not contain a culinary recipe, return {"error": "RECIPE_NOT_FOUND"}.
+If the page does not contain a culinary recipe, set "found" to false and "recipe" to null.
 `;
 
 const transcriptParsingSystemPrompt = `
-You are an expert recipe parsing assistant. Your task is to analyze the provided transcript and video description from a cooking video and extract the recipe details.
-The transcript will be unstructured text. You must infer the ingredients, quantities, and instructions from the spoken words.
-You MUST return a single raw JSON object matching this exact structure. Do not include any other text, markdown, or code fences.
-{
-  "name": "Recipe Name (e.g., 'Spicy Chicken Stir-Fry')",
-  "description": "A short, engaging description of the dish. Create a suitable description based on the ingredients and instructions.",
-  "ingredients": [ { "name": "Ingredient Name", "quantity": "e.g., '1.5 cup' or '200 g'" } ],
-  "instructions": [ "Step 1...", "Step 2..." ],
-  "tags": [ "Tag 1", "Tag 2" ],
-  "photoURL": null
-}
+You are an expert recipe parsing assistant. Analyze the transcript and description from a cooking video and extract the recipe.
+The transcript is unstructured speech — infer the ingredients, quantities, and instructions from what is said.
+A video has no still photo, so always set "photoURL" to null.
+${recipeWritingRules}
 ${tagVocabulary}
-DO NOT include markdown, code fences, or any text outside of the JSON object. The video won't have a photo, so always set photoURL to null.
 ${quantityFormatRules}
-If the transcript or description do not contain a culinary recipe, return {"error": "RECIPE_NOT_FOUND"}.
+If the transcript and description do not contain a culinary recipe, set "found" to false and "recipe" to null.
 `;
 
 
@@ -133,24 +119,18 @@ route.post('/', async (c) => {
     }
 
     // --- COMMON AI LOGIC ---
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userInput },
-      ],
-      response_format: { type: 'json_object' },
+    const { found, recipe } = await completeJson<{ found: boolean; recipe: any }>({
+      model: models.recipeImport,
+      system: systemPrompt,
+      user: userInput,
+      schema: importedRecipeSchema,
+      effort: 'low',
     });
 
-    const content = completion.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error('AI returned empty content.');
+    if (!found || !recipe) {
+      return c.json({ error: 'RECIPE_NOT_FOUND' }, 422);
     }
 
-    const recipe = JSON.parse(content);
-    if (recipe === 'RECIPE_NOT_FOUND' || recipe.error === 'RECIPE_NOT_FOUND' || recipe.name === 'RECIPE_NOT_FOUND') {
-      throw new Error('No recipe found in the provided content.')
-    }
     // Belt-and-braces: canonicalize whatever quantity strings the model produced
     recipe.ingredients = normalizeIngredients(recipe.ingredients);
     return c.json(recipe);

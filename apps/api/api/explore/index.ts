@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
 import { fs } from '@/utils/firebase'; // Assuming you use Firestore for recipes
 import { getAuth } from 'firebase-admin/auth';
-import OpenAI from 'openai';
 import { FieldPath } from 'firebase-admin/firestore';
 import type { Recipe } from '@/utils/types';
 
@@ -21,11 +20,6 @@ interface Creator {
 
 const route = new Hono();
 route.use('*', auth);
-
-const apiKey = process.env.OPENAI_API_KEY || Bun.env.OPENAI_API_KEY;
-const openai = new OpenAI({
-  apiKey
-});
 
 // GET /api/explore
 route.get('/', async (c) => {
