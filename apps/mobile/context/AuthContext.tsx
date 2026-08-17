@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useSegments } from 'expo-router';
 import { onAuthStateChanged, signInAnonymously, updateProfile, User } from 'firebase/auth';
 import { goOnline, onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
-import React, { useCallback, useRef, createContext, useContext, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useMemo, createContext, useContext, useEffect, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 
 interface UserProfileWithPresence extends UserProfile {
@@ -53,6 +53,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // const [profile, setProfile] = useState<UserProfile | null>(null);
   const [groups, setGroups] = useState<GroupWithPresence[]>([]);
   const [groupsError, setGroupsError] = useState<Error | null>(null);
+  /** Live presence per uid, kept separate from `groups` and merged at render. */
+  const [presence, setPresence] = useState<Record<string, { online?: boolean; lastOnline?: number }>>({});
   // Bumping this re-runs the group fetch. Without it a single failed load was
   // permanent: selectedGroup stayed null, so ListContext cleared with no error
   // of its own, and the whole header silently rendered nothing.
@@ -154,11 +156,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
+  // Keyed on the uid, NOT the user object. refreshAuthUser deliberately hands
+  // back a fresh object reference to retrigger effects elsewhere, and this one
+  // writes `online: false` in its cleanup — so every refresh marked you offline
+  // immediately, then only restored `online: true` after an onDisconnect
+  // round-trip. Anything interrupting that window left you showing offline.
   useEffect(() => {
-    if (!user) return;
+    if (!user?.uid) return;
+    const uid = user.uid;
 
-    // TODO: some issues here on read and write (especially around logging out)
-    const userStatusRef = ref(db, `/status/${user.uid}`);
+    const userStatusRef = ref(db, `/status/${uid}`);
     const connectedRef = ref(db, '.info/connected');
 
     const unsubscribe = onValue(connectedRef, (snapshot) => {
@@ -196,7 +203,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           lastOnline: serverTimestamp()
       }).catch(() => {});
     };
-  }, [user]);
+  }, [user?.uid]);
 
   // Effect to fetch groups and listen for member presence
   useEffect(() => {
@@ -214,27 +221,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         presenceListeners.forEach(unsubscribe => unsubscribe());
         presenceListeners = [];
 
+        // Presence is kept in its own map keyed by uid, NOT merged into `groups`
+        // here. These listeners fire their initial value immediately, and the
+        // `setGroups(fetchedGroups)` below used to run after them — so the first
+        // presence snapshot was applied to the previous array and then thrown
+        // away. Since presence only pushes again when a status *changes*, and
+        // your own "online: true" is written before this runs, you could sit
+        // there showing offline indefinitely. Merging at render removes the
+        // ordering dependency entirely.
+        const seen = new Set<string>();
         fetchedGroups.forEach(group => {
           group.members.forEach(member => {
+            if (seen.has(member.uid)) return;   // one listener per user, not per membership
+            seen.add(member.uid);
+
             const memberStatusRef = ref(db, `/status/${member.uid}`);
             const unsubscribe = onValue(memberStatusRef, (snapshot) => {
-              const statusUpdate = snapshot.val(); // e.g., { online: true } or { online: false, lastOnline: ... }
-
-              setGroups(currentGroups =>
-                currentGroups.map(g =>
-                  g.id === group.id
-                    ? {
-                        ...g,
-                        members: g.members.map(m =>
-                          m.uid === member.uid 
-                            // Spread the new status object onto the member
-                            ? { ...m, ...statusUpdate } 
-                            : m
-                        ),
-                      }
-                    : g
-                )
-              );
+              const status = snapshot.val() as { online?: boolean; lastOnline?: number } | null;
+              setPresence(prev => ({ ...prev, [member.uid]: status ?? { online: false } }));
             });
             presenceListeners.push(unsubscribe);
           });
@@ -260,7 +264,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => {
       presenceListeners.forEach((unsubscribe) => unsubscribe());
     };
-  }, [user, groupsReloadToken]);
+    // uid, not the user object — refreshAuthUser replaces that reference on
+    // purpose, and re-fetching every group and re-attaching every presence
+    // listener on a display-name change is pure churn.
+  }, [user?.uid, groupsReloadToken]);
 
   useEffect(() => {
     // Only run if we have a logged-in user and groups have been loaded
@@ -315,11 +322,29 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     });
   };
 
+  // Presence is merged in here rather than written into `groups`, so a slow or
+  // fast RTDB callback can't be clobbered by the group fetch landing after it.
+  // The current user is always shown online — they're holding the phone, and
+  // trusting a round-trip to tell us that is what made your own avatar grey.
+  const groupsWithPresence = useMemo<GroupWithPresence[]>(() => groups.map(group => ({
+    ...group,
+    members: group.members.map(member => ({
+      ...member,
+      ...(presence[member.uid] ?? {}),
+      ...(user && member.uid === user.uid ? { online: true } : {}),
+    })),
+  })), [groups, presence, user]);
+
+  const selectedGroupWithPresence = useMemo<GroupWithPresence | null>(
+    () => (selectedGroup ? groupsWithPresence.find(g => g.id === selectedGroup.id) ?? selectedGroup : null),
+    [groupsWithPresence, selectedGroup]
+  );
+
   const value = {
     user,
     // profile,
-    groups,
-    selectedGroup,
+    groups: groupsWithPresence,
+    selectedGroup: selectedGroupWithPresence,
     selectGroup,
     loading,
     serverTimeOffset,

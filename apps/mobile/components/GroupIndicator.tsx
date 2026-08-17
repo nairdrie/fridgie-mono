@@ -7,7 +7,11 @@ import React, { useState } from 'react';
 import { FlatList, Image, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Modal from 'react-native-modal';
 
-const ONLINE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+// A client-side staleness threshold used to live here but was never wired up.
+// It isn't needed: presence is torn down by an RTDB onDisconnect handler, which
+// the *server* fires when the socket drops, so a stale `online: true` resolves
+// itself without the client second-guessing it. A local TTL would only add
+// flicker on slow networks.
 
 export default function GroupIndicator() {
     const { selectedGroup, serverTimeOffset, user } = useAuth();
