@@ -33,17 +33,13 @@ export default function GroupIndicator() {
     return (
         <>
             <TouchableOpacity style={styles.container} onPress={() => setModalVisible(true)}>
-                <View style={styles.avatarRow}>
-                    {sortedMembers.slice(0, 5).map((member, index) => (
-                        <Image
-                            key={member.uid}
-                            source={{ uri: member.photoURL || defaultAvatars[0] }}
-                            style={[styles.photo, member.online ? styles.onlinePhoto: styles.offlinePhoto, { marginLeft: index > 0 ? -16 : 0, zIndex: 100 - index }]}
-                        />
-                    ))}
-                </View>
-                {/* Mirrors the week subtitle on the left: same size and colour. */}
-                <Text style={styles.groupName} numberOfLines={1}>{selectedGroup.name}</Text>
+                {sortedMembers.slice(0, 5).map((member, index) => (
+                    <Image
+                        key={member.uid}
+                        source={{ uri: member.photoURL || defaultAvatars[0] }}
+                        style={[styles.photo, member.online ? styles.onlinePhoto: styles.offlinePhoto, { marginLeft: index > 0 ? -16 : 0, zIndex: 100 - index }]}
+                    />
+                ))}
             </TouchableOpacity>
 
             <Modal
@@ -98,23 +94,10 @@ export default function GroupIndicator() {
 
 const styles = StyleSheet.create({
     container: {
-        alignItems: 'flex-end',
-        justifyContent: 'center',
-        // Reserves the same space whether or not a group is selected, so the
-        // header doesn't jump as it loads.
-        minHeight: 50,
-    },
-    avatarRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'flex-end',
-    },
-    groupName: {
-        fontSize: 14,
-        color: primary,
-        marginTop: 2,
-        // Long names truncate rather than pushing the week selector around.
-        maxWidth: 140,
+        height: 50, // Set fixed height
     },
     photo: {
         width: 45,
