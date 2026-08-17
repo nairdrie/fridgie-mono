@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { List, ListView } from '../types/types';
 import { ApiError, getLists } from '../utils/api';
 import { parseWeekStart } from '../utils/date';
@@ -13,6 +14,10 @@ interface ListContextType {
   selectList: (list: List | null) => void;
   selectView: (view: ListView) => void;
   isLoading: boolean;
+  /** Set when the last load failed. The header shows a retry rather than nothing. */
+  loadError: Error | null;
+  /** Re-runs the fetch. Safe to call at any time. */
+  refreshLists: () => void;
 }
 
 const ListContext = createContext<ListContextType | undefined>(undefined);
@@ -25,6 +30,27 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
   const [selectedList, setSelectedList] = useState<List | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedView, setSelectedView] = useState<ListView>(ListView.GroceryList);
+  const [loadError, setLoadError] = useState<Error | null>(null);
+
+  // Bumping this re-runs the fetch effect. Without it a single failed load at
+  // startup was permanent: the effect keyed only on the group id, so if the API
+  // was unreachable when the app opened, selectedList stayed null — and the
+  // whole header renders nothing without it — until the app was restarted.
+  const [reloadToken, setReloadToken] = useState(0);
+  const refreshLists = useCallback(() => setReloadToken((t) => t + 1), []);
+
+  // Retry when the app comes back to the foreground, but only if we're in a
+  // failed state — otherwise every app switch would refetch.
+  const loadErrorRef = useRef<Error | null>(null);
+  loadErrorRef.current = loadError;
+
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === 'active' && loadErrorRef.current) refreshLists();
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, [refreshLists]);
 
   useEffect(() => {
     // This flag prevents state updates if the component unmounts or the dependency changes
@@ -40,6 +66,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
         if (ignore) return;
 
         setAllLists(fetchedLists);
+        setLoadError(null);
 
         if (fetchedLists.length > 0) {
           // Your existing logic to select the most recent list by default
@@ -62,6 +89,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
         // Always clear lists on an error to avoid showing stale/incorrect data
         setAllLists([]);
         setSelectedList(null);
+        setLoadError(error instanceof Error ? error : new Error(String(error)));
 
       } finally {
         if (!ignore) {
@@ -76,6 +104,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
       // If there's no selected group, clear everything out.
       setAllLists([]);
       setSelectedList(null);
+      setLoadError(null);
       setIsLoading(false);
     }
 
@@ -86,7 +115,7 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
       ignore = true;
     };
     // ✅ DEPEND ON THE STABLE ID, NOT THE OBJECT
-  }, [selectedGroup?.id]); // Now, this effect only re-runs when the actual group changes.
+  }, [selectedGroup?.id, reloadToken]); // reloadToken lets a failed load be retried.
 
   const selectList = (list: List | null) => {
     setSelectedList(list);
@@ -96,7 +125,10 @@ export function ListProvider({ children }: { children: React.ReactNode }) {
     setSelectedView(view);
   };
 
-  const value = { selectedGroup, allLists, selectedList, selectList, selectedView, selectView, isLoading };
+  const value = {
+    selectedGroup, allLists, selectedList, selectList,
+    selectedView, selectView, isLoading, loadError, refreshLists,
+  };
 
   return <ListContext.Provider value={value}>{children}</ListContext.Provider>;
 }

@@ -27,7 +27,7 @@ const DEVICE_HEIGHT =
 
 export default function ListHeader() {
   const router = useRouter();
-  const { allLists, selectedList, selectList, selectedView, selectView } = useLists();
+  const { allLists, selectedList, selectList, selectedView, selectView, loadError, refreshLists } = useLists();
   const [isModalVisible, setModalVisible] = useState(false);
 
  // State to hold the width of a single segment for the animation
@@ -95,7 +95,24 @@ export default function ListHeader() {
     };
   });
 
-  if(!selectedList) 
+  // A failed load used to render nothing at all, and nothing ever retried — so
+  // if the API was unreachable when the app opened, the header stayed gone until
+  // a restart. Show why, and offer a way out.
+  if (!selectedList && loadError) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.errorBar}>
+          <Ionicons name="cloud-offline-outline" size={20} color="#8a8a8a" />
+          <Text style={styles.errorText} numberOfLines={1}>Couldn&apos;t load your lists</Text>
+          <TouchableOpacity onPress={refreshLists} style={styles.retryButton} accessibilityRole="button">
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!selectedList)
     return <></>;
 
   return (
@@ -203,6 +220,29 @@ export default function ListHeader() {
 }
 
 const styles = StyleSheet.create({
+  errorBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#8a8a8a',
+  },
+  retryButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+  },
+  retryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: primary,
+  },
   safeArea: {
     backgroundColor: '#fff', // Match your header background
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
