@@ -10,7 +10,7 @@ import { LayoutAnimation, Pressable, SafeAreaView, StyleSheet, Text, TextInput, 
 import * as Haptics from 'expo-haptics';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import Modal from 'react-native-modal';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { FadeInLeft, FadeOutLeft, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import uuid from 'react-native-uuid';
 
 const DAYS: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -60,6 +60,8 @@ function MealCard({
 
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [isMenuVisible, setIsMenuVisible] = useState(false);
+    const [cookbookFeedback, setCookbookFeedback] = useState<string | null>(null);
+    const cookbookFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const daySelectorProgress = useSharedValue(0);
     
@@ -254,6 +256,25 @@ function MealCard({
     }, [editingId, ingredients]);
 
 
+    /**
+     * Toggles the cookbook and shows a short confirmation beside the icon.
+     * `meal.addedToCookbook` is the value BEFORE the toggle, so the message
+     * describes what the press just did rather than the state it came from.
+     */
+    const handleToggleCookbook = () => {
+        const nowAdded = !meal.addedToCookbook;
+        onToggleCookbook(meal);
+        setCookbookFeedback(nowAdded ? 'Added to Cookbook' : 'Removed from Cookbook');
+
+        if (cookbookFeedbackTimer.current) clearTimeout(cookbookFeedbackTimer.current);
+        cookbookFeedbackTimer.current = setTimeout(() => setCookbookFeedback(null), 2000);
+    };
+
+    // Don't set state on an unmounted card — meals get removed from the plan.
+    useEffect(() => () => {
+        if (cookbookFeedbackTimer.current) clearTimeout(cookbookFeedbackTimer.current);
+    }, []);
+
     const handleDeletePress = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setIsConfirmingDelete(true);
@@ -380,9 +401,26 @@ function MealCard({
                                 <Ionicons name="book-outline" size={16} color={primary} />
                                 <Text style={styles.recipeIndicatorText}>View Recipe</Text>
                             </TouchableOpacity>
-                            {/* The cookbook toggle moved into the ⋯ menu — it's a
-                                setting, not a navigation action, so it doesn't
-                                belong beside "View Recipe". */}
+                            {/* Icon-only until you press it: the filled/outline
+                                bookmark already says whether it's saved, so the
+                                permanent label was just noise. The confirmation
+                                text animates in on press and clears itself. */}
+                            <TouchableOpacity style={styles.recipeIndicator} onPress={handleToggleCookbook}>
+                                <Ionicons
+                                    name={meal.addedToCookbook ? 'bookmark' : 'bookmark-outline'}
+                                    size={16}
+                                    color={primary}
+                                />
+                                {cookbookFeedback && (
+                                    <Animated.Text
+                                        entering={FadeInLeft.duration(180)}
+                                        exiting={FadeOutLeft.duration(180)}
+                                        style={styles.recipeIndicatorText}
+                                    >
+                                        {cookbookFeedback}
+                                    </Animated.Text>
+                                )}
+                            </TouchableOpacity>
                         </View>
                     ) : (
                         <View style={styles.mealHeaderLower}>
@@ -446,22 +484,6 @@ function MealCard({
                         <Text style={styles.menuTitle} numberOfLines={1}>
                             {meal.name || 'Untitled meal'}
                         </Text>
-
-                        {hasRecipe && (
-                            <TouchableOpacity
-                                style={styles.menuRow}
-                                onPress={() => { setIsMenuVisible(false); onToggleCookbook(meal); }}
-                            >
-                                <Ionicons
-                                    name={meal.addedToCookbook ? 'bookmark' : 'bookmark-outline'}
-                                    size={22}
-                                    color={primary}
-                                />
-                                <Text style={styles.menuRowText}>
-                                    {meal.addedToCookbook ? 'Remove from Cookbook' : 'Add to Cookbook'}
-                                </Text>
-                            </TouchableOpacity>
-                        )}
 
                         <TouchableOpacity
                             style={styles.menuRow}
