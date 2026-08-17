@@ -9,6 +9,7 @@ export {
   aggregateQuantities,
   convert,
   formatQuantity,
+  formatFriendlyValue,
   formatQuantityDisplay,
   formatValue,
   normalizeIngredients,

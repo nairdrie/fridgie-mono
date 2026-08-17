@@ -42,8 +42,10 @@ describe('normalizeQuantity', () => {
   test('normalizes the shapes LLM output actually produces', () => {
     // Ranges collapse to the lower bound (the importer prompt's own rule),
     // compound units become a single canonical token, decimal commas resolve.
-    expect(normalizeQuantity('2-3')).toBe('2')
-    expect(normalizeQuantity('2 - 3 cups')).toBe('2 cup')
+    // Ranges are PRESERVED — collapsing to the low end made you under-buy.
+    expect(normalizeQuantity('2-3')).toBe('2-3')
+    expect(normalizeQuantity('2 - 3 cups')).toBe('2-3 cup')
+    expect(normalizeQuantity('5 to 10 cloves')).toBe('5-10 clove')
     expect(normalizeQuantity('8 fl oz')).toBe('8 fl oz')
     expect(normalizeQuantity('8 fl. oz.')).toBe('8 fl oz')
     expect(normalizeQuantity('1,5 kg')).toBe('1.5 kg')
@@ -56,12 +58,13 @@ describe('normalizeQuantity', () => {
 
   test('leaves genuinely freeform strings untouched', () => {
     expect(normalizeQuantity('to taste')).toBe('to taste')
-    expect(normalizeQuantity('1 large')).toBe('1 large')
+    // "large" is a size, not a unit — it belongs on the item name.
+    expect(normalizeQuantity('1 large')).toBe('1')
     expect(normalizeQuantity('1 cup or 200g')).toBe('1 cup or 200g')
   })
 
   test('canonicalizes the value of an unknown unit but keeps the token', () => {
-    expect(normalizeQuantity('2 bunches')).toBe('2 bunches')
+    expect(normalizeQuantity('2 bunches')).toBe('2 bunch')
     expect(normalizeQuantity('1/2 bunch')).toBe('0.5 bunch')
   })
 
@@ -111,7 +114,8 @@ describe('formatQuantityDisplay', () => {
 
 describe('aggregateQuantities', () => {
   test('combines same-dimension quantities', () => {
-    expect(aggregateQuantities(['1 cup', '2 tbsp'])).toBe('1.13 cups')
+    // Cooks read fractions, not decimals.
+    expect(aggregateQuantities(['1 cup', '2 tbsp'])).toBe('1⅛ cups')
     expect(aggregateQuantities(['200 g', '1 kg'])).toBe('1.2 kg')
   })
 
@@ -125,9 +129,9 @@ describe('aggregateQuantities', () => {
   })
 
   test('merges singular and plural spellings of unknown units', () => {
-    expect(aggregateQuantities(['1 clove', '2 cloves'])).toBe('3 clove')
-    expect(aggregateQuantities(['1 slice', '2 slices'])).toBe('3 slice')
-    expect(aggregateQuantities(['1 bunch', '2 bunches'])).toBe('3 bunch')
+    expect(aggregateQuantities(['1 clove', '2 cloves'])).toBe('3 cloves')
+    expect(aggregateQuantities(['1 slice', '2 slices'])).toBe('3 slices')
+    expect(aggregateQuantities(['1 bunch', '2 bunches'])).toBe('3 bunches')
   })
 
   test('carries unparseable values through instead of dropping them', () => {
@@ -138,7 +142,85 @@ describe('aggregateQuantities', () => {
   })
 
   test('keeps different dimensions separate', () => {
+    // No ingredient name, so no density is available to bridge them.
     expect(aggregateQuantities(['200 g', '2 tsp'])).toBe('200 g + 2 tsp')
+  })
+})
+
+describe('ranges', () => {
+  test('both ends survive parsing', () => {
+    expect(parseQuantity('5-10 cloves')).toMatchObject({ min: 5, max: 10, unit: 'clove' })
+    expect(parseQuantity('5 to 10 cloves')).toMatchObject({ min: 5, max: 10 })
+    expect(parseQuantity('2 cloves')).toMatchObject({ min: 2, max: 2 })
+  })
+
+  test('add end to end', () => {
+    // The reported case: 2 cloves plus "5-10 minced" should be 7-12, not
+    // "2 + 5-10, minced". Truncating to the low end made you under-buy.
+    expect(aggregateQuantities(['2', '5-10 minced'], 'garlic')).toBe('7–12')
+    expect(aggregateQuantities(['2 cloves', '5-10 cloves, minced'], 'garlic')).toBe('7–12 cloves')
+    expect(aggregateQuantities(['2-3 cloves', '5-10 cloves'], 'garlic')).toBe('7–13 cloves')
+  })
+})
+
+describe('preparation words are not units', () => {
+  test('are stripped from the amount and kept as notes', () => {
+    expect(parseQuantity('5-10 cloves, minced')).toMatchObject({ unit: 'clove', prep: ['minced'] })
+    expect(parseQuantity('1 ½ cups packed')).toMatchObject({ unit: 'cup', prep: ['packed'] })
+    expect(parseQuantity('1 large')).toMatchObject({ unit: null, prep: ['large'] })
+  })
+
+  test('a real unit wins over a word that is in both vocabularies', () => {
+    // "slice" is both a preparation and a count unit; treating the singular as
+    // prep and the plural as a unit meant they never combined.
+    expect(aggregateQuantities(['1 slice', '2 slices'])).toBe('3 slices')
+  })
+})
+
+describe('density unlocks mass ↔ volume', () => {
+  test('combines cups and grams for a known ingredient', () => {
+    expect(aggregateQuantities(['1 cup', '10 g', '2 tsp'], 'all-purpose flour')).toBe('1⅛ cups')
+    expect(aggregateQuantities(['1 cup', '100 g'], 'granulated sugar')).toBe('1½ cups')
+    expect(aggregateQuantities(['1/2 cup', '50 g'], 'butter')).toBe('¾ cup')
+  })
+
+  test('leaves them separate when the ingredient is unknown', () => {
+    expect(aggregateQuantities(['1 cup', '10 g'], 'dragonfruit puree')).toBe('1 cup + 10 g')
+  })
+
+  test('picks the more specific density', () => {
+    // "brown sugar" must not match the generic "sugar" entry.
+    const brown = aggregateQuantities(['1 cup', '220 g'], 'brown sugar')
+    const white = aggregateQuantities(['1 cup', '220 g'], 'granulated sugar')
+    expect(brown).toBe('2 cups')
+    expect(brown).not.toBe(white)
+  })
+})
+
+describe('display reads like a recipe', () => {
+  test('snaps to fractions rather than decimals', () => {
+    expect(aggregateQuantities(['1 cup', '2 tbsp'])).toBe('1⅛ cups')
+    expect(aggregateQuantities(['1/2 cup'])).toBe('½ cup')
+  })
+
+  test('absorbs negligible additions', () => {
+    // 2 tsp on top of a cup is not something you shop differently for.
+    expect(aggregateQuantities(['1 cup', '2 tsp'], 'flour')).toBe('1 cup')
+  })
+
+  test('promotes units at sensible magnitudes', () => {
+    expect(aggregateQuantities(['600 g', '600 g'], 'flour')).toBe('1.2 kg')
+  })
+
+  test('pluralizes correctly, including abbreviations', () => {
+    expect(aggregateQuantities(['200 g', '2 tsp'])).toBe('200 g + 2 tsp')  // not "tsps"
+    expect(aggregateQuantities(['1 bunch', '2 bunches'])).toBe('3 bunches') // not "bunchs"
+    expect(aggregateQuantities(['1/2 cup', '50 g'], 'butter')).toBe('¾ cup') // not "¾ cups"
+  })
+
+  test('refuses to guess at compound expressions', () => {
+    expect(normalizeQuantity('1 cup or 200g')).toBe('1 cup or 200g')
+    expect(normalizeQuantity('2 cups (500 ml)')).toBe('2 cups (500 ml)')
   })
 })
 

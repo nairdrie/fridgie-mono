@@ -80,7 +80,10 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         for (const [, sources] of itemMap) {
             if (sources.length === 0) continue;
             const baseItem = sources[0];
-            const computedTotal = aggregateQuantities(sources.map(s => s.quantity));
+            // The item name unlocks mass↔volume merging: "1 cup flour" and
+            // "10 g flour" can only combine if we know what a cup of flour
+            // weighs. Without it they stay separate terms.
+            const computedTotal = aggregateQuantities(sources.map(s => s.quantity), baseItem.text);
 
             // An override replaces the computed total, but only while the
             // underlying quantities still match the snapshot taken when it was
