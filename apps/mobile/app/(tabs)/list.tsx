@@ -3,6 +3,7 @@
 import AddEditRecipeModal from '@/components/AddEditRecipeModal';
 import GroceryListView from '@/components/GroceryListView'; // Import the new component
 import MealPlanView from '@/components/MealPlanView';
+import AddFromCookbookModal from '@/components/AddFromCookbookModal';
 import MealSuggestionsModal from '@/components/MealSuggestionsModal';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
@@ -50,6 +51,7 @@ export default function HomeScreen() {
     const inputRefs = useRef<Record<string, TextInput | null>>({});
 
     const [isSuggestionModalVisible, setSuggestionModalVisible] = useState(false);
+    const [isCookbookModalVisible, setCookbookModalVisible] = useState(false);
 
 
     const [collapsedMeals, setCollapsedMeals] = useState<Record<string, boolean>>({});
@@ -119,6 +121,10 @@ export default function HomeScreen() {
     }));
     const fabStyle1 = useAnimatedStyle(() => ({
         transform: [{ translateY: fabAnimation.value * -145 }],
+        opacity: fabAnimation.value,
+    }));
+    const fabStyle2 = useAnimatedStyle(() => ({
+        transform: [{ translateY: fabAnimation.value * -210 }],
         opacity: fabAnimation.value,
     }));
 
@@ -713,17 +719,25 @@ export default function HomeScreen() {
                     {isFabMenuOpen && (
                         <>
                             {selectedView === ListView.MealPlan ? (
+                                // Ordered by expected use: the nearest to the FAB is the
+                                // quickest action, the furthest is the most involved.
                                 <>
-                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
                                         <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
                                             <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                            <Text style={styles.secondaryButtonText}>Suggest</Text>
+                                            <Text style={styles.secondaryButtonText}>Suggest Meal</Text>
+                                        </TouchableOpacity>
+                                    </Animated.View>
+                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { setCookbookModalVisible(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="book-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                            <Text style={styles.secondaryButtonText}>From Cookbook</Text>
                                         </TouchableOpacity>
                                     </Animated.View>
                                     <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
                                         <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
                                             <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
-                                            <Text style={styles.secondaryButtonText}>Meal</Text>
+                                            <Text style={styles.secondaryButtonText}>New Meal</Text>
                                         </TouchableOpacity>
                                     </Animated.View>
                                 </>
@@ -764,6 +778,13 @@ export default function HomeScreen() {
             />
             <AddEditRecipeModal isVisible={!!recipeToEdit} onClose={() => setRecipeToEdit(null)} mealForRecipe={recipeToEdit} onRecipeSave={handleRecipeSaved} />
             <MealSuggestionsModal isVisible={isSuggestionModalVisible} onClose={() => setSuggestionModalVisible(false)} onAddSelectedMeals={handleAddMealsFromSuggestion} listId={selectedList?.id ?? ''} />
+            {/* Adds through POST /meal, so the server broadcasts it and the list
+                updates live — no local optimistic write to reconcile. */}
+            <AddFromCookbookModal
+                isVisible={isCookbookModalVisible}
+                onClose={() => setCookbookModalVisible(false)}
+                listId={selectedList?.id ?? ''}
+            />
             
             {/* --- Start of new/moved code: Sort Modal --- */}
             <Modal
@@ -843,6 +864,8 @@ const styles = StyleSheet.create({
     fabContainer: {
         alignItems: 'flex-end',
         width: 80,
+        // The menu buttons deliberately extend past this width.
+        overflow: 'visible',
     },
     fab: {
         width: 60,
@@ -859,8 +882,12 @@ const styles = StyleSheet.create({
     },
     secondaryFabContainer: {
         position: 'absolute',
-        alignItems: 'center',
+        // Anchored to the right and given room to grow leftward. Without an
+        // explicit width these size to the 80pt fabContainer and truncate any
+        // label longer than about one word ("Suggest M…", "From Cook…").
         right: 6,
+        width: 240,
+        alignItems: 'flex-end',
     },
     secondaryButton: {
         flexDirection: 'row',
