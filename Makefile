@@ -52,12 +52,22 @@ OFF  := \033[0m
 # output prefixed; the wrapped command keeps the TTY so Metro's interactive keys
 # still work. Cleanup targets only the API's process group — a bare `kill 0`
 # would signal the caller's group too.
+#
+# If something is already serving API_PORT (you ran `make api` in another
+# terminal), reuse it rather than starting a second one. Bun does not set
+# SO_REUSEPORT, so the duplicate would just die with EADDRINUSE and dump a stack
+# trace into the output — harmless, but it reads like a real failure.
 define with_api
 	@set -m; \
-	( cd $(API_DIR) && $(BUN) --watch index.ts 2>&1 \
-		| awk '{ printf "\033[35m[api]\033[0m %s\n", $$0; fflush() }' ) & \
-	API_PGID=$$!; \
-	trap 'kill -TERM -$$API_PGID 2>/dev/null; exit 0' EXIT INT TERM; \
+	API_PGID=""; \
+	if lsof -nP -iTCP:$(API_PORT) -sTCP:LISTEN >/dev/null 2>&1; then \
+		printf "$(DIM)note: something is already serving :$(API_PORT) — using it rather than starting another$(OFF)\n\n"; \
+	else \
+		( cd $(API_DIR) && $(BUN) --watch index.ts 2>&1 \
+			| awk '{ printf "\033[35m[api]\033[0m %s\n", $$0; fflush() }' ) & \
+		API_PGID=$$!; \
+	fi; \
+	trap 'if [ -n "$$API_PGID" ]; then kill -TERM -$$API_PGID 2>/dev/null; fi; exit 0' EXIT INT TERM; \
 	sleep 1; \
 	$(1)
 endef
