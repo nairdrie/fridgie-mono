@@ -205,14 +205,24 @@ route.use('*', auth);
 route.post('/', async (c) => {
   const uid = c.get('uid') as string;
 
-  // Session vetoes from the current re-roll; merged with the persisted history.
-  let sessionVetoes: string[] = [];
+  // Only the parse is guarded. Anything else inside this try would have its
+  // throw swallowed and answer 200 with an unsteered — but fully billed — set.
+  let body: SuggestionRequestBody | null = null;
   try {
-    const body = await c.req.json<SuggestionRequestBody>();
-    if (Array.isArray(body?.vetoedTitles)) sessionVetoes = body.vetoedTitles.filter(Boolean);
+    body = await c.req.json<SuggestionRequestBody>();
   } catch {
     // Empty or invalid body is fine — there just aren't any vetoes.
   }
+
+  // Session vetoes from the current re-roll; merged with the persisted history.
+  // Bounded: this is client-supplied and goes straight into the prompt, so an
+  // unbounded list is somebody else's token bill.
+  const sessionVetoes: string[] = Array.isArray(body?.vetoedTitles)
+    ? body.vetoedTitles
+        .filter((t): t is string => typeof t === 'string' && t.length > 0)
+        .slice(0, 60)
+        .map((t) => t.slice(0, 200))
+    : [];
 
   const userRef = fs.collection('users').doc(uid);
   const userDoc = await userRef.get();
