@@ -2,8 +2,8 @@
 #
 #   make              list every target, grouped
 #   make setup        install everything
-#   make ios          API + build + launch the iOS simulator
-#   make android      API + build + launch the Android emulator
+#   make api          run the API        (terminal 1)
+#   make ios          build + launch the iOS simulator (terminal 2)
 #
 # Deliberately plain make: this repo is not a package-manager workspace, so
 # Turborepo/Nx have nothing to hook into, and make is already on every Mac.
@@ -48,43 +48,24 @@ DIM  := \033[2m
 BOLD := \033[1m
 OFF  := \033[0m
 
-# Runs $(1) with the API alive alongside it. The API is backgrounded with its
-# output prefixed; the wrapped command keeps the TTY so Metro's interactive keys
-# still work. Cleanup targets only the API's process group — a bare `kill 0`
-# would signal the caller's group too.
-#
-# If something is already serving API_PORT (you ran `make api` in another
-# terminal), reuse it rather than starting a second one. Bun does not set
-# SO_REUSEPORT, so the duplicate would just die with EADDRINUSE and dump a stack
-# trace into the output — harmless, but it reads like a real failure.
-define with_api
-	@set -m; \
-	API_PGID=""; \
-	if lsof -nP -iTCP:$(API_PORT) -sTCP:LISTEN >/dev/null 2>&1; then \
-		printf "$(DIM)note: something is already serving :$(API_PORT) — using it rather than starting another$(OFF)\n\n"; \
-	else \
-		( cd $(API_DIR) && $(BUN) --watch index.ts 2>&1 \
-			| awk '{ printf "\033[35m[api]\033[0m %s\n", $$0; fflush() }' ) & \
-		API_PGID=$$!; \
-	fi; \
-	trap 'if [ -n "$$API_PGID" ]; then kill -TERM -$$API_PGID 2>/dev/null; fi; exit 0' EXIT INT TERM; \
-	sleep 1; \
-	$(1)
-endef
+# Every target does one thing and owns one process. Run the API in its own
+# terminal — nothing here starts it for you.
 
 .PHONY: help
 help:
 	@printf "$(BOLD)Fridgie$(OFF)   api → $(CYAN)$(API_URL)$(OFF)\n"
+	@printf "\n$(DIM)two terminals: 'make api' in one, then a mobile target in the other$(OFF)\n"
 	@printf "\n$(BOLD)everyday$(OFF)\n"
 	@printf "  $(CYAN)%-18s$(OFF) %s\n" \
 		setup            "install dependencies for all three packages" \
-		ios              "API + build + launch on the iOS simulator" \
-		android          "API + build + launch on the Android emulator" \
-		dev              "API + Metro only (app already installed)"
+		api              "run the API (terminal 1)" \
+		dev              "run Metro for the installed dev client (terminal 2)" \
+		ios              "build + launch on the iOS simulator" \
+		android          "build + launch on the Android emulator"
 	@printf "\n$(BOLD)your own phone, over USB$(OFF)\n"
 	@printf "  $(CYAN)%-18s$(OFF) %s\n" \
-		ios-device       "API + build + launch on a connected iPhone" \
-		android-device   "API + build + launch on a connected Android"
+		ios-device       "build + launch on a connected iPhone" \
+		android-device   "build + launch on a connected Android"
 	@printf "\n$(BOLD)cloud builds (EAS)$(OFF)   add PLATFORM=ios|android|all\n"
 	@printf "  $(CYAN)%-18s$(OFF) %s\n" \
 		build-dev        "dev client to install on a device (no Xcode needed)" \
@@ -101,8 +82,6 @@ help:
 		bundle-check     "verify Metro can bundle"
 	@printf "\n$(BOLD)other$(OFF)\n"
 	@printf "  $(CYAN)%-18s$(OFF) %s\n" \
-		api              "run only the API" \
-		mobile           "run only Metro" \
 		prebuild         "regenerate ios/ and android/ from app.json" \
 		docker-build     "build the API image" \
 		doctor           "report on the local toolchain" \
@@ -124,32 +103,36 @@ setup: check-bun ## Install dependencies for all three packages
 
 # ── everyday dev ─────────────────────────────────────────────────────────────
 
+.PHONY: api
+api: check-env ## Run the API with live reload (its own terminal)
+	@printf "$(CYAN)==>$(OFF) api on :$(API_PORT) — reachable at $(API_URL)\n\n"
+	@cd $(API_DIR) && $(BUN) --watch index.ts
+
 .PHONY: dev
-dev: check-env ## API + Metro only — use when the app is already installed
-	@printf "$(CYAN)==>$(OFF) api on :$(API_PORT), metro in the foreground\n"
-	@printf "$(DIM)    app will talk to $(API_URL)$(OFF)\n\n"
-	$(call with_api, cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo start --dev-client)
+dev: ## Run Metro for the installed dev client (its own terminal)
+	@printf "$(DIM)app will talk to $(API_URL) — start it with 'make api'$(OFF)\n\n"
+	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo start --dev-client
 
 .PHONY: ios
-ios: check-xcode check-env ## API + build + launch on the iOS simulator
-	$(call with_api, cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:ios)
+ios: check-xcode ## Build and launch on the iOS simulator
+	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:ios
 
 .PHONY: android
-android: check-android check-env ## API + build + launch on the Android emulator
-	$(call with_api, cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:android)
+android: check-android ## Build and launch on the Android emulator
+	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:android
 
 # ── physical devices, over USB ───────────────────────────────────────────────
 
 .PHONY: ios-device
-ios-device: check-xcode check-env ## API + build + launch on a connected iPhone
+ios-device: check-xcode ## Build and launch on a connected iPhone
 	@printf "$(DIM)Needs the iPhone plugged in, unlocked and trusted. A free Apple ID\n"
 	@printf "works but the build expires after 7 days; a paid account lasts a year.$(OFF)\n\n"
-	$(call with_api, cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:ios --device)
+	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:ios --device
 
 .PHONY: android-device
-android-device: check-android check-env ## API + build + launch on a connected Android
+android-device: check-android ## Build and launch on a connected Android
 	@printf "$(DIM)Needs USB debugging on and the device authorised (check: adb devices).$(OFF)\n\n"
-	$(call with_api, cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:android --device)
+	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo run:android --device
 
 # ── cloud builds (EAS) ───────────────────────────────────────────────────────
 #
@@ -206,14 +189,6 @@ bundle-check: ## Verify Metro can bundle (catches shared-package resolution brea
 		&& printf "$(BOLD)Bundle OK.$(OFF)\n"
 
 # ── other ────────────────────────────────────────────────────────────────────
-
-.PHONY: api
-api: check-env ## Run only the API, with live reload
-	@cd $(API_DIR) && $(BUN) --watch index.ts
-
-.PHONY: mobile
-mobile: ## Run only Metro (expects the API to be running elsewhere)
-	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo start --dev-client
 
 .PHONY: mobile-go
 mobile-go: ## Run Metro in Expo Go mode (most native modules will NOT work)

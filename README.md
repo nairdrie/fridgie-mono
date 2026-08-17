@@ -37,17 +37,19 @@ JSON at `apps/api/utils/firebase-service-account.json`, or:
 cp apps/api/.env.example apps/api/.env
 ```
 
-Then run both with live reload:
+Then run the two processes, one per terminal:
 
 ```bash
-make dev
+make api      # terminal 1 — the API on :3000
+make ios      # terminal 2 — build + launch the simulator
 ```
 
-That starts the API on `:3000` (prefixed `[api]` output) and Metro in the
-foreground so its interactive keys still work. `EXPO_PUBLIC_API_URL` is wired to
-your current LAN IP automatically, which is what a physical device needs — pass
-`API_URL=...` to override. `make` on its own lists every target, and
-`make doctor` reports on your toolchain.
+Each target owns exactly one process; nothing starts the API for you. Once the
+app is installed, `make dev` (Metro only) is the fast everyday loop.
+
+`EXPO_PUBLIC_API_URL` is wired to your current LAN IP automatically, which is
+what a physical device needs — pass `API_URL=...` to override. `make` on its own
+lists every target, and `make doctor` reports on your toolchain.
 
 ### iOS
 
