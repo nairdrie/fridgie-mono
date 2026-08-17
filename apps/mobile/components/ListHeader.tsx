@@ -1,3 +1,4 @@
+import { useAuth } from '@/context/AuthContext';
 import { useLists } from '@/context/ListContext';
 import { List, ListView } from '@/types/types';
 import { primary } from '@/utils/styles';
@@ -28,6 +29,7 @@ const DEVICE_HEIGHT =
 export default function ListHeader() {
   const router = useRouter();
   const { allLists, selectedList, selectList, selectedView, selectView, loadError, refreshLists } = useLists();
+  const { groupsError, refreshGroups } = useAuth();
   const [isModalVisible, setModalVisible] = useState(false);
 
  // State to hold the width of a single segment for the animation
@@ -98,13 +100,21 @@ export default function ListHeader() {
   // A failed load used to render nothing at all, and nothing ever retried — so
   // if the API was unreachable when the app opened, the header stayed gone until
   // a restart. Show why, and offer a way out.
-  if (!selectedList && loadError) {
+  //
+  // Both failures have to be covered. Groups load first, and without one there
+  // is no list to fetch, so a groups failure produces a null selectedList with
+  // no list-level error — which looked identical to "nothing to show".
+  const failure = groupsError ?? loadError;
+  if (!selectedList && failure) {
+    const retry = () => { if (groupsError) refreshGroups(); refreshLists(); };
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.errorBar}>
           <Ionicons name="cloud-offline-outline" size={20} color="#8a8a8a" />
-          <Text style={styles.errorText} numberOfLines={1}>Couldn&apos;t load your lists</Text>
-          <TouchableOpacity onPress={refreshLists} style={styles.retryButton} accessibilityRole="button">
+          <Text style={styles.errorText} numberOfLines={1}>
+            {groupsError ? "Couldn't load your groups" : "Couldn't load your lists"}
+          </Text>
+          <TouchableOpacity onPress={retry} style={styles.retryButton} accessibilityRole="button">
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>

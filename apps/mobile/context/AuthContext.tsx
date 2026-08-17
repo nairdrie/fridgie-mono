@@ -7,8 +7,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useSegments } from 'expo-router';
 import { onAuthStateChanged, signInAnonymously, updateProfile, User } from 'firebase/auth';
 import { goOnline, onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import React, { useCallback, useRef, createContext, useContext, useEffect, useState } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 
 interface UserProfileWithPresence extends UserProfile {
   online?: boolean;
@@ -29,6 +29,10 @@ interface AuthContextType {
   loading: boolean;
   serverTimeOffset: number;
   refreshAuthUser: () => void;
+  /** Set when loading the user's groups failed. Nothing renders without a group. */
+  groupsError: Error | null;
+  /** Re-runs the group fetch. Safe to call at any time. */
+  refreshGroups: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -39,13 +43,34 @@ const AuthContext = createContext<AuthContextType>({
   selectGroup: () => {},
   loading: true,
   serverTimeOffset: 0, // Add initial value
-  refreshAuthUser: () => {}
+  refreshAuthUser: () => {},
+  groupsError: null,
+  refreshGroups: () => {}
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   // const [profile, setProfile] = useState<UserProfile | null>(null);
   const [groups, setGroups] = useState<GroupWithPresence[]>([]);
+  const [groupsError, setGroupsError] = useState<Error | null>(null);
+  // Bumping this re-runs the group fetch. Without it a single failed load was
+  // permanent: selectedGroup stayed null, so ListContext cleared with no error
+  // of its own, and the whole header silently rendered nothing.
+  const [groupsReloadToken, setGroupsReloadToken] = useState(0);
+  const refreshGroups = useCallback(() => setGroupsReloadToken((t) => t + 1), []);
+
+  // Retry when the app returns to the foreground, but only while in a failed
+  // state, so ordinary app switching doesn't refetch.
+  const groupsErrorRef = useRef<Error | null>(null);
+  groupsErrorRef.current = groupsError;
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === 'active' && groupsErrorRef.current) refreshGroups();
+    };
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, [refreshGroups]);
+
   const [selectedGroup, setSelectedGroup] = useState<GroupWithPresence | null>(null);
   const [loading, setLoading] = useState(true);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
@@ -216,6 +241,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         setGroups(fetchedGroups);
+        setGroupsError(null);
         if (fetchedGroups.length > 0) {
           const previouslySelected = storedGroupId ? fetchedGroups.find(g => g.id === storedGroupId) : null;
            setSelectedGroup(previouslySelected || fetchedGroups[0]);
@@ -226,6 +252,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } catch (error) {
         console.error('Failed to fetch groups:', error);
         setGroups([]);
+        setGroupsError(error instanceof Error ? error : new Error(String(error)));
       }
     };
     fetchGroupsAndListen();
@@ -233,7 +260,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => {
       presenceListeners.forEach((unsubscribe) => unsubscribe());
     };
-  }, [user]);
+  }, [user, groupsReloadToken]);
 
   useEffect(() => {
     // Only run if we have a logged-in user and groups have been loaded
@@ -296,7 +323,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     selectGroup,
     loading,
     serverTimeOffset,
-    refreshAuthUser
+    refreshAuthUser,
+    groupsError,
+    refreshGroups
   };
 
   return (
