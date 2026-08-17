@@ -7,6 +7,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LayoutAnimation, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import * as Haptics from 'expo-haptics';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import uuid from 'react-native-uuid';
@@ -201,7 +202,16 @@ function MealCard({
         const isEditing = item.id === editingId;
         return (
             <View style={styles.itemRow}>
-                <Pressable onPressIn={drag} style={styles.dragHandle} hitSlop={20} disabled={isActive}>
+                {/* Long-press to drag, matching GroceryListView. onPressIn grabbed
+                    the gesture the instant you touched the handle, so a downward
+                    swipe that started anywhere near it became a reorder instead
+                    of scrolling the meal plan. */}
+                <Pressable
+                    onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); drag(); }}
+                    style={styles.dragHandle}
+                    hitSlop={20}
+                    disabled={isActive}
+                >
                     <Text style={styles.dragIcon}>≡</Text>
                 </Pressable>
                 <TouchableOpacity style={styles.checkbox} onPress={() => handleToggleCheck(item.id)}>
@@ -372,7 +382,15 @@ function MealCard({
                         keyExtractor={(item) => item.id}
                         renderItem={renderIngredient}
                         containerStyle={{ flex: 1 }}
-                        simultaneousHandlers={[]} 
+                        // This list is nested inside MealPlanView's FlatList. As
+                        // its own scroll container it swallowed every vertical
+                        // pan, so the meal plan couldn't be scrolled by dragging
+                        // over a meal. A meal holds a handful of ingredients, so
+                        // it doesn't need to scroll — let the outer list do it.
+                        scrollEnabled={false}
+                        // Require a deliberate movement before a drag takes over
+                        // the gesture, rather than the first pixel of travel.
+                        activationDistance={16}
                         initialNumToRender={15}
                         maxToRenderPerBatch={10}
                         windowSize={10}
