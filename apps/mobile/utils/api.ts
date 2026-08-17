@@ -603,12 +603,19 @@ export async function importRecipeFromUrl(url: string): Promise<Recipe> {
  * @param recipeId The ID of the recipe.
  * @param rating 'liked' or 'disliked'.
  * @param feedback Optional feedback text, primarily for dislikes.
+ * @param mealId The meal that prompted the rating, so the server can tie the
+ *   verdict back to the occasion it was cooked.
  */
-export async function submitRecipeFeedback(recipeId: string, rating: 'liked' | 'disliked', feedback?: string) {
+export async function submitRecipeFeedback(
+  recipeId: string,
+  rating: 'liked' | 'disliked',
+  feedback?: string,
+  mealId?: string
+) {
   const res = await authorizedFetch(`${BASE_URL}/recipe/feedback/${recipeId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rating, feedback }),
+    body: JSON.stringify({ rating, feedback, mealId }),
   });
   return res.json();
 }

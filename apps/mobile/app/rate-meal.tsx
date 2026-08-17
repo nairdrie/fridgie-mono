@@ -86,7 +86,7 @@ export default function RateMealScreen() {
     const handleLike = async () => {
         setIsSubmitting(true);
         try {
-            await submitRecipeFeedback(recipe!.id, 'liked');
+            await submitRecipeFeedback(recipe!.id, 'liked', undefined, mealId);
             if (mealId) {
                 await markMealAsRated(mealId);
             }
@@ -110,7 +110,7 @@ export default function RateMealScreen() {
         }
         setIsSubmitting(true);
         try {
-            await submitRecipeFeedback(recipe!.id, 'disliked', feedback);
+            await submitRecipeFeedback(recipe!.id, 'disliked', feedback, mealId);
             if (mealId) {
                 await markMealAsRated(mealId);
             }
