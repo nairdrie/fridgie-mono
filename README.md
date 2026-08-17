@@ -18,10 +18,10 @@ deliberately *not* a hoisted npm/bun workspace:
 - `apps/api` uses **bun** (`bun.lock`)
 - `apps/mobile` uses **npm** (`package-lock.json`)
 
-Hoisting was avoided because the two apps are on different `firebase` majors, and
-because Expo/Metro + a committed `android/` prebuild makes hoisted resolution
-fragile. `packages/shared` is shared via TypeScript `paths` rather than package
-resolution, so Metro and EAS never need to resolve it.
+Hoisting was avoided because the two apps are on different `firebase` majors and
+because hoisted resolution under Metro is fragile. `packages/shared` is wired up
+with TypeScript `paths` plus a `metro.config.js` entry rather than by package
+resolution — see [packages/shared](#packagesshared) below.
 
 ## Getting started
 
@@ -105,10 +105,10 @@ not as an edit to `ios/Podfile`.
 `android/app/debug.keystore` is regenerated identically every time, so the debug
 signing SHA-1 registered in Firebase for Google Sign-In stays stable.
 
-Without Xcode, `make ios-build-cloud` builds a dev client through EAS that you
-install on a physical iPhone; `make dev` then live-reloads it over the LAN. Note
-that Expo Go (`make mobile-go`) will not work for the full app — Google Sign-In
-and the other custom native modules need a dev build.
+Without Xcode, `make build-dev PLATFORM=ios` builds a dev client through EAS that
+you install on a physical iPhone; `make dev` then live-reloads it over the LAN.
+Note that Expo Go (`make mobile-go`) will not work for the full app — Google
+Sign-In and the other custom native modules need a dev build.
 
 ## packages/shared
 
@@ -137,7 +137,24 @@ unit aliases, trailing periods, and rounding.
 
 ## Deploying
 
-- **API** — build with Docker using `apps/api` as the build context
-  (`docker build apps/api`). The Dockerfile's paths are relative to that context
-  and are unchanged from the pre-monorepo layout.
-- **Mobile** — run `eas build` from inside `apps/mobile`.
+**API** — build from the **repo root**, not from `apps/api`. The image needs
+`packages/shared`, so a build scoped to `apps/api` fails:
+
+```bash
+make docker-build     # docker build -f apps/api/Dockerfile .
+```
+
+There is currently **no deploy target and no deploy config in this repo**.
+`api.fridgie.ca` resolves to an EC2 instance in `ca-central-1` that was set up
+outside version control. Wiring up a real deploy path is outstanding work.
+
+**Mobile** — via EAS, parameterised by platform:
+
+```bash
+make build-dev     PLATFORM=ios       # dev client to sideload
+make build-preview PLATFORM=android   # APK for testers
+make build-prod    PLATFORM=all       # store builds
+make submit        PLATFORM=ios
+```
+
+`eas.json` sets `EXPO_PUBLIC_API_URL` explicitly per profile.
