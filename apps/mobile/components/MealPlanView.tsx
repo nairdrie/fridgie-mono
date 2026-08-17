@@ -2,6 +2,7 @@
 import { Item, Meal } from "@/types/types";
 import { formatQuantity, parseQuantity } from "@/utils/quantity";
 import { primary } from "@/utils/styles";
+import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import MealCard from "./MealCard"; // Import the new component
@@ -17,6 +18,8 @@ interface MealPlanViewProps {
   onUpdateMeal: (mealId: string, updates: Partial<Meal>) => void;
   onDeleteMeal: (mealId: string) => void;
   onAddMeal: () => void;
+  onAddFromCookbook: () => void;
+  onSuggestMeal: () => void;
   onAddRecipe: (meal: Meal) => void;
   collapsedMeals: Record<string, boolean>;
   onToggleMealCollapse: (mealId: string) => void;
@@ -36,6 +39,8 @@ export default function MealPlanView({
   onUpdateMeal,
   onDeleteMeal,
   onAddMeal,
+  onAddFromCookbook,
+  onSuggestMeal,
   onViewRecipe,
   onAddRecipe,
   editingId,
@@ -105,14 +110,26 @@ export default function MealPlanView({
 
   return (
     <View style={{ flex: 1 }}>
-     { sortedMeals.length == 0 && 
+     {/* Same three choices as the FAB, in the same order and wording. A lone
+         "+ Add Meal" meant the empty state quietly offered less than the button
+         in the corner, and silently picked one of the three for you. */}
+     { sortedMeals.length == 0 &&
       <View style={styles.emptyMealsContainer}>
-        <Text style={styles.emptyMealsText}>Let's get cooking!</Text>
-        <TouchableOpacity 
-            style={styles.addMealButton}
-            onPress={onAddMeal}>
-            <Text style={styles.addMealText}>+ Add Meal</Text>
-        </TouchableOpacity>
+        <Text style={styles.emptyMealsText}>Let&apos;s get cooking!</Text>
+        <View style={styles.emptyActions}>
+          <TouchableOpacity style={styles.emptyAction} onPress={onAddMeal}>
+            <Ionicons name="add-outline" size={22} color={primary} />
+            <Text style={styles.emptyActionText}>New Meal</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.emptyAction} onPress={onAddFromCookbook}>
+            <Ionicons name="book-outline" size={22} color={primary} />
+            <Text style={styles.emptyActionText}>From Cookbook</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.emptyAction} onPress={onSuggestMeal}>
+            <Ionicons name="sparkles" size={22} color={primary} />
+            <Text style={styles.emptyActionText}>Suggest Meal</Text>
+          </TouchableOpacity>
+        </View>
       </View>
      }
      { sortedMeals.length > 0 && 
@@ -156,6 +173,13 @@ export default function MealPlanView({
 }
 
 const styles = StyleSheet.create({
+  emptyActions: { marginTop: 16, gap: 10, alignSelf: 'stretch', paddingHorizontal: 40 },
+  emptyAction: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#fff', borderRadius: 25, paddingVertical: 12, paddingHorizontal: 18,
+    borderWidth: 1, borderColor: '#e9ecef',
+  },
+  emptyActionText: { fontSize: 16, fontWeight: '600', color: primary },
   container: {
     padding: 10,
   },

@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import uuid from 'react-native-uuid';
-import { getRecipe, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
+import { getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 
 interface AddEditRecipeModalProps {
   isVisible: boolean;
@@ -18,8 +18,9 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [importUrl, setImportUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  const [importSource, setImportSource] = useState<'link' | 'photo'>('link');
   const [isLoading, setIsLoading] = useState(false);
-  const [creationMode, setCreationMode] = useState<'initial' | 'automatic' | 'manual'>('initial');
+  const [creationMode, setCreationMode] = useState<'initial' | 'link' | 'photo' | 'manual'>('initial');
   const [isSaveDisabled, setIsSaveDisabled] = useState(true);
   const { height, width } = useWindowDimensions();
 
@@ -51,12 +52,19 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     let interval: ReturnType<typeof setInterval> | undefined = undefined;
 
     if (isImporting) {
-        const messages = [
-            'Fetching your recipe...',
-            'Analyzing ingredients...',
-            'Extracting steps...',
-            'Just a moment longer...'
-        ];
+        const messages = importSource === 'photo'
+          ? [
+              'Reading the page...',
+              'Making out the ingredients...',
+              'Working through the steps...',
+              'Almost there...'
+            ]
+          : [
+              'Fetching your recipe...',
+              'Analyzing ingredients...',
+              'Extracting steps...',
+              'Just a moment longer...'
+            ];
         let messageIndex = 0;
         setImportingMessage(messages[messageIndex]); // Set initial message
         
@@ -75,7 +83,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             clearInterval(interval);
         }
     };
-  }, [isImporting]);
+  }, [isImporting, importSource]);
 
   useEffect(() => {
     if (!isVisible || !mealForRecipe) {
@@ -110,6 +118,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   const handleImportRecipe = async () => {
     if (!importUrl) return;
     Keyboard.dismiss();
+    setImportSource('link');
     setIsImporting(true);
     try {
       const importedRecipe = await importRecipeFromUrl(importUrl);
@@ -123,10 +132,69 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       setIsImporting(false);
     }
   };
-  
+
+  /**
+   * Reads a recipe out of a photo of a page. Lands in the same manual editor as
+   * a link import, so the user reviews and corrects before saving — reading
+   * handwriting produces a first draft, not an answer.
+   */
+  const handleImportFromPhoto = async (source: 'camera' | 'library') => {
+    const permission = source === 'camera'
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert(
+        'Permission needed',
+        source === 'camera'
+          ? 'Fridgie needs camera access to photograph a recipe.'
+          : 'Fridgie needs photo access to import a recipe image.'
+      );
+      return;
+    }
+
+    const options: ImagePicker.ImagePickerOptions = {
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      // Text needs detail, but this travels as base64 — quality is a balance.
+      quality: 0.6,
+      base64: true,
+    };
+    const result = source === 'camera'
+      ? await ImagePicker.launchCameraAsync(options)
+      : await ImagePicker.launchImageLibraryAsync(options);
+
+    if (result.canceled) return;
+    const asset = result.assets?.[0];
+    if (!asset?.base64) {
+      Alert.alert('Error', "Couldn't read that image. Please try again.");
+      return;
+    }
+
+    setImportSource('photo');
+    setIsImporting(true);
+    try {
+      const mime = asset.mimeType?.startsWith('image/') ? asset.mimeType : 'image/jpeg';
+      const imported = await importRecipeFromPhoto(`data:${mime};base64,${asset.base64}`);
+      setEditingRecipe(prev => ({ ...imported, id: prev!.id }));
+      setCreationMode('manual');
+    } catch (error: any) {
+      console.error('Failed to import recipe from photo', error);
+      const notARecipe = typeof error?.message === 'string' && error.message.includes('RECIPE_NOT_FOUND');
+      Alert.alert(
+        notARecipe ? 'No recipe found' : 'Import failed',
+        notARecipe
+          ? "That photo doesn't look like a recipe. Try a clearer shot of the page."
+          : "Couldn't read the recipe from that photo. Try again with more light, or enter it manually."
+      );
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+
   const handleBackPress = () => {
     // Go back to the initial selection from any other state
-    if (creationMode === 'automatic' || creationMode === 'manual') {
+    if (creationMode === 'link' || creationMode === 'photo' || creationMode === 'manual') {
       setCreationMode('initial');
       // Reset to a blank slate in case of a bad import
       setEditingRecipe(createBlankRecipe());
@@ -174,21 +242,57 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     if (creationMode === 'initial') {
       return (
         <>
-          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('automatic')}>
+          {/* Named by SOURCE rather than by mechanism. Both of the first two
+              are automatic imports, so calling one "Automatic Import" made the
+              photo option read like something else entirely. */}
+          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('link')}>
             <View style={styles.iconRow}><Ionicons name="globe-outline" size={32} color={primary} /><Ionicons name="logo-tiktok" size={32} color={primary} /></View>
-            <Text style={styles.selectionButtonTitle}>Automatic Import</Text>
-            <Text style={styles.selectionButtonDescription}>Paste a link from a recipe website or TikTok to get started.</Text>
+            <Text style={styles.selectionButtonTitle}>Import from Link</Text>
+            <Text style={styles.selectionButtonDescription}>Paste a link from a recipe website or TikTok.</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('photo')}>
+            <View style={styles.iconRow}><Ionicons name="camera-outline" size={32} color={primary} /><Ionicons name="document-text-outline" size={32} color={primary} /></View>
+            <Text style={styles.selectionButtonTitle}>Import from Photo</Text>
+            <Text style={styles.selectionButtonDescription}>Snap a cookbook page, recipe card, or handwritten note.</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('manual')}>
             <Ionicons name="create-outline" size={32} color={primary} />
-            <Text style={styles.selectionButtonTitle}>Manual Entry</Text>
-            <Text style={styles.selectionButtonDescription}>Enter the recipe details yourself, step-by-step.</Text>
+            <Text style={styles.selectionButtonTitle}>Enter Manually</Text>
+            <Text style={styles.selectionButtonDescription}>Type the recipe in yourself, step-by-step.</Text>
           </TouchableOpacity>
         </>
       );
     }
     
-    if (creationMode === 'automatic') {
+    if (creationMode === 'photo') {
+      if (isImporting) {
+        return (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={primary} />
+            <Text style={styles.loadingText}>{importingMessage}</Text>
+          </View>
+        );
+      }
+      return (
+        <>
+          <TouchableOpacity style={styles.selectionButton} onPress={() => handleImportFromPhoto('camera')}>
+            <Ionicons name="camera-outline" size={32} color={primary} />
+            <Text style={styles.selectionButtonTitle}>Take a Photo</Text>
+            <Text style={styles.selectionButtonDescription}>Lay the page flat in good light and fill the frame.</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.selectionButton} onPress={() => handleImportFromPhoto('library')}>
+            <Ionicons name="images-outline" size={32} color={primary} />
+            <Text style={styles.selectionButtonTitle}>Choose an Image</Text>
+            <Text style={styles.selectionButtonDescription}>Pick a photo or screenshot you already have.</Text>
+          </TouchableOpacity>
+          <Text style={styles.photoHint}>
+            You&apos;ll get a chance to check everything before it&apos;s saved.
+          </Text>
+        </>
+      );
+    }
+
+    if (creationMode === 'link') {
       // ✅ 3. If importing, show the animated loading screen. Otherwise, show the URL input.
       if (isImporting) {
         return (
@@ -247,7 +351,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             <KeyboardAvoidingView style={styles.modalContentContainer} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
               <View style={styles.modalHeader}>
                 {/* Header content remains the same */}
-                {(creationMode === 'automatic' || creationMode === 'manual') && !mealForRecipe?.recipeId ? (
+                {(creationMode === 'link' || creationMode === 'photo' || creationMode === 'manual') && !mealForRecipe?.recipeId ? (
                   <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
                     <Ionicons name="chevron-back" size={28} color="#aaa" />
                   </TouchableOpacity>
@@ -326,6 +430,7 @@ const styles = StyleSheet.create({
   formRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   quantityInput: { flex: 0.3, marginRight: 8 },
   nameInput: { flex: 1 },
+  photoHint: { textAlign: 'center', color: '#888', fontSize: 14, marginTop: 8, paddingHorizontal: 12 },
   stepNumber: { marginRight: 8, fontSize: 16, color: '#888' },
   deleteRowButton: { padding: 4, marginLeft: 8 },
   addFieldButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 8 },

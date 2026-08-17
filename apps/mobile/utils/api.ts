@@ -570,6 +570,23 @@ export async function loginWithToken(idToken: string) {
   await res.json();
 }
 
+/**
+ * Reads a recipe out of a photograph of a printed or handwritten page.
+ *
+ * The image goes up as a base64 data URL rather than via Storage: it's
+ * transient input, not something the user is saving, so uploading it would
+ * leave orphaned objects and expose a publicly-readable URL for what might be
+ * a photo of someone's private notebook.
+ */
+export async function importRecipeFromPhoto(imageDataUrl: string): Promise<Recipe> {
+  const res = await authorizedFetch(`${BASE_URL}/recipe/import/photo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: imageDataUrl }),
+  });
+  return res.json();
+}
+
 export async function importRecipeFromUrl(url: string): Promise<Recipe> {
   const res = await authorizedFetch(`${BASE_URL}/recipe/import`, {
     method: 'POST',

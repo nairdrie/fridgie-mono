@@ -673,6 +673,8 @@ export default function HomeScreen() {
                         onUpdateMeal={handleUpdateMeal}
                         onDeleteMeal={handleDeleteMeal}
                         onAddMeal={handleAddMeal}
+                        onAddFromCookbook={() => setCookbookModalVisible(true)}
+                        onSuggestMeal={() => setSuggestionModalVisible(true)}
                         onViewRecipe={handleViewRecipe}
                         onAddRecipe={handleAddRecipe}
                         collapsedMeals={collapsedMeals}
