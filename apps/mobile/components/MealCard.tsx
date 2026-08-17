@@ -6,9 +6,10 @@ import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutAnimation, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { LayoutAnimation, Pressable, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as Haptics from 'expo-haptics';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import Modal from 'react-native-modal';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import uuid from 'react-native-uuid';
 
@@ -58,6 +59,7 @@ function MealCard({
     const mealNameInputRef = useRef<TextInput | null>(null);
 
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+    const [isMenuVisible, setIsMenuVisible] = useState(false);
 
     const daySelectorProgress = useSharedValue(0);
     
@@ -269,13 +271,17 @@ function MealCard({
     if (isConfirmingDelete) {
         return (
             <View style={[styles.mealCard, styles.confirmationContainer]}>
-                <Text style={styles.confirmationTitle}>Delete {meal.name ? `"${meal.name}"` : 'meal'}?</Text>
+                {/* "Remove from meal plan", not "Delete" — the recipe itself is
+                    untouched, and only this week's plan changes. */}
+                <Text style={styles.confirmationTitle}>
+                    Remove {meal.name ? `"${meal.name}"` : 'this meal'} from meal plan?
+                </Text>
                 <View style={styles.confirmationButtons}>
                     <TouchableOpacity style={[styles.confirmationButton, styles.cancelButton]} onPress={handleCancelDelete}>
                         <Text style={styles.cancelButtonText}>Cancel</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.confirmationButton, styles.confirmButton]} onPress={handleConfirmDelete}>
-                        <Text style={styles.confirmButtonText}>Confirm</Text>
+                        <Text style={styles.confirmButtonText}>Remove</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -313,8 +319,13 @@ function MealCard({
                             </Animated.View>
                         )}
                     </View>
-                    <TouchableOpacity onPress={handleDeletePress} style={styles.deleteButton}>
-                        <Ionicons name="trash" size={18} color="#db6767ff" /> 
+                    <TouchableOpacity
+                        onPress={() => setIsMenuVisible(true)}
+                        style={styles.deleteButton}
+                        hitSlop={10}
+                        accessibilityLabel="Meal options"
+                    >
+                        <Ionicons name="ellipsis-horizontal" size={20} color="#8a8a8a" />
                     </TouchableOpacity>
                 </View>
                 <View style={styles.mealHeader}>
@@ -322,8 +333,14 @@ function MealCard({
                         <TouchableOpacity onPress={() => onToggleCollapse(meal.id)} style={styles.collapseButton}>
                             <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
                         </TouchableOpacity>
+                        {/* An unnamed meal stays a live text field with its
+                            placeholder — that's the fastest path for a brand new
+                            meal. Once it HAS a name, tapping it collapses like
+                            the chevron, and the pencil is how you rename. onFocus
+                            latches editing so typing the first character doesn't
+                            flip it out from under the cursor. */}
                         <View style={styles.mealNameContainer}>
-                            {isMealNameEditing ? (
+                            {(!meal.name || isMealNameEditing) ? (
                                 <TextInput
                                     ref={(ref) => {
                                         mealNameInputRef.current = ref;
@@ -334,14 +351,26 @@ function MealCard({
                                     onChangeText={(text) => onUpdateMeal(meal.id, { name: text })}
                                     placeholder={placeholder}
                                     placeholderTextColor={'grey'}
+                                    onFocus={() => setIsMealNameEditing(true)}
                                     onBlur={() => setIsMealNameEditing(false)}
                                 />
                             ) : (
-                                <TouchableOpacity onPress={() => setIsMealNameEditing(true)}>
-                                    <Text style={[styles.mealName, !meal.name && styles.placeholderText]}>
-                                        {meal.name ? mealNameDisplay : placeholder}
-                                    </Text>
-                                </TouchableOpacity>
+                                <View style={styles.mealNameRow}>
+                                    <TouchableOpacity
+                                        onPress={() => onToggleCollapse(meal.id)}
+                                        style={styles.mealNameTap}
+                                    >
+                                        <Text style={styles.mealName}>{mealNameDisplay}</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => setIsMealNameEditing(true)}
+                                        style={styles.editNameButton}
+                                        hitSlop={12}
+                                        accessibilityLabel="Rename meal"
+                                    >
+                                        <Ionicons name="pencil" size={15} color="#9a9a9a" />
+                                    </TouchableOpacity>
+                                </View>
                             )}
                         </View>
                     </View>
@@ -351,18 +380,9 @@ function MealCard({
                                 <Ionicons name="book-outline" size={16} color={primary} />
                                 <Text style={styles.recipeIndicatorText}>View Recipe</Text>
                             </TouchableOpacity>
-                            { meal.addedToCookbook ? (
-                                <TouchableOpacity style={styles.recipeIndicator} onPress={() => onToggleCookbook(meal)}>
-                                    <Ionicons name="bookmark" size={16} color={primary} />
-                                    <Text style={styles.recipeIndicatorText}>Added to Cookbook</Text>
-                                </TouchableOpacity>
-                            ) : (
-                                <TouchableOpacity style={styles.recipeIndicator} onPress={() => onToggleCookbook(meal)}>
-                                    <Ionicons name="bookmark-outline" size={16} color={primary} />
-                                    <Text style={styles.recipeIndicatorText}>Add to Cookbook</Text>
-                                </TouchableOpacity>
-                            )
-                            }
+                            {/* The cookbook toggle moved into the ⋯ menu — it's a
+                                setting, not a navigation action, so it doesn't
+                                belong beside "View Recipe". */}
                         </View>
                     ) : (
                         <View style={styles.mealHeaderLower}>
@@ -396,7 +416,7 @@ function MealCard({
                         windowSize={10}
                     />
                     {ingredients.length === 0 && (
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.addFirstIngredientButton}
                             onPress={() => handleAddIngredient(-1)}>
                             <Text style={styles.addIngredientText}>+ Add Ingredient</Text>
@@ -404,12 +424,72 @@ function MealCard({
                     )}
                 </View>
             )}
+
+            {/* Rendered only while open — every meal in the plan mounts a
+                MealCard, and a permanently-mounted Modal each would be a lot of
+                idle components for something used one at a time. */}
+            {isMenuVisible && (
+                <Modal
+                    isVisible={isMenuVisible}
+                    onBackdropPress={() => setIsMenuVisible(false)}
+                    onBackButtonPress={() => setIsMenuVisible(false)}
+                    swipeDirection="down"
+                    onSwipeComplete={() => setIsMenuVisible(false)}
+                    backdropOpacity={0.4}
+                    style={styles.menuModal}
+                    useNativeDriverForBackdrop
+                >
+                    <SafeAreaView style={styles.menuSheet}>
+                        <View style={styles.menuGrabberContainer}>
+                            <View style={styles.menuGrabber} />
+                        </View>
+                        <Text style={styles.menuTitle} numberOfLines={1}>
+                            {meal.name || 'Untitled meal'}
+                        </Text>
+
+                        {hasRecipe && (
+                            <TouchableOpacity
+                                style={styles.menuRow}
+                                onPress={() => { setIsMenuVisible(false); onToggleCookbook(meal); }}
+                            >
+                                <Ionicons
+                                    name={meal.addedToCookbook ? 'bookmark' : 'bookmark-outline'}
+                                    size={22}
+                                    color={primary}
+                                />
+                                <Text style={styles.menuRowText}>
+                                    {meal.addedToCookbook ? 'Remove from Cookbook' : 'Add to Cookbook'}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+
+                        <TouchableOpacity
+                            style={styles.menuRow}
+                            onPress={() => { setIsMenuVisible(false); handleDeletePress(); }}
+                        >
+                            <Ionicons name="close-circle-outline" size={22} color="#db6767ff" />
+                            <Text style={[styles.menuRowText, styles.menuRowDanger]}>Remove from Meal Plan</Text>
+                        </TouchableOpacity>
+                    </SafeAreaView>
+                </Modal>
+            )}
         </View>
     );
 }
 
 
 const styles = StyleSheet.create({
+    mealNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    mealNameTap: { flexShrink: 1 },
+    editNameButton: { padding: 2 },
+    menuModal: { justifyContent: 'flex-end', margin: 0 },
+    menuSheet: { backgroundColor: '#f8f9fa', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 8 },
+    menuGrabberContainer: { alignItems: 'center', paddingTop: 12 },
+    menuGrabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#d0d0d0' },
+    menuTitle: { fontSize: 16, fontWeight: '600', color: '#6c757d', textAlign: 'center', marginTop: 12, marginBottom: 8, paddingHorizontal: 24 },
+    menuRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 24 },
+    menuRowText: { fontSize: 17, fontWeight: '500', color: '#212529' },
+    menuRowDanger: { color: '#db6767ff' },
     mealCard: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 8, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
     mealHeader: {
 
