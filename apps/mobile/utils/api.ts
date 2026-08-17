@@ -10,9 +10,8 @@ import {
 } from "firebase/auth";
 import { Platform } from 'react-native';
 import uuid from 'react-native-uuid';
-import { DayOfWeek, Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, UserProfile, UserSearchResult } from "../types/types";
+import { Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, UserProfile, UserSearchResult } from "../types/types";
 import { authStatePromise } from "./authState";
-import { parseWeekStart } from "./date";
 import { auth } from "./firebase";
 
 // API root. Configure per environment via EXPO_PUBLIC_API_URL
@@ -319,6 +318,18 @@ export async function registerForPushNotificationsAsync() {
     return;
   }
 
+  // Before the token fetch, not after: the channel is Android display setup and
+  // has nothing to do with tokens, but it used to sit past two `return`s that
+  // fire on simulators and on any token failure — so it was often never created.
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'default',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+  }
+
   try {
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
@@ -342,16 +353,6 @@ export async function registerForPushNotificationsAsync() {
   } catch (error) {
     const status = error instanceof ApiError ? ` (HTTP ${error.status})` : '';
     console.error(`Could not save push token to server${status}`, error);
-  }
-
-  // Recommended for Android
-  if (Platform.OS === 'android') {
-    Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
-    });
   }
 
   return token;
@@ -407,40 +408,9 @@ export async function getRecipe(recipeId: string): Promise<Recipe> {
 }
 
 
-const DAY_INDEX: Record<DayOfWeek, number> = {
-  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
-  Thursday: 4, Friday: 5, Saturday: 6,
-};
-
-/** Local hour on the meal's day at which to ask the user to rate it. */
-const RATING_PROMPT_HOUR = 20;
-
-/**
- * Schedules the post-meal rating prompt.
- *
- * The server requires an absolute `sendAt` — it has no way to resolve a bare
- * day-of-week, since only the client knows the user's zone. We derive it from
- * the list's weekStart, which is a local Sunday date key. The server keys the
- * job by (listId, mealId), so re-scheduling on a day change replaces rather
- * than stacks.
- */
-export async function scheduleMealRating(
-  mealId: string,
-  listId: string,
-  weekStart: string,
-  dayOfWeek: DayOfWeek
-) {
-  const sendAtDate = parseWeekStart(weekStart);
-  sendAtDate.setDate(sendAtDate.getDate() + DAY_INDEX[dayOfWeek]);
-  sendAtDate.setHours(RATING_PROMPT_HOUR, 0, 0, 0);
-
-  const res = await authorizedFetch(`${BASE_URL}/notification/schedule-rating`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mealId, listId, sendAt: sendAtDate.toISOString() }),
-  });
-  return res.json();
-}
+// The post-meal rating prompt is scheduled on the device now — see
+// utils/mealReminders.ts. It was posted to the server here, which stored a job
+// nothing ever read, so no reminder was ever delivered.
 
 /**
  * Sends user preferences to the backend to get a meal suggestion.

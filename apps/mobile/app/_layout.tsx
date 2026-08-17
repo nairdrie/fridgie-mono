@@ -1,7 +1,8 @@
 // app/_layout.tsx
 import "@/utils/firebase";
-import { Stack } from 'expo-router';
-import React from 'react';
+import * as Notifications from 'expo-notifications';
+import { Stack, useRouter } from 'expo-router';
+import React, { useEffect, useRef } from 'react';
 import { Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -11,6 +12,49 @@ import { ListProvider } from '@/context/ListContext';
 import { NotificationProvider } from "@/context/NotificationContext";
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
+
+// Without a handler, a notification that arrives while the app is open is
+// swallowed silently — the OS assumes a foregrounded app will present it itself.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
+/**
+ * Routes a tapped meal-rating reminder to the rating screen.
+ *
+ * useLastNotificationResponse covers the cold-start case too — if the tap
+ * launched the app, the response is already waiting on first render, which a
+ * plain listener subscription would miss. It keeps returning the same response
+ * across re-renders, hence the guard.
+ */
+function MealRatingNotificationRouter() {
+  const router = useRouter();
+  const response = Notifications.useLastNotificationResponse();
+  const handled = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!response) return;
+
+    const request = response.notification.request;
+    if (handled.current === request.identifier) return;
+
+    const data = request.content.data as { type?: string; recipeId?: string; mealId?: string };
+    if (data?.type !== 'meal-rating' || !data.recipeId) return;
+
+    handled.current = request.identifier;
+    router.push({
+      pathname: '/rate-meal',
+      params: { recipeId: data.recipeId, ...(data.mealId ? { mealId: data.mealId } : {}) },
+    });
+  }, [response, router]);
+
+  return null;
+}
 
 // Create a wrapper component that conditionally applies GestureHandlerRootView
 const RootView = ({ children }: { children: React.ReactNode }) => {
@@ -31,6 +75,7 @@ export default function RootLayout() {
             <ListProvider>
               <RootView>
                 <StatusBar style="dark" />
+                <MealRatingNotificationRouter />
                 {/* The Stack component defines the navigator */}
                 <Stack>
                   <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

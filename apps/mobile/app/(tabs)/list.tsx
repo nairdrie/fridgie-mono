@@ -32,7 +32,8 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
-import { addUserCookbookRecipe, categorizeList, CLIENT_ID, getUserCookbook, listenToList, removeUserCookbookRecipe, scheduleMealRating, StaleRevError, updateList } from '../../utils/api';
+import { addUserCookbookRecipe, categorizeList, CLIENT_ID, getUserCookbook, listenToList, removeUserCookbookRecipe, StaleRevError, updateList } from '../../utils/api';
+import { cancelMealRatingReminder, scheduleMealRatingReminder } from '../../utils/mealReminders';
 import { parseWeekStart } from '../../utils/date';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
 
@@ -421,18 +422,37 @@ export default function HomeScreen() {
     const handleUpdateMeal = (mealId: string, updates: Partial<Meal>) => {
         setMeals(prev => prev.map(meal => (meal.id === mealId ? { ...meal, ...updates } : meal)));
         markDirty();
-        if (updates.dayOfWeek && selectedList) {
-            // The server needs an absolute sendAt — only the client knows the
-            // user's zone — so it's derived from the list's local weekStart.
-            scheduleMealRating(mealId, selectedList.id, selectedList.weekStart, updates.dayOfWeek)
-                .catch(console.error);
+
+        if (!selectedList) return;
+        // Reconcile against the MERGED meal rather than just `updates`: a rating
+        // reminder needs both a day and a recipe, and either can arrive in a
+        // separate edit from the other.
+        const existing = meals.find(m => m.id === mealId);
+        const merged = { ...existing, ...updates } as Meal;
+
+        if (merged.dayOfWeek && merged.recipeId) {
+            scheduleMealRatingReminder({
+                listId: selectedList.id,
+                mealId,
+                recipeId: merged.recipeId,
+                mealName: merged.name ?? '',
+                weekStart: selectedList.weekStart,
+                dayOfWeek: merged.dayOfWeek,
+            }).catch(console.error);
+        } else {
+            // Day cleared, or no recipe to rate — the reminder would open a
+            // screen that immediately bounces the user back.
+            cancelMealRatingReminder(selectedList.id, mealId).catch(console.error);
         }
     };
-    
+
     const handleDeleteMeal = (mealId: string) => {
         setMeals(prev => prev.filter(meal => meal.id !== mealId));
         setItems(prev => prev.filter(item => item.mealId !== mealId));
         markDirty();
+        if (selectedList) {
+            cancelMealRatingReminder(selectedList.id, mealId).catch(console.error);
+        }
     };
 
     const handleAutoCategorize = async (itemsToCategorize?: Item[]) => {
