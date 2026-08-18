@@ -40,6 +40,17 @@ ifneq ($(XCODE_FALLBACK),)
 export DEVELOPER_DIR := $(XCODE_FALLBACK)
 endif
 
+# Android Studio installs the SDK but never touches your shell, so ANDROID_HOME
+# is unset and emulator/ is missing from PATH on a fresh machine. Expo reports
+# that as "no emulators could be started automatically", which sends you looking
+# at the emulator when the emulator is fine — so point at the SDK ourselves.
+# Set ANDROID_HOME yourself to override.
+ANDROID_SDK := $(or $(ANDROID_HOME),$(wildcard $(HOME)/Library/Android/sdk))
+ifneq ($(ANDROID_SDK),)
+export ANDROID_HOME := $(ANDROID_SDK)
+export PATH := $(ANDROID_SDK)/emulator:$(ANDROID_SDK)/platform-tools:$(ANDROID_SDK)/cmdline-tools/latest/bin:$(PATH)
+endif
+
 # Which platform the EAS targets act on: ios | android | all
 PLATFORM ?= all
 
@@ -259,11 +270,21 @@ check-xcode:
 
 .PHONY: check-android
 check-android:
-	@if [ -z "$$ANDROID_HOME" ] && [ ! -d "$$HOME/Library/Android/sdk" ]; then \
+	@if [ -z "$(ANDROID_SDK)" ]; then \
 		printf "\033[31mAndroid SDK not found.\033[0m\n\n"; \
-		printf "Install Android Studio, open it once to install the SDK, then add to your shell:\n"; \
-		printf "  export ANDROID_HOME=\$$HOME/Library/Android/sdk\n"; \
-		printf "  export PATH=\$$PATH:\$$ANDROID_HOME/platform-tools:\$$ANDROID_HOME/emulator\n\n"; \
+		printf "Install Android Studio and open it once to install the SDK.\n"; \
+		printf "If it lives somewhere non-standard, set ANDROID_HOME to it.\n\n"; \
+		exit 1; \
+	fi
+	@command -v emulator >/dev/null 2>&1 || { \
+		printf "\033[31memulator not found under $(ANDROID_SDK).\033[0m\n\n"; \
+		printf "Android Studio > Settings > SDK Manager > SDK Tools > Android Emulator.\n\n"; \
+		exit 1; }
+	@if [ -z "$$(emulator -list-avds 2>/dev/null)" ] && \
+	   [ "$$(adb devices 2>/dev/null | grep -c 'device$$')" = "0" ]; then \
+		printf "\033[31mNo Android emulator or device to run on.\033[0m\n\n"; \
+		printf "Create a virtual device in Android Studio > Device Manager,\n"; \
+		printf "or plug in a phone with USB debugging enabled.\n\n"; \
 		exit 1; \
 	fi
 	@command -v java >/dev/null 2>&1 || { \
@@ -288,10 +309,8 @@ doctor: ## Report on the local toolchain
 	@printf "  pod        %s\n" "$$(pod --version 2>/dev/null || echo 'MISSING — brew install cocoapods')"
 	@printf "  simulators %s\n" "$$(xcrun simctl list devices available 2>/dev/null | grep -c iPhone || echo 0) iPhone"
 	@printf "\n$(BOLD)android$(OFF)\n"
-	@if [ -n "$$ANDROID_HOME" ]; then \
-		printf "  sdk        %s\n" "$$ANDROID_HOME"; \
-	elif [ -d "$$HOME/Library/Android/sdk" ]; then \
-		printf "  sdk        \033[33m%s\033[0m\n" "$$HOME/Library/Android/sdk — found, but ANDROID_HOME is unset"; \
+	@if [ -n "$(ANDROID_SDK)" ]; then \
+		printf "  sdk        %s\n" "$(ANDROID_SDK)"; \
 	else \
 		printf "  sdk        \033[31mMISSING\033[0m — install Android Studio\n"; \
 	fi
