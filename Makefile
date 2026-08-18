@@ -51,6 +51,9 @@ export ANDROID_HOME := $(ANDROID_SDK)
 export PATH := $(ANDROID_SDK)/emulator:$(ANDROID_SDK)/platform-tools:$(ANDROID_SDK)/cmdline-tools/latest/bin:$(PATH)
 endif
 
+# Read from app.json so it cannot drift from what actually gets installed.
+APP_ID := $(shell sed -n 's/.*"package": "\(.*\)".*/\1/p' $(MOBILE_DIR)/app.json | head -1)
+
 # Which platform the EAS targets act on: ios | android | all
 PLATFORM ?= all
 
@@ -121,7 +124,17 @@ api: check-env ## Run the API with live reload (its own terminal)
 
 .PHONY: dev
 dev: ## Run Metro for the installed dev client (its own terminal)
-	@printf "$(DIM)app will talk to $(API_URL) — start it with 'make api'$(OFF)\n\n"
+	@printf "$(DIM)app will talk to $(API_URL) — start it with 'make api'$(OFF)\n"
+	@# Metro only serves a dev client that is ALREADY installed. Opening it on a
+	@# device without one fails as "No development build ... is installed", which
+	@# reads like a build problem rather than a missing step, so say so up front.
+	@if command -v adb >/dev/null 2>&1 && \
+	   [ "$$(adb devices 2>/dev/null | grep -c 'device$$')" != "0" ] && \
+	   ! adb shell pm list packages 2>/dev/null | grep -q '$(APP_ID)'; then \
+		printf "\033[33mnote:$(OFF) $(APP_ID) is not installed on the attached Android device.\n"; \
+		printf "      Metro will start, but opening the app there needs $(BOLD)make android$(OFF) first.\n"; \
+	fi
+	@printf "\n"
 	@cd $(MOBILE_DIR) && EXPO_PUBLIC_API_URL=$(API_URL) npx expo start --dev-client
 
 .PHONY: ios
