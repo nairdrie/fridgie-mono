@@ -1,0 +1,34 @@
+{
+  "rules": {
+    // Everything is denied by default. The API reaches this database through
+    // firebase-admin, which bypasses rules entirely, so locking the root costs
+    // the server nothing — lists, groups, users and scheduledNotifications are
+    // only ever touched server-side.
+    ".read": false,
+    ".write": false,
+
+    // Presence is the ONLY path the mobile client touches directly
+    // (AuthContext.tsx writes /status/{own uid} and reads /status/{member uid}
+    // per member; the only other client reads are .info/connected and
+    // .info/serverTimeOffset, which are always readable).
+    //
+    // Note the read/write rules sit on $uid, NOT on "status". That is
+    // deliberate: it means an individual user's presence can be read, but the
+    // /status list itself cannot be enumerated. The previous rules allowed
+    // exactly that enumeration to anyone, with no token.
+    "status": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid === $uid",
+
+        // Shape is pinned so this node cannot be used as free storage. The
+        // client writes {online:true} on connect and
+        // {online:false, lastOnline:<serverTimestamp>} via onDisconnect.
+        ".validate": "newData.hasChild('online')",
+        "online": { ".validate": "newData.isBoolean()" },
+        "lastOnline": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}
