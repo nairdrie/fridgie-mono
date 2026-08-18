@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { FieldValue } from 'firebase-admin/firestore'
 import { fs } from '@/utils/firebase'
 import { auth } from '@/middleware/auth'
+import { requireAccount } from '@/middleware/requireAccount'
 import { getCookbook } from '@/api/cookbook'
 
 
@@ -10,7 +11,7 @@ const route = new Hono()
 // All cookbook routes require authentication
 route.use('*', auth)
 
-route.delete('/', async (c) => {
+route.delete('/', requireAccount, async (c) => {
   const uid = c.get('uid')
   const recipeId = c.req.param('id')
 

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
+import { requireAccount } from '@/middleware/requireAccount';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { normalizeIngredients } from '@/utils/quantity';
@@ -55,7 +56,7 @@ const generateRandomIp = (): string => {
   return `${octet()}.${octet()}.${octet()}.${octet()}`;
 };
 
-route.use('*', auth);
+route.use('*', auth, requireAccount);
 
 route.post('/', async (c) => {
   const { url } = await c.req.json();

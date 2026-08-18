@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
+import { requireAccount } from '@/middleware/requireAccount';
 import { normalizeIngredients } from '@/utils/quantity';
 import { completeJson, models } from '@/utils/claude';
 import { importedRecipeSchema, photoParsingSystemPrompt } from '@/utils/recipePrompts';
@@ -27,7 +28,7 @@ const MEDIA_TYPES = {
   jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
 } as const;
 
-route.use('*', auth);
+route.use('*', auth, requireAccount);
 
 route.post('/', async (c) => {
   let body: { image?: string };

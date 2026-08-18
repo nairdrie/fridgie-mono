@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { FieldPath } from 'firebase-admin/firestore';
 import { auth } from '@/middleware/auth';
+import { requireAccount } from '@/middleware/requireAccount';
 import { fs } from '@/utils/firebase';
 import { normalizeIngredients } from '@/utils/quantity';
 import { completeJson, models } from '@/utils/claude';
@@ -200,7 +201,7 @@ ${tagVocabulary}
 ${quantityFormatRules}
 `;
 
-route.use('*', auth);
+route.use('*', auth, requireAccount);
 
 route.post('/', async (c) => {
   const uid = c.get('uid') as string;

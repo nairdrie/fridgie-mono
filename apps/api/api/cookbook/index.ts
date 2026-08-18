@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { FieldValue } from 'firebase-admin/firestore'
 import { adminAuth, adminRtdb, fs } from '@/utils/firebase'
 import { auth } from '@/middleware/auth'
+import { requireAccount } from '@/middleware/requireAccount'
 import type { Group, Meal } from '@/utils/types'
 import { getAuth } from 'firebase-admin/auth'
 
@@ -39,7 +40,7 @@ const getMealDate = (weekStart: string, dayOfWeek?: Meal['dayOfWeek']): Date => 
  * POST /api/cookbook
  * Adds a recipe to the user's personal cookbook.
  */
-route.post('/', async (c) => {
+route.post('/', requireAccount, async (c) => {
   const uid = c.get('uid')
   const { recipeId } = await c.req.json<{ recipeId: string }>()
 

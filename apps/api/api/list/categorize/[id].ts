@@ -3,13 +3,14 @@ import { adminRtdb } from '@/utils/firebase';
 import { LexoRank } from 'lexorank';
 import { v4 as uuid } from 'uuid';
 import { auth } from '@/middleware/auth';
+import { requireAccount } from '@/middleware/requireAccount';
 import { groupAuth } from '@/middleware/groupAuth';
 import { mutateList } from '@/utils/listStore';
 import { completeJson, models } from '@/utils/claude';
 
 const route = new Hono();
 
-route.use('*', auth, groupAuth)
+route.use('*', auth, requireAccount, groupAuth)
 
 /** Supermarket aisles, in the order they tend to appear. */
 const SECTIONS = [
