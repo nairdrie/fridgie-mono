@@ -9,6 +9,17 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const apiKey = process.env.ANTHROPIC_API_KEY || Bun.env.ANTHROPIC_API_KEY;
 
+// The SDK constructs happily without a key and only fails at request time, so a
+// missing key surfaces as a generic 500 the first time someone taps Suggest
+// Meals — with nothing in the response pointing at the cause. Say it at boot.
+if (!apiKey) {
+  console.warn(
+    '\n\x1b[33mANTHROPIC_API_KEY is not set.\x1b[0m Meal suggestions, recipe import\n' +
+    '(URL and photo) and list categorization will all fail at request time.\n' +
+    'Add it to apps/api/.env — see .env.example.\n',
+  );
+}
+
 export const anthropic = new Anthropic({ apiKey });
 
 // Per-route model choice lives here so switching one route is a one-line edit

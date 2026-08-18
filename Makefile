@@ -344,5 +344,13 @@ doctor: ## Report on the local toolchain
 	@printf "  LAN IP     %s\n" "$(LAN_IP)"
 	@printf "  API_URL    %s\n" "$(API_URL)"
 	@printf "  api .env   %s\n" "$$([ -f $(API_DIR)/.env ] || [ -f $(API_DIR)/utils/firebase-service-account.json ] && echo present || echo 'absent — see .env.example')"
+	@# Presence only — never print a key. A missing one fails at request time with
+	@# an SDK auth error that names no environment variable, so surface it here.
+	@for k in ANTHROPIC_API_KEY FIREBASE_CREDENTIALS ALGOLIA_APP_ID; do \
+		if grep -qE "^$$k=.+" $(API_DIR)/.env 2>/dev/null; then \
+			printf "  %-10s set\n" "$$k"; \
+		else \
+			printf "  %-10s \033[31mmissing\033[0m — add to $(API_DIR)/.env\n" "$$k"; \
+		fi; done
 	@printf "  ios/       %s\n" "$$([ -d $(MOBILE_DIR)/ios ] && echo generated || echo 'not generated — make ios creates it')"
 	@printf "  android/   %s\n" "$$([ -d $(MOBILE_DIR)/android ] && echo generated || echo 'not generated — make android creates it')"
