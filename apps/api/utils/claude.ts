@@ -27,11 +27,28 @@ export const anthropic = new Anthropic({ apiKey });
 // the cheap-and-cheerful routes (categorize especially) are the first place to
 // try a smaller model if the bill argues for it.
 export const models = {
-  recipeImport: 'claude-opus-5',
-  recipePhoto: 'claude-opus-5',
-  mealSuggest: 'claude-opus-5',
-  categorize: 'claude-opus-5',
+  /** Extraction from messy HTML. The 20–80K tokens of page markup dominate the
+   *  bill here far more than the model tier does. */
+  recipeImport: 'claude-sonnet-5',
+  /** Reading a shadowed, angled page of someone's handwriting. Perception, and
+   *  the hardest of the four — Sonnet 5 has the same high-resolution vision
+   *  tier as Opus. Raise to claude-opus-5 if transcription disappoints. */
+  recipePhoto: 'claude-sonnet-5',
+  /** Creative work under real constraints (diet, protein slots, vetoes). The
+   *  most quality-sensitive route, and the first to raise if output slips. */
+  mealSuggest: 'claude-sonnet-5',
+  /** Sorting grocery strings into 18 fixed aisles, with the answer constrained
+   *  to an enum and an RTDB cache in front so only NOVEL items ever arrive.
+   *  Nothing here needs a frontier model. */
+  categorize: 'claude-haiku-4-5',
 } as const;
+
+/**
+ * Haiku 4.5 predates the effort parameter and rejects it outright, so it cannot
+ * simply be passed through. Sending it anyway 400s every call — the exact trap
+ * a one-line model swap walks into.
+ */
+const supportsEffort = (model: string) => !model.startsWith('claude-haiku');
 
 export interface JsonCallOptions {
   model: string;
@@ -80,7 +97,7 @@ export async function completeJson<T>({
       },
     ],
     output_config: {
-      effort,
+      ...(supportsEffort(model) ? { effort } : {}),
       format: { type: 'json_schema', schema },
     },
     messages: [{ role: 'user', content: user }],

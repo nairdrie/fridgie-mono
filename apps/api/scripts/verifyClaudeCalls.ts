@@ -53,7 +53,7 @@ auditSchema(importedRecipeSchema, 'importedRecipe');
 
 // Imported only now: the SDK binds `fetch` when the client is constructed, so
 // the module has to load after the patch above is in place.
-const { completeJson } = await import('@/utils/claude');
+const { completeJson, models } = await import('@/utils/claude');
 
 console.log('\n--- text request ---');
 await completeJson({
@@ -87,6 +87,28 @@ const blocks = captured.messages[0].content;
 check('image block uses base64 source', blocks[0].type === 'image' && blocks[0].source.type === 'base64');
 check('image block carries media_type', blocks[0].source.media_type === 'image/jpeg');
 check('no OpenAI-style image_url block', JSON.stringify(blocks).indexOf('image_url') === -1);
+
+console.log('\n--- effort guard (Haiku rejects the effort param) ---');
+await completeJson({
+  model: models.categorize,
+  system: 'sort things',
+  user: 'items',
+  schema: recipeSchema as any,
+  effort: 'low',
+});
+check(`categorize model is ${models.categorize}`, captured.model === models.categorize);
+check('no effort sent to Haiku', captured.output_config?.effort === undefined);
+check('schema still sent to Haiku', captured.output_config?.format?.type === 'json_schema');
+
+await completeJson({
+  model: models.mealSuggest,
+  system: 'suggest',
+  user: 'dinner',
+  schema: recipeSchema as any,
+  effort: 'medium',
+});
+check(`suggest model is ${models.mealSuggest}`, captured.model === models.mealSuggest);
+check('effort IS sent to Sonnet', captured.output_config?.effort === 'medium');
 
 globalThis.fetch = realFetch;
 console.log(failures.length ? `\n${failures.length} FAILURE(S)` : '\nall checks passed');
