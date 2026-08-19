@@ -9,7 +9,7 @@ import {
 import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useMemo, useState } from "react";
-import { Keyboard, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 // Re-exported for existing imports; implementation lives in utils/quantity.
 export { parseQuantityAndText } from "@/utils/quantity";
@@ -78,7 +78,14 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
             animationType="fade"
             onRequestClose={onClose}
         >
-            <View style={styles.modalContainer}>
+            {/* The input autofocuses, so the keyboard is already up by the time
+                this is on screen. Centred in the full screen that put the Save
+                and Cancel buttons — and on a shorter phone the input itself —
+                underneath it. */}
+            <KeyboardAvoidingView
+                style={styles.modalContainer}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
                 <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>Edit Quantity</Text>
                     <Text style={styles.modalItemName}>{item?.text}</Text>
@@ -113,7 +120,7 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
                         </TouchableOpacity>
                     </View>
                 </View>
-            </View>
+            </KeyboardAvoidingView>
         </Modal>
     );
 }

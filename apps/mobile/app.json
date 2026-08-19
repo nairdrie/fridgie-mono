@@ -10,12 +10,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.nairdrie.fridgie",
-      "config": {
-        "googleSignIn": {
-          "reservedClientId": "598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj.apps.googleusercontent.com"
-        }
-      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -27,6 +23,9 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.nairdrie.fridgie",
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
       "googleServicesFile": "./google-services.json"
     },
     "web": {
@@ -35,7 +34,34 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "@react-native-google-signin/google-signin",
+      "expo-apple-authentication",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj"
+        }
+      ],
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "776186408706339",
+          "clientToken": "REPLACE_WITH_FACEBOOK_CLIENT_TOKEN",
+          "displayName": "fridgie",
+          "scheme": "fb776186408706339",
+          "isAutoInitEnabled": false,
+          "autoLogAppEventsEnabled": false,
+          "advertiserIDCollectionEnabled": false,
+          "iosUserTrackingPermission": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Fridgie uses your photos to import a recipe from a picture of one, and to add a photo to a recipe you save.",
+          "cameraPermission": "Fridgie uses the camera to photograph a cookbook page or recipe card and read the recipe off it.",
+          "microphonePermission": false
+        }
+      ],
       "expo-dev-client",
       "expo-router",
       [

@@ -44,7 +44,10 @@ export default function HomeScreen() {
     
     const [meals, setMeals] = useState<Meal[]>([]);
     const [items, setItems] = useState<Item[]>([]);
-    const [sort, setSort] = useState<List['sort']>('custom');
+    // Department order is the default: a grocery list is walked aisle by aisle,
+    // and a list that arrives without a stored `sort` has never been given one
+    // rather than having been deliberately set to custom.
+    const [sort, setSort] = useState<List['sort']>('category');
 
     const [editingId, setEditingId] = useState<string>('');
     const [isCategorizing, setIsCategorizing] = useState(false);
@@ -140,8 +143,24 @@ export default function HomeScreen() {
     // initial empty state.
     const hasLoadedRef = useRef(false);
 
+    // Ids of items the server has already filed under a department. Anything with
+    // text that ISN'T in here was added or typed locally since the last sort, and
+    // is what the auto-sort effect below reacts to.
+    const sortedItemIdsRef = useRef<Set<string>>(new Set());
+    // Ids we tried and failed to sort. Without this the auto-sort effect would
+    // spin on every render for as long as the request keeps failing.
+    const sortFailedIdsRef = useRef<Set<string>>(new Set());
+
+    const hasText = (i: Item) => !i.isSection && (i.text ?? '').trim() !== '';
+
+    const markSorted = (list: Item[]) => {
+        sortedItemIdsRef.current = new Set(list.filter(hasText).map(i => i.id));
+        sortFailedIdsRef.current = new Set();
+    };
+
     const applyRemoteList = (list: List) => {
         applyingRemoteRef.current = true;
+        const isFirstSnapshot = !hasLoadedRef.current;
         hasLoadedRef.current = true;
         if (typeof list.rev === 'number') revRef.current = list.rev;
 
@@ -150,9 +169,16 @@ export default function HomeScreen() {
         const withOrder = sanitizeListOrders(rawItems)
             .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
 
+        // Treat the snapshot as already sorted on first load, and whenever it
+        // carries section rows — a categorize result always does. Both cases
+        // matter: the first stops opening an old, hand-ordered list from
+        // instantly reshuffling it, and the second stops another member's sort
+        // (or the server's own sort after a cookbook add) from being redone here.
+        if (isFirstSnapshot || withOrder.some(i => i.isSection)) markSorted(withOrder);
+
         setItems(withOrder.length > 0 ? withOrder : [{ id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false }]);
         setMeals(Array.isArray(list.meals) ? list.meals : []);
-        setSort(list.sort || 'custom');
+        setSort(list.sort || 'category');
     };
 
     // Handles ALL incoming data (Initial Fetch + Real-time Updates)
@@ -322,27 +348,12 @@ export default function HomeScreen() {
             return [...base, ...rankedNewItems];
         });
         markDirty();
-
-        // If the list is sorted by category, re-categorize after adding new
-        // items — passing them explicitly. The old code fired on a 100ms timer
-        // and relied on the 500ms debounced save having landed, which it never
-        // had, so categorize read a snapshot without these ingredients and then
-        // wrote it back, erasing them.
-        if (sort === 'category') {
-            const base = items
-                .filter(item => item.mealId !== updatedMeal.id)
-                .filter(i => (i.text ?? '').trim() !== '' || i.isSection);
-            let listRank = nextListRank(base);
-            let mealRank = LexoRank.middle();
-            const rankedNewItems = newItems
-                .filter(i => (i.text ?? '').trim() !== '')
-                .map(i => {
-                    listRank = listRank.genNext();
-                    mealRank = mealRank.genNext();
-                    return { ...i, listOrder: listRank.toString(), mealOrder: i.mealOrder ?? mealRank.toString() };
-                });
-            handleAutoCategorize([...base, ...rankedNewItems]).catch(console.error);
-        }
+        // No categorize call here. The auto-sort effect picks these ingredients
+        // up off the committed state a moment later, which is what the old code
+        // had to rebuild the ranked item list by hand to approximate — it fired
+        // before React had applied the update above, so it categorized a
+        // snapshot that did not contain these ingredients and wrote it back,
+        // erasing them.
     };
 
     const handleViewRecipe = (meal: Meal) => {
@@ -377,7 +388,11 @@ export default function HomeScreen() {
         markDirty(); // Keep the dirty flag to prevent immediate listener overwrites
 
         try {
-            // 3. Explicitly save the new, UNCATEGORIZED items to Firestore
+            // 3. Save the new, still-unsorted items immediately rather than
+            // waiting out the debounce — these came from a modal the user has
+            // just dismissed, and losing them to a backgrounded app would be
+            // losing a whole meal plan. The auto-sort effect files them into
+            // departments once the state above has committed.
             if (selectedGroup && selectedList) {
                 const res = await updateList(selectedGroup.id, selectedList.id, {
                     items: finalNewItems,
@@ -386,14 +401,8 @@ export default function HomeScreen() {
                 }, revRef.current);
                 if (typeof res?.rev === 'number') revRef.current = res.rev;
             }
-
-            // 4. AFTER saving is successful, categorize if needed
-            if (sort === 'category') {
-                // Now we call handleAutoCategorize with the items we know are saved
-                await handleAutoCategorize(finalNewItems);
-            }
         } catch (error) {
-            console.error("Failed to add/categorize suggested meals:", error);
+            console.error("Failed to save suggested meals:", error);
             // Optional: Implement logic to revert the optimistic update on error
             Alert.alert("Error", "Could not save new meals. Please try again.");
         }
@@ -455,25 +464,61 @@ export default function HomeScreen() {
         }
     };
 
-    const handleAutoCategorize = async (itemsToCategorize?: Item[]) => {
+    const handleAutoCategorize = async () => {
         if (!selectedGroup || !selectedList?.id) return;
         setIsCategorizing(true);
         markDirty();
-        
-        // Use the passed-in items, or fall back to the component's state
-        const currentItems = itemsToCategorize || items;
+
+        // Always the committed state. Every caller used to have the option of
+        // passing its own not-yet-applied array instead, which is exactly how a
+        // list got sorted without the items that had just been added to it.
+        const currentItems = items;
 
         try {
             const newItems = await categorizeList(selectedGroup.id, selectedList.id, currentItems);
-            setItems(sanitizeListOrders(newItems));
+            const sorted = sanitizeListOrders(newItems);
+            setItems(sorted);
+            markSorted(sorted);
             setSort('category'); // Set sort mode to category
             setEditingId('');
         } catch (err) {
             console.error('Auto-categorization failed', err);
+            // Give up on these particular items until something else changes,
+            // so the auto-sort effect doesn't retry them on every render.
+            for (const item of currentItems) {
+                if (hasText(item)) sortFailedIdsRef.current.add(item.id);
+            }
         } finally {
             setIsCategorizing(false);
         }
     };
+
+    // Items that have text but no department yet — a hand-typed grocery row, an
+    // ingredient typed into a meal, a recipe's ingredients.
+    const unsortedCount = items.filter(i =>
+        hasText(i)
+        && !sortedItemIdsRef.current.has(i.id)
+        && !sortFailedIdsRef.current.has(i.id)
+    ).length;
+
+    // Keep a department-sorted list sorted. Every path that puts items on the
+    // list ends here, rather than each one remembering to sort for itself:
+    // adding a row, typing an ingredient into a meal, saving a recipe, and
+    // generating meals all just change `items`.
+    useEffect(() => {
+        if (sort !== 'category') return;
+        if (unsortedCount === 0) return;
+        if (isCategorizing) return;
+        if (!hasLoadedRef.current || !selectedGroup || !selectedList?.id) return;
+        // Mid-edit, re-sorting would move the row out from under the cursor.
+        // The blur that ends editing clears this and re-runs the effect.
+        if (editingId) return;
+
+        // Long enough that adding several items in a row costs one sort, not one
+        // per item.
+        const timer = setTimeout(() => { handleAutoCategorize().catch(console.error); }, 900);
+        return () => clearTimeout(timer);
+    }, [unsortedCount, sort, isCategorizing, editingId, items, selectedGroup?.id, selectedList?.id]);
 
     const handleToggleCookbookById = async (recipeId: string) => {
         const isInCookbook = cookbookRecipeIds.has(recipeId);
@@ -517,6 +562,12 @@ export default function HomeScreen() {
         // we'll switch to custom before adding.
         setSort('custom');
     }
+
+    // Writing your own category heading is organising the list by hand, the
+    // same as dragging a row is. Auto department sort rebuilds the headings
+    // from scratch, so it would delete this one the moment the next item
+    // landed; opt out of it instead, exactly as reordering does.
+    if (isSection) setSort('custom');
 
     if (!selectedList) return;
     const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: isSection };

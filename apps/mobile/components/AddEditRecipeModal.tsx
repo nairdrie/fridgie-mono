@@ -3,9 +3,9 @@ import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import uuid from 'react-native-uuid';
-import { getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
+import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 
 interface AddEditRecipeModalProps {
   isVisible: boolean;
@@ -17,12 +17,16 @@ interface AddEditRecipeModalProps {
 export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, onRecipeSave }: AddEditRecipeModalProps) {
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [importUrl, setImportUrl] = useState('');
+  // Seeded from the meal's own title: someone who typed "Chicken Katsu" into
+  // their plan has already said what they want, so the field arrives filled in
+  // and the whole flow is two taps. It stays editable because the title is
+  // also the place to add "for two" or "make it spicy".
+  const [generateTitle, setGenerateTitle] = useState('');
   const [isImporting, setIsImporting] = useState(false);
-  const [importSource, setImportSource] = useState<'link' | 'photo'>('link');
+  const [importSource, setImportSource] = useState<'link' | 'photo' | 'generate'>('link');
   const [isLoading, setIsLoading] = useState(false);
-  const [creationMode, setCreationMode] = useState<'initial' | 'link' | 'photo' | 'manual'>('initial');
+  const [creationMode, setCreationMode] = useState<'initial' | 'link' | 'photo' | 'generate' | 'manual'>('initial');
   const [isSaveDisabled, setIsSaveDisabled] = useState(true);
-  const { height, width } = useWindowDimensions();
 
   // ✅ 1. State for the animated loading message
   const [importingMessage, setImportingMessage] = useState('Fetching your recipe...');
@@ -57,6 +61,14 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
               'Reading the page...',
               'Making out the ingredients...',
               'Working through the steps...',
+              'Almost there...'
+            ]
+          : importSource === 'generate'
+          ? [
+              'Thinking about the dish...',
+              'Choosing the ingredients...',
+              'Working out the quantities...',
+              'Writing the method...',
               'Almost there...'
             ]
           : [
@@ -94,6 +106,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     const setupRecipe = async () => {
       setIsLoading(true);
       setImportUrl('');
+      setGenerateTitle(mealForRecipe.name || '');
       
       if (mealForRecipe.recipeId) {
         setCreationMode('manual');
@@ -161,15 +174,31 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     }
 
     const options: ImagePicker.ImagePickerOptions = {
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      // `MediaTypeOptions.Images` is deprecated in expo-image-picker 16 and gone
+      // in 17; the array form is the supported spelling.
+      mediaTypes: ['images'],
       allowsEditing: true,
       // Text needs detail, but this travels as base64 — quality is a balance.
       quality: 0.6,
       base64: true,
     };
-    const result = source === 'camera'
-      ? await ImagePicker.launchCameraAsync(options)
-      : await ImagePicker.launchImageLibraryAsync(options);
+
+    // Launching the picker can throw outright — no camera on the device, the
+    // OS refusing to present over a modal that is already up. Uncaught, that
+    // surfaced as the whole screen dying rather than as a message.
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = source === 'camera'
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+    } catch (error) {
+      console.error('Failed to open the image picker', error);
+      Alert.alert(
+        source === 'camera' ? "Couldn't open the camera" : "Couldn't open your photos",
+        'Please try again, or enter the recipe manually.'
+      );
+      return;
+    }
 
     if (result.canceled) return;
     const asset = result.assets?.[0];
@@ -200,13 +229,44 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
 
+  /**
+   * Writes a recipe from the dish name alone. Lands in the same manual editor
+   * as the two importers, deliberately: what comes back is a plausible first
+   * draft, and the user should see the quantities before they become a
+   * shopping list.
+   */
+  const handleGenerateRecipe = async () => {
+    const title = generateTitle.trim();
+    if (!title) return;
+    Keyboard.dismiss();
+    setImportSource('generate');
+    setIsImporting(true);
+    try {
+      const generated = await generateRecipeFromTitle(title);
+      setEditingRecipe(prev => ({ ...generated, id: prev!.id }));
+      setCreationMode('manual');
+    } catch (error: any) {
+      console.error('Failed to generate recipe', error);
+      const notFood = typeof error?.message === 'string' && error.message.includes('RECIPE_NOT_FOUND');
+      Alert.alert(
+        notFood ? "That doesn't sound like a dish" : 'Could not write that recipe',
+        notFood
+          ? "We couldn't tell what to cook from that. Try naming a dish, like \"chicken katsu curry\"."
+          : 'Something went wrong writing that recipe. Please try again.'
+      );
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleBackPress = () => {
     // Go back to the initial selection from any other state
-    if (creationMode === 'link' || creationMode === 'photo' || creationMode === 'manual') {
+    if (creationMode !== 'initial') {
       setCreationMode('initial');
       // Reset to a blank slate in case of a bad import
       setEditingRecipe(createBlankRecipe());
       setImportUrl('');
+      setGenerateTitle(mealForRecipe?.name || '');
     }
   };
 
@@ -229,11 +289,15 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
   const handlePickImage = async () => {
-    // (This function remains the same as before)
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') { Alert.alert('Permission needed', 'Sorry, we need camera roll permissions to add a photo.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [16, 9], quality: 0.7 });
-    if (!result.canceled && result.assets[0].uri) { handleRecipeFieldChange('photoURL', result.assets[0].uri); }
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 9], quality: 0.7 });
+      if (!result.canceled && result.assets[0].uri) { handleRecipeFieldChange('photoURL', result.assets[0].uri); }
+    } catch (error) {
+      console.error('Failed to open the image picker', error);
+      Alert.alert("Couldn't open your photos", 'Please try again.');
+    }
   };
 
   const handleRecipeFieldChange = (field: keyof Recipe, value: string) => setEditingRecipe(p => p ? { ...p, [field]: value } : null);
@@ -253,6 +317,20 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
           {/* Named by SOURCE rather than by mechanism. Both of the first two
               are automatic imports, so calling one "Automatic Import" made the
               photo option read like something else entirely. */}
+          {/* First, because the common path into this modal is a meal that
+              already has a name — at that point the fastest route to a recipe
+              is to write one, not to go hunting for a link to a dish they can
+              already name. Called "Write" rather than "Find": it is made up on
+              the spot, and the copy shouldn't imply we went and looked. */}
+          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('generate')}>
+            <Ionicons name="sparkles-outline" size={32} color={primary} />
+            <Text style={styles.selectionButtonTitle}>Write Me a Recipe</Text>
+            <Text style={styles.selectionButtonDescription}>
+              {mealForRecipe?.name?.trim()
+                ? `Ingredients and steps for ${mealForRecipe.name.trim()}, written for you.`
+                : 'Name a dish and get the ingredients and steps, written for you.'}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('link')}>
             <View style={styles.iconRow}><Ionicons name="globe-outline" size={32} color={primary} /><Ionicons name="logo-tiktok" size={32} color={primary} /></View>
             <Text style={styles.selectionButtonTitle}>Import from Link</Text>
@@ -272,6 +350,40 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       );
     }
     
+    if (creationMode === 'generate') {
+      if (isImporting) {
+        return (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={primary} />
+            <Text style={styles.loadingText}>{importingMessage}</Text>
+          </View>
+        );
+      }
+      return (
+        <View style={styles.formSectionContainer}>
+          <TextInput
+            style={styles.formInput}
+            placeholder="e.g. chicken katsu curry"
+            placeholderTextColor="#999"
+            value={generateTitle}
+            onChangeText={setGenerateTitle}
+            multiline
+          />
+          <TouchableOpacity
+            style={[styles.primaryButton, !generateTitle.trim() && styles.disabledButton]}
+            onPress={handleGenerateRecipe}
+            disabled={!generateTitle.trim()}
+          >
+            <Text style={styles.primaryButtonText}>Write Recipe</Text>
+          </TouchableOpacity>
+          <Text style={styles.photoHint}>
+            Written fresh, so check it over before you save — you can edit every
+            ingredient and step.
+          </Text>
+        </View>
+      );
+    }
+
     if (creationMode === 'photo') {
       if (isImporting) {
         return (
@@ -354,12 +466,21 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 
     return (
     <Modal animationType="slide" visible={isVisible} onRequestClose={onClose} transparent={true}>
-      <View style={styles.modalOverlay}>
+      {/* The avoider has to be the FULL-SCREEN element, not the sheet. Wrapped
+          around the sheet instead, `behavior="padding"` padded the inside of a
+          content-sized box: the sheet simply grew downwards off the screen and
+          nothing moved, so the keyboard sat on top of whatever you had just
+          tapped. Out here it shrinks the space the sheet is bottom-aligned in,
+          which lifts it. */}
+      <KeyboardAvoidingView
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <SafeAreaView style={styles.modalSafeArea}>
-            <KeyboardAvoidingView style={styles.modalContentContainer} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <View style={styles.modalContentContainer}>
               <View style={styles.modalHeader}>
                 {/* Header content remains the same */}
-                {(creationMode === 'link' || creationMode === 'photo' || creationMode === 'manual') && !mealForRecipe?.recipeId ? (
+                {creationMode !== 'initial' && !mealForRecipe?.recipeId ? (
                   <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
                     <Ionicons name="chevron-back" size={28} color="#aaa" />
                   </TouchableOpacity>
@@ -370,13 +491,16 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                 </TouchableOpacity>
               </View>
               
-              <ScrollView 
-                style={[
-                  styles.modalScrollView, 
-                  creationMode === 'manual' ? { height: height * 0.7 } : null
-                ]} 
-                contentContainerStyle={styles.modalScrollViewContent} 
+              {/* No fixed height. `height: height * 0.7` was measured against the
+                  whole screen, so with the keyboard up the sheet was taller
+                  than the space left for it and its top — the header, the
+                  Cancel/Save row — was pushed off, leaving a full screen of
+                  form background. flexShrink lets it give way instead. */}
+              <ScrollView
+                style={styles.modalScrollView}
+                contentContainerStyle={styles.modalScrollViewContent}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
               >
                 {renderContent()}
               </ScrollView>
@@ -390,9 +514,9 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                   </TouchableOpacity>
                 </View>
               )}
-            </KeyboardAvoidingView>
+            </View>
         </SafeAreaView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -404,11 +528,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'flex-end',
   },
+  // React Native defaults flexShrink to 0, so without these three the sheet
+  // refuses to give up any height and overflows the screen the moment the
+  // keyboard takes half of it.
   modalSafeArea: {
     width: '100%',
+    flexShrink: 1,
   },
   modalScrollView: {
-
+    flexGrow: 0,
+    flexShrink: 1,
   },
   modalScrollViewContent: { paddingTop: 16 },
   modalContentContainer: {
@@ -416,6 +545,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
+    flexShrink: 1,
   },
   modalHeader: { 
     flexDirection: 'row', 

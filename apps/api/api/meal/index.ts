@@ -8,6 +8,7 @@ import { type Item, type Meal, type Recipe } from '@/utils/types'
 import { mutateList } from '@/utils/listStore'
 import { maxRank, sanitizeItems } from '@/utils/rank'
 import { normalizeQuantity } from '@/utils/quantity'
+import { categorizeItems, isBlankItem, isRealItem } from '@/utils/categorize'
 
 const route = new Hono()
 
@@ -81,6 +82,28 @@ route.post('/', groupAuth, async (c) => {
 
         if (result.status === 'missing') {
             return c.json({ error: 'List not found' }, 404)
+        }
+
+        // A recipe's ingredients land on the end of the list, which on a
+        // department-sorted list means they sit below the last aisle instead of
+        // in it. Re-sort here rather than on the client: the client only learns
+        // about this meal from the broadcast, so it would have to categorize
+        // against a snapshot it may not have received yet and would write the
+        // new ingredients straight back out of existence.
+        //
+        // Best-effort — a model outage must not fail an otherwise-good add, it
+        // just leaves the list unsorted until the next sort.
+        if (result.list?.sort === 'category') {
+            try {
+                const committed: Item[] = Array.isArray(result.list.items) ? result.list.items : []
+                const sorted = await categorizeItems(
+                    committed.filter(isRealItem),
+                    committed.filter(isBlankItem),
+                )
+                await mutateList(groupId, listId, (current) => ({ ...current, items: sorted }))
+            } catch (error) {
+                console.error('Post-add categorization failed; list left unsorted:', error)
+            }
         }
 
         // Respond with 201 Created and the new meal object

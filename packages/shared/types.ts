@@ -102,12 +102,62 @@ export interface UserProfile {
   isFollowing?: boolean;
 }
 
+/**
+ * What holds for this person EVERY time they ask for a suggestion.
+ *
+ * Deliberately only the two things that don't move: what they can't eat, and
+ * what they won't eat. Cuisine and cooking style used to live here too, but
+ * those track the mood of the day rather than the person — a global "I like
+ * Italian" quietly steered every suggestion forever — so they are now picked as
+ * hints at generation time instead. See `SuggestionRequest.hints`.
+ */
 export interface MealPreferences {
+  /** Hard constraints: vegan, gluten-free, allergies. */
   dietaryNeeds?: string[];
+  /** Free text — ingredients never to suggest. */
+  dislikedIngredients?: string;
+
+  /**
+   * Legacy, still present on user documents written before hints existed. Kept
+   * on the type so those documents parse; nothing reads them as constraints.
+   */
   cookingStyles?: string[];
   cuisines?: string[];
-  dislikedIngredients?: string;
   query?: string;
+}
+
+/** One turn of the suggestion conversation, as the client replays it. */
+export interface SuggestionTurn {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+/**
+ * Everything that applies to ONE generation and is never persisted.
+ *
+ * This is the whole point of the split: a vegan cooking for their family on a
+ * Sunday can drop the vegan constraint for one set of suggestions without
+ * editing who they are.
+ */
+export interface SuggestionRequest {
+  /** Titles already shown this session, so a re-roll doesn't repeat them. */
+  vetoedTitles?: string[];
+  /**
+   * Preferences as they apply to THIS generation. A field that is PRESENT
+   * replaces the stored one; absent means "use what's saved". Present-and-empty
+   * is how "I switched vegan off just for tonight" is expressed, which is why
+   * this is a nested object rather than optional fields on the body.
+   */
+  overrides?: {
+    dietaryNeeds?: string[];
+    dislikedIngredients?: string;
+  };
+  /** Cuisine / style / mood tags chosen for this generation only. */
+  hints?: string[];
+  /** Free text from the chat box. */
+  query?: string;
+  /** Prior turns, oldest first, so a follow-up knows what it follows up on. */
+  conversation?: SuggestionTurn[];
 }
 
 export interface Ingredient {

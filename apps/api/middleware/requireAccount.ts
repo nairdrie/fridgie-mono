@@ -7,8 +7,12 @@ import type { Context, Next } from 'hono'
  * every install holds a valid token within seconds of first launch. That is
  * fine for lists — they are the reason someone tries the app — but it means
  * anything expensive or account-shaped is otherwise open to anyone who
- * downloads it. The AI routes each cost real money per call, and a cookbook
- * belongs to a person rather than to a device.
+ * downloads it. Recipe generation and meal suggestions each cost real money per
+ * call, and a cookbook belongs to a person rather than to a device.
+ *
+ * Sorting a list by aisle (`/list/categorize/:id`) is deliberately NOT here.
+ * It is an AI route, but it is also part of the grocery list itself, and
+ * `itemCategoryCache` means a repeat item never reaches the model at all.
  *
  * The client mirrors this by prompting for sign-up, but that is a courtesy:
  * this is the check that actually holds, because a client-side redirect is

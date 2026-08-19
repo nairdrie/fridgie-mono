@@ -10,7 +10,7 @@ import {
 } from "firebase/auth";
 import { Platform } from 'react-native';
 import uuid from 'react-native-uuid';
-import { Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, UserProfile, UserSearchResult } from "../types/types";
+import { Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, SuggestionRequest, UserProfile, UserSearchResult } from "../types/types";
 import { authStatePromise } from "./authState";
 import { auth } from "./firebase";
 
@@ -456,11 +456,16 @@ export async function getRecipe(recipeId: string): Promise<Recipe> {
  * @param preferences An object containing the user's meal preferences.
  * @returns A promise that resolves to a meal suggestion.
  */
-export async function getMealSuggestions(vetoedTitles?: string[]): Promise<Recipe[]> {
+/**
+ * Asks for three dinners. Everything in `request` applies to this call only and
+ * is never persisted — `overrides` is how a saved dietary need gets switched
+ * off for one evening without editing the saved profile.
+ */
+export async function getMealSuggestions(request: SuggestionRequest = {}): Promise<Recipe[]> {
   const res = await authorizedFetch(`${BASE_URL}/meal/suggest`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ vetoedTitles }),
+    body: JSON.stringify(request),
   }, [], AI_TIMEOUT_MS);
   return res.json();
 }
@@ -596,6 +601,20 @@ export async function importRecipeFromPhoto(imageDataUrl: string): Promise<Recip
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image: imageDataUrl }),
+  }, [], AI_TIMEOUT_MS);
+  return res.json();
+}
+
+/**
+ * Writes a recipe from a dish name alone. Returns the same Recipe shape as the
+ * two importers, so it lands in the same review-and-edit screen — what comes
+ * back is a first draft to check, not an answer.
+ */
+export async function generateRecipeFromTitle(title: string): Promise<Recipe> {
+  const res = await authorizedFetch(`${BASE_URL}/recipe/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
   }, [], AI_TIMEOUT_MS);
   return res.json();
 }

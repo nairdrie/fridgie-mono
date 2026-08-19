@@ -17,8 +17,10 @@ import {
     FlatList,
     Image,
     LayoutAnimation,
+    KeyboardAvoidingView,
     Modal,
     SafeAreaView,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -446,7 +448,7 @@ export default function GroupsScreen() {
 
     return (
         <SafeAreaView style={styles.container}>
-            <ScrollView>
+            <ScrollView keyboardShouldPersistTaps="handled">
                 <View style={styles.groupsContainer}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.headerLeft}>
@@ -485,9 +487,18 @@ export default function GroupsScreen() {
             </ScrollView>
 
             <Modal visible={isGroupModalVisible} animationType="slide">
+                {/* The Create Group / Cancel row is pinned to the bottom, so
+                    with the keyboard up — which it always is here, both fields
+                    are typed into — it sat underneath it and the group could
+                    not be created without dismissing first. */}
+                <KeyboardAvoidingView
+                    style={styles.modalViewContainer}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                >
                 <SafeAreaView style={styles.modalViewContainer}>
                     <FlatList
                         contentContainerStyle={styles.modalScrollView}
+                        keyboardShouldPersistTaps="handled"
                         data={searchResults}
                         keyExtractor={(item) => item.uid}
                         ListHeaderComponent={
@@ -554,6 +565,7 @@ export default function GroupsScreen() {
                         </TouchableOpacity>
                     </View>
                 </SafeAreaView>
+                </KeyboardAvoidingView>
             </Modal>
         </SafeAreaView>
     );

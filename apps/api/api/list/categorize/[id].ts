@@ -1,59 +1,18 @@
 import { Hono } from 'hono';
 import { adminRtdb } from '@/utils/firebase';
-import { LexoRank } from 'lexorank';
-import { v4 as uuid } from 'uuid';
 import { auth } from '@/middleware/auth';
-import { requireAccount } from '@/middleware/requireAccount';
 import { groupAuth } from '@/middleware/groupAuth';
 import { mutateList } from '@/utils/listStore';
-import { completeJson, models } from '@/utils/claude';
+import { categorizeItems, isBlankItem, isRealItem } from '@/utils/categorize';
 
 const route = new Hono();
 
-route.use('*', auth, requireAccount, groupAuth)
-
-/** Supermarket aisles, in the order they tend to appear. */
-const SECTIONS = [
-  'Produce', 'Meat & Poultry', 'Seafood', 'Deli', 'Bakery', 'Dairy & Eggs',
-  'Frozen Foods', 'Pantry', 'Canned Goods', 'Baking', 'Beverages',
-  'Snacks & Candy', 'Health & Beauty', 'Household Essentials', 'Pet Supplies',
-  'International', 'Floral', 'Alcohol',
-] as const;
-
-// An invented section name used to fall through to the "Other" bucket at the
-// bottom of this file; as an enum the schema simply won't allow one.
-const categorizationSchema = {
-  type: 'object',
-  properties: {
-    sections: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', enum: [...SECTIONS] },
-          items: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['name', 'items'],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['sections'],
-  additionalProperties: false,
-} as const;
-
-const categorizeSystemPrompt = `
-You sort grocery items into supermarket sections.
-Copy each item's text through to the output exactly as given — do not rename,
-correct, pluralise, or tidy it. Every item must appear in exactly one section.
-Only include sections that end up with at least one item.
-`;
-
-// Helper to normalize text for consistent cache keys
-const normalizeItemText = (text: string) => {
-  return text.toLowerCase().replace(/\s+/g, '');
-};
-
+// Deliberately NOT behind requireAccount. Sorting a list by aisle is the core
+// of the grocery list, which is the one thing an anonymous install is meant to
+// be able to do end to end; gating it made the Sort button silently no-op on
+// any device that had not signed up. Cost is bounded by `itemCategoryCache` —
+// repeat items never reach the model at all.
+route.use('*', auth, groupAuth)
 
 // POST /api/lists/categorize/:id
 route.post('/', async (c) => {
@@ -62,13 +21,7 @@ route.post('/', async (c) => {
   if (!id) return c.text('Missing list ID', 400);
 
   let originalItems: any[] | undefined;
-  // Blank placeholder rows (every list is created with one `text: ''` item) must
-  // survive categorization without being treated as uncategorizable — otherwise
-  // they get swept into a spurious "Other" section on every single run.
   let blankItems: any[] = [];
-
-  const isReal = (i: any) => !i?.isSection && String(i?.text ?? '').trim() !== '';
-  const isBlank = (i: any) => !i?.isSection && String(i?.text ?? '').trim() === '';
 
   // 1. Prefer items from the request body — they carry edits the client hasn't
   // saved yet. Accept a bare array too, since older clients POST it unwrapped.
@@ -76,8 +29,8 @@ route.post('/', async (c) => {
     const body = await c.req.json();
     const bodyItems = Array.isArray(body) ? body : body?.items;
     if (Array.isArray(bodyItems)) {
-      originalItems = bodyItems.filter(isReal);
-      blankItems = bodyItems.filter(isBlank);
+      originalItems = bodyItems.filter(isRealItem);
+      blankItems = bodyItems.filter(isBlankItem);
     }
   } catch (e) {
     // Empty or invalid JSON body — fall through to the stored copy below.
@@ -89,145 +42,24 @@ route.post('/', async (c) => {
     const list = snap.val();
     if (!list) return c.text('List not found', 404);
     const stored = Array.isArray(list.items) ? list.items : [];
-    originalItems = stored.filter(isReal);
-    blankItems = stored.filter(isBlank);
+    originalItems = stored.filter(isRealItem);
+    blankItems = stored.filter(isBlankItem);
   }
 
   // Both branches above assign it; this makes that provable to the compiler.
   const sourceItems: any[] = originalItems ?? [];
 
-  // If there are no items to categorize, return the original list
+  // Nothing to sort — hand the list straight back rather than writing it.
   if (sourceItems.length === 0) {
     return c.json([...sourceItems, ...blankItems]);
   }
 
-  // ✅ 3. Create a lookup map from the now-correctly-sourced items.
-  const itemMap = new Map<string, any[]>();
-  for (const item of sourceItems) {
-    const key = String(item.text ?? '').toLowerCase();
-    if (!itemMap.has(key)) {
-      itemMap.set(key, []);
-    }
-    itemMap.get(key)?.push(item);
-  }
-
-  // --- The rest of the logic remains exactly the same ---
-
-  const cacheRef = adminRtdb.ref('itemCategoryCache');
-  const cacheSnap = await cacheRef.once('value');
-  const cache: { [key: string]: string } = cacheSnap.val() || {};
-
-  const itemsForAI: string[] = [];
-  const allCategorizedItems = new Map<string, string[]>();
-
-  for (const item of sourceItems) {
-    const normalizedText = normalizeItemText(String(item.text ?? ''));
-    const cachedCategory = cache[normalizedText];
-
-    if (cachedCategory) {
-      if (!allCategorizedItems.has(cachedCategory)) {
-        allCategorizedItems.set(cachedCategory, []);
-      }
-      allCategorizedItems.get(cachedCategory)?.push(item.text);
-    } else {
-      itemsForAI.push(item.text);
-    }
-  }
-
-  if (itemsForAI.length > 0) {
-    let parsed: { sections: { name: string; items: string[] }[] };
-    try {
-      parsed = await completeJson({
-        model: models.categorize,
-        system: categorizeSystemPrompt,
-        user: `Sort these items:\n${JSON.stringify(itemsForAI)}`,
-        schema: categorizationSchema,
-        effort: 'low',
-      });
-    } catch (err) {
-      console.error('Categorization failed:', err);
-      return c.text('Categorization failed', 500);
-    }
-
-    const cacheUpdates: { [key: string]: string } = {};
-
-    for (const sec of parsed.sections) {
-      if (Array.isArray(sec.items) && sec.items.length > 0) {
-        if (!allCategorizedItems.has(sec.name)) {
-          allCategorizedItems.set(sec.name, []);
-        }
-        const existingItems = allCategorizedItems.get(sec.name)!;
-        
-        for (const itemText of sec.items) {
-          existingItems.push(itemText);
-          cacheUpdates[normalizeItemText(itemText)] = sec.name;
-        }
-      }
-    }
-    if (Object.keys(cacheUpdates).length > 0) {
-      await cacheRef.update(cacheUpdates);
-    }
-  }
-  
-  let rank = LexoRank.middle();
-  const newItems: any[] = [];
-  
-  const sortedCategories = Array.from(allCategorizedItems.keys()).sort();
-
-  for (const categoryName of sortedCategories) {
-    const itemsInSection = allCategorizedItems.get(categoryName)!;
-
-    newItems.push({
-      id: uuid(),
-      text: categoryName,
-      checked: false,
-      isSection: true,
-      listOrder: rank.toString(),
-    });
-    rank = rank.genNext();
-
-    for (const text of itemsInSection) {
-      const key = text.toLowerCase();
-      const matchingItems = itemMap.get(key);
-
-      if (matchingItems && matchingItems.length > 0) {
-        const originalItem = matchingItems.shift();
-        newItems.push({
-          ...originalItem,
-          listOrder: rank.toString(),
-        });
-        rank = rank.genNext();
-      } else {
-        console.warn(`Categorized item "${text}" could not be found in the original item map.`);
-      }
-    }
-  }
-
-  // Items the AI renamed or skipped never matched the map above; they must not
-  // vanish from the user's list, so append them under an "Other" section.
-  const leftovers: any[] = [];
-  for (const remaining of itemMap.values()) {
-    leftovers.push(...remaining);
-  }
-  if (leftovers.length > 0) {
-    newItems.push({
-      id: uuid(),
-      text: 'Other',
-      checked: false,
-      isSection: true,
-      listOrder: rank.toString(),
-    });
-    rank = rank.genNext();
-    for (const item of leftovers) {
-      newItems.push({ ...item, listOrder: rank.toString() });
-      rank = rank.genNext();
-    }
-  }
-
-  // Blank placeholder rows go back on the end, outside any section.
-  for (const item of blankItems) {
-    newItems.push({ ...item, listOrder: rank.toString() });
-    rank = rank.genNext();
+  let newItems: any[];
+  try {
+    newItems = await categorizeItems(sourceItems, blankItems);
+  } catch (err) {
+    console.error('Categorization failed:', err);
+    return c.text('Categorization failed', 500);
   }
 
   // Write through the shared list mutator so the doc's rev is bumped and

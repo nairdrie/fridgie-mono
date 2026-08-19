@@ -14,17 +14,11 @@ import {
 
 // --- Native Sign-In Libraries ---
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as Facebook from 'expo-auth-session/providers/facebook';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
 
 // --- Firebase JS SDK Imports ---
 import {
   AuthCredential,
   EmailAuthProvider,
-  FacebookAuthProvider,
-  GoogleAuthProvider,
-  OAuthProvider, // Added for new account creation
   fetchSignInMethodsForEmail,
   linkWithCredential,
   signInWithCredential,
@@ -33,27 +27,40 @@ import {
 
 // --- Your Project's Imports ---
 import { auth } from '@/utils/firebase';
+import {
+  SocialAuthError,
+  signInWithApple,
+  signInWithFacebook,
+  signInWithGoogle,
+} from '@/utils/socialAuth';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Logo from '../components/Logo';
 
-
-// This is needed for expo-auth-session to work correctly on web
-WebBrowser.maybeCompleteAuthSession();
-
-// Get your client IDs from a secure place or define them here
-const IOS_CLIENT_ID = "598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj.apps.googleusercontent.com";
-const ANDROID_CLIENT_ID = "598650352064-tdjm4ia5oemhgl0ml6hh020d4et251o5.apps.googleusercontent.com";
-const EXPO_CLIENT_ID = "598650352064-bjkgnsj14of6fs4f9ggkmi9tlqptuiat.apps.googleusercontent.com";
-const FACEBOOK_APP_ID = "776186408706339";
 
 type LoadingState = "google" | "apple" | "facebook" | "existing" | "email" | "password" | "";
 // --- Added 'createPassword' to handle new user sign-up flow ---
 type UIState = "initial" | "enterPassword" | "createPassword";
 
+
+
+// Maps a Firebase provider id to the name and button copy the user actually sees.
+const PROVIDER_NAMES: Record<string, string> = {
+  'google.com': 'Google',
+  'apple.com': 'Apple',
+  'facebook.com': 'Facebook',
+};
+
+const providerLabel = (providerId: string) => {
+  if (PROVIDER_NAMES[providerId]) return PROVIDER_NAMES[providerId];
+  const name = providerId.split('.')[0];
+  return name.charAt(0).toUpperCase() + name.slice(1);
+};
+
+const providerButtonLabel = (providerId: string) => `Continue with ${providerLabel(providerId)}`;
 
 
 export default function LoginScreen() {
@@ -69,17 +76,6 @@ export default function LoginScreen() {
   const [confirmPassword, setConfirmPassword] = useState(""); // Added for create password flow
 
   const [pendingCredential, setPendingCredential] = useState<AuthCredential | null>(null);
-
-  // --- Google Sign-In Hook ---
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    iosClientId: IOS_CLIENT_ID,
-    androidClientId: ANDROID_CLIENT_ID,
-    webClientId: EXPO_CLIENT_ID
-  });
-
-  const [facebookRequest, facebookResponse, promptFacebookAsync] = Facebook.useAuthRequest({
-    clientId: FACEBOOK_APP_ID,
-  });
 
   // --- New component for password validation feedback ---
   const PasswordStrengthIndicator = ({ password }: { password: string }) => {
@@ -108,35 +104,35 @@ export default function LoginScreen() {
   };
 
 
-  // Effect to handle the response from Google's native prompt
-  useEffect(() => {
-    const handleGoogleResponse = async () => {
-      if (response?.type === 'success') {
-        const { id_token } = response.params;
-        const credential = GoogleAuthProvider.credential(id_token);
-        await linkOrSignIn(credential);
-      } else if (response?.type === 'error' || response?.type === 'cancel' || response?.type === 'dismiss') {
-        setError(response.type === 'error' ? 'Google Sign-In failed. Please try again.' : null);
+  // Runs a native provider sheet and feeds whatever it returns into Firebase.
+  // A null credential means the user dismissed the sheet, which is not an error.
+  const runSocialSignIn = async (
+    provider: LoadingState,
+    getCredential: () => Promise<AuthCredential | null>
+  ) => {
+    setLoading(provider);
+    setError(null);
+    try {
+      const credential = await getCredential();
+      if (!credential) {
         setLoading('');
+        return;
       }
-    };
-    handleGoogleResponse();
-  }, [response]);
+      await linkOrSignIn(credential);
+    } catch (err: any) {
+      console.error(`${provider} Sign-In Error:`, err);
+      setError(
+        err instanceof SocialAuthError
+          ? err.message
+          : 'Sign-in failed. Please try again.'
+      );
+      setLoading('');
+    }
+  };
 
-  // Effect to handle the response from Facebook's native prompt
-  useEffect(() => {
-    const handleFacebookResponse = async () => {
-      if (facebookResponse?.type === 'success') {
-        const { access_token } = facebookResponse.params;
-        const credential = FacebookAuthProvider.credential(access_token);
-        await linkOrSignIn(credential);
-      } else if (facebookResponse?.type === 'error' || facebookResponse?.type === 'cancel' || facebookResponse?.type === 'dismiss') {
-        setError(facebookResponse.type === 'error' ? 'Facebook Sign-In failed. Please try again.' : null);
-        setLoading('');
-      }
-    };
-    handleFacebookResponse();
-  }, [facebookResponse]);
+  const handleGoogleSignIn = () => runSocialSignIn('google', signInWithGoogle);
+  const handleFacebookSignIn = () => runSocialSignIn('facebook', signInWithFacebook);
+  const handleAppleSignIn = () => runSocialSignIn('apple', signInWithApple);
 
   // --- Core Authentication Logic ---
   const linkOrSignIn = async (credential: AuthCredential) => {
@@ -172,6 +168,8 @@ export default function LoginScreen() {
     }
     setLoading("email");
     setError(null);
+    // Set when we hand off to a social prompt, which owns the loading state from there.
+    let handedOff = false;
     try {
       const methods = await fetchSignInMethodsForEmail(auth, email);
 
@@ -179,12 +177,14 @@ export default function LoginScreen() {
         // If 'password' is a valid sign-in method for this email...
         if (methods.includes('password')) {
           setUiState("enterPassword");
+        } else if (methods.includes('google.com')) {
+          // Google-linked account: skip the dead end and open the Google sheet for them.
+          handedOff = true;
+          handleGoogleSignIn();
         } else {
-          // ...otherwise, the email is linked to another provider (e.g., Google).
-          // We create a user-friendly name from the provider ID (e.g., 'google.com' -> 'Google')
-          const providerName = methods[0].split('.')[0];
-          const friendlyProviderName = providerName.charAt(0).toUpperCase() + providerName.slice(1);
-          setError(`This email is linked to a ${friendlyProviderName} account. Please use that method to sign in.`);
+          // ...otherwise, the email is linked to another provider we can't auto-launch.
+          const providerId = methods[0];
+          setError(`This email is linked to a ${providerLabel(providerId)} account. Tap "${providerButtonLabel(providerId)}" below to sign in.`);
         }
       } else {
         // This is a new user, so let them create a password.
@@ -194,7 +194,7 @@ export default function LoginScreen() {
       console.error("Email check failed:", err);
       setError("Could not verify email. Please try again.");
     } finally {
-      setLoading("");
+      if (!handedOff) setLoading("");
     }
   };
 
@@ -288,33 +288,6 @@ export default function LoginScreen() {
       setError('Failed to sign in. Please try again.');
     } finally {
       setPendingCredential(null);
-      setLoading('');
-    }
-  };
-
-  const handleAppleSignIn = async () => {
-    setLoading('apple');
-    setError(null);
-    try {
-      const appleCredential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      if (appleCredential.identityToken) {
-        const provider = new OAuthProvider('apple.com');
-        const credential = provider.credential({ idToken: appleCredential.identityToken });
-        await linkOrSignIn(credential);
-      } else {
-        throw new Error('Could not get Apple identity token.');
-      }
-    } catch (e: any) {
-      if (e.code !== 'ERR_REQUEST_CANCELED') {
-        console.error("Apple Sign-In Error:", e);
-        setError('Apple Sign-In failed. Please try again.');
-      }
-    } finally {
       setLoading('');
     }
   };
@@ -441,7 +414,7 @@ export default function LoginScreen() {
                 </View>
                 <TouchableOpacity
                   style={[styles.googleButton, (loading !== '' && loading !== 'google') && styles.disabledButton]}
-                  onPress={() => { setLoading('google'); setError(null); promptAsync(); }}
+                  onPress={handleGoogleSignIn}
                   disabled={loading !== ''}
                 >
                   {loading === 'google' ? (
@@ -464,7 +437,7 @@ export default function LoginScreen() {
                 )}
                 <TouchableOpacity
                   style={[styles.facebookButton, (loading !== '' && loading !== 'facebook') && styles.disabledButton]}
-                  onPress={() => { setLoading('facebook'); setError(null); promptFacebookAsync(); }}
+                  onPress={handleFacebookSignIn}
                   disabled={loading !== ''}
                 >
                   {loading === 'facebook' ? (

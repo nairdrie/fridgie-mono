@@ -207,7 +207,11 @@ export default function ExploreScreen() {
         }
 
         return (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+            <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 20 }}
+                keyboardShouldPersistTaps="handled"
+            >
                 {/* Users Section */}
                 {searchResults.users.length > 0 && (
                     <View>

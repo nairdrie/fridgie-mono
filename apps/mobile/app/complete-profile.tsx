@@ -14,7 +14,6 @@ import {
   Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -145,12 +144,16 @@ export default function CompleteProfileScreen() {
 
   return (
     <KeyboardAwareScrollView
+          // One scroller, not two. A plain ScrollView nested inside this one
+          // owned the vertical gesture, so the auto-scroll that puts the focused
+          // input above the keyboard had nothing to scroll — the name field and
+          // Continue button, both at the bottom of the form, stayed under it.
+          style={styles.safeArea}
           enableOnAndroid={true} // makes sure Android scrolls too
           extraScrollHeight={60} // bump focused input just above keyboard
           keyboardOpeningTime={0} // avoid flicker
-          // behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          contentContainerStyle={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container}>
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.container}>
         <Text style={styles.title}>Welcome!</Text>
         <Text style={styles.subtitle}>Let's set up your profile.</Text>
         { selectedPhotoUrl &&
@@ -218,7 +221,6 @@ export default function CompleteProfileScreen() {
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue</Text>}
         </TouchableOpacity>
-      </ScrollView>
     </KeyboardAwareScrollView>
   );
 }

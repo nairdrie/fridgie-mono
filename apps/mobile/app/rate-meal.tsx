@@ -224,6 +224,7 @@ export default function RateMealScreen() {
             enableOnAndroid={true}
             extraScrollHeight={60}
             keyboardOpeningTime={0}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.safeArea}
         >
             <View style={styles.container}>

@@ -111,6 +111,7 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
             <FlatList
                 data={filteredRecipes}
                 keyExtractor={(item) => item.id}
+                keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
                     <>
                         {/* {

@@ -22,13 +22,13 @@ import {
 const DIETARY_NEEDS = [
   'Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free', 'Nut-Free', 'Pescatarian',
 ];
-const COOKING_STYLES = [
-  'Quick & Easy', 'Healthy & Light', 'Family Friendly', 'Comfort Food', 'Budget-Friendly', 'Adventurous',
-];
-const CUISINES = [
-  'Italian', 'Mexican', 'American', 'Mediterranean', 'Indian', 'Thai', 'Japanese', 'Chinese', 'Anything!',
-];
-const TOTAL_STEPS = 4;
+
+// Two steps, not four. Cuisine and cooking style used to be asked here and then
+// applied to every suggestion forever, which is the wrong shape for them — what
+// you feel like eating is a property of the evening, not of you. They are now
+// offered as hints at suggestion time. What's left is the pair that genuinely
+// doesn't change between Tuesday and Saturday.
+const TOTAL_STEPS = 2;
 
 // --- REUSABLE TILE COMPONENT ---
 const PreferenceTile = ({ label, isSelected, onPress }: { label: string, isSelected: boolean, onPress: () => void }) => (
@@ -50,8 +50,6 @@ export default function MealPreferencesScreen() {
 
   // State for user's selections
   const [dietaryNeeds, setDietaryNeeds] = useState<string[]>([]);
-  const [cookingStyles, setCookingStyles] = useState<string[]>([]);
-  const [cuisines, setCuisines] = useState<string[]>([]);
   const [dislikedIngredients, setDislikedIngredients] = useState<string>('');
 
    useEffect(() => {
@@ -60,8 +58,6 @@ export default function MealPreferencesScreen() {
         const prefs = await getMealPreferences();
         if (prefs) {
           setDietaryNeeds(prefs.dietaryNeeds || []);
-          setCookingStyles(prefs.cookingStyles || []);
-          setCuisines(prefs.cuisines || []);
           setDislikedIngredients(prefs.dislikedIngredients || '');
         }
       } catch (error) {
@@ -94,10 +90,12 @@ export default function MealPreferencesScreen() {
   };
 
   const handleFinish = async () => {
+    // Only these two. A previously-saved `cuisines`/`cookingStyles` is left on
+    // the document rather than cleared — the suggest route already ignores it,
+    // and rewriting other people's data to prove a point isn't worth a
+    // migration.
     const preferences = {
       dietaryNeeds,
-      cookingStyles,
-      cuisines,
       dislikedIngredients,
     };
 
@@ -115,8 +113,12 @@ export default function MealPreferencesScreen() {
       case 1:
         return (
           <>
-            <Text style={styles.title}>First, any specific dietary needs?</Text>
-            <Text style={styles.subtitle}>Select any that apply.</Text>
+            <Text style={styles.title}>Any dietary needs?</Text>
+            <Text style={styles.subtitle}>
+              These apply to every suggestion, every time. You can switch one off
+              for a single suggestion later — handy when you&apos;re cooking for
+              other people.
+            </Text>
             <View style={styles.tileContainer}>
               {DIETARY_NEEDS.map(need => (
                 <PreferenceTile
@@ -130,44 +132,12 @@ export default function MealPreferencesScreen() {
           </>
         );
       case 2:
-        return (
-          <>
-            <Text style={styles.title}>What's your typical cooking style?</Text>
-            <Text style={styles.subtitle}>Pick a few that sound like you.</Text>
-            <View style={styles.tileContainer}>
-              {COOKING_STYLES.map(style => (
-                <PreferenceTile
-                  key={style}
-                  label={style}
-                  isSelected={cookingStyles.includes(style)}
-                  onPress={() => toggleSelection(setCookingStyles, style)}
-                />
-              ))}
-            </View>
-          </>
-        );
-      case 3:
-        return (
-          <>
-            <Text style={styles.title}>Which cuisines are you in the mood for?</Text>
-            <Text style={styles.subtitle}>This helps us pick a flavor profile.</Text>
-            <View style={styles.tileContainer}>
-              {CUISINES.map(cuisine => (
-                <PreferenceTile
-                  key={cuisine}
-                  label={cuisine}
-                  isSelected={cuisines.includes(cuisine)}
-                  onPress={() => toggleSelection(setCuisines, cuisine)}
-                />
-              ))}
-            </View>
-          </>
-        );
-      case 4:
           return (
             <>
-              <Text style={styles.title}>Anything we should avoid?</Text>
-              <Text style={styles.subtitle}>List any ingredients you dislike.</Text>
+              <Text style={styles.title}>Anything you never want to see?</Text>
+              <Text style={styles.subtitle}>
+                Ingredients to keep out of every suggestion.
+              </Text>
               <TextInput
                 style={styles.input}
                 placeholder="e.g., mushrooms, cilantro, olives"
@@ -175,6 +145,10 @@ export default function MealPreferencesScreen() {
                 onChangeText={setDislikedIngredients}
                 placeholderTextColor="#999"
               />
+              <Text style={styles.footnote}>
+                Not sure what you feel like eating? That part isn&apos;t here —
+                you&apos;ll pick a cuisine or a mood when you ask for suggestions.
+              </Text>
             </>
           );
       default:
@@ -189,11 +163,19 @@ export default function MealPreferencesScreen() {
         style={styles.container}
       >
         <View style={styles.header}>
+            <Text style={styles.headerTitle}>Your everyday preferences</Text>
+            {/* This screen is reached by tapping "Suggest Meal", so without
+                saying so it reads as a form about tonight's dinner — people
+                filled in a craving and then wondered why every future
+                suggestion was Thai. */}
+            <Text style={styles.headerSubtitle}>
+                Saved once and applied to every suggestion — not just today&apos;s.
+            </Text>
             <Text style={styles.progressText}>
                 Step {currentStep} of {TOTAL_STEPS}
             </Text>
         </View>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
             {renderStepContent()}
         </ScrollView>
         <View style={styles.footer}>
@@ -229,7 +211,10 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#fff', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, },
   container: { flex: 1, padding: 20 },
   header: { alignItems: 'center', marginBottom: 20, },
-  progressText: { fontSize: 16, color: '#888' },
+  headerTitle: { fontSize: 15, fontWeight: '700', color: '#333' },
+  headerSubtitle: { fontSize: 13, color: '#888', textAlign: 'center', marginTop: 2, marginBottom: 8, paddingHorizontal: 20 },
+  progressText: { fontSize: 13, color: '#aaa' },
+  footnote: { fontSize: 14, color: '#888', textAlign: 'center', marginTop: 8, lineHeight: 20 },
   scrollContent: { paddingBottom: 20, flexGrow: 1 },
   title: { fontSize: 26, fontWeight: 'bold', textAlign: 'center', marginBottom: 8, color: '#222', },
   subtitle: { fontSize: 16, textAlign: 'center', color: '#666', marginBottom: 30, },

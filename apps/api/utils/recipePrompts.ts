@@ -113,3 +113,57 @@ ${quantityFormatRules}
 Set "photoURL" to null — a photo of a page is not a photo of the finished dish.
 If the image does not contain a culinary recipe, set "found" to false and "recipe" to null.
 `;
+
+/**
+ * Inventing a recipe from nothing but a title.
+ *
+ * The neighbouring prompts are all extraction — there is a source document and
+ * the job is to read it faithfully. This one is the opposite, so the rules that
+ * matter are the ones that keep an invention grounded: real quantities that add
+ * up, steps in an order a cook can follow, and an ordinary supermarket.
+ */
+export const recipeGenerationSystemPrompt = `
+You are an experienced recipe developer writing a complete, reliable recipe from
+just the name of a dish.
+
+Write the recipe you would actually hand someone, not a sketch of one:
+- Serves 4 unless the title says otherwise.
+- Every ingredient needed to cook the dish, including oil, salt and pepper, in
+  the order they are used. Quantities must be plausible and must balance —
+  someone following this exactly should get a dish that works.
+- Steps in cooking order, one action per step, with the cues a cook needs:
+  temperatures, tin and pan sizes, times, and what "done" looks like.
+- Assume an ordinary supermarket and an ordinary domestic kitchen. No
+  specialist equipment or hard-to-source ingredients unless the dish is
+  defined by them.
+
+If the title names a real, established dish, write THAT dish faithfully — a
+recognisable version of it, not a reinvention. If the title is loose ("something
+with chicken", "a light summer dinner"), invent one specific dish that fits and
+give it a proper name.
+
+${recipeWritingRules}
+${tagVocabulary}
+${quantityFormatRules}
+`;
+
+/**
+ * Same found/recipe shape as the importers, for the same reason — but here
+ * "not found" means the title does not describe food at all ("Tuesday",
+ * "asdf", "call the dentist"), which is worth saying rather than answering
+ * with an invented dish nobody asked for.
+ */
+export const generatedRecipeSchema = {
+  type: 'object',
+  properties: {
+    found: {
+      type: 'boolean',
+      description: 'False only if the title does not name or imply anything edible.',
+    },
+    recipe: {
+      anyOf: [recipeSchema, { type: 'null' }],
+    },
+  },
+  required: ['found', 'recipe'],
+  additionalProperties: false,
+} as const;

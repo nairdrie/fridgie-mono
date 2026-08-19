@@ -29,14 +29,29 @@ export interface Recipe {
 
 interface MealPreferences {
   dietaryNeeds?: string[];
+  dislikedIngredients?: string[] | string;
+  // Legacy fields, still on older user documents. Deliberately NOT read as
+  // constraints any more — see the note on hints below.
   cookingStyles?: string[];
   cuisines?: string[];
-  dislikedIngredients?: string[] | string;
   query?: string;
+}
+
+interface SuggestionTurn {
+  role: 'user' | 'assistant';
+  text: string;
 }
 
 interface SuggestionRequestBody {
   vetoedTitles?: string[];
+  /** Present field replaces the stored one, for this request only. */
+  overrides?: {
+    dietaryNeeds?: string[];
+    dislikedIngredients?: string;
+  };
+  hints?: string[];
+  query?: string;
+  conversation?: SuggestionTurn[];
 }
 
 const route = new Hono();
@@ -218,11 +233,23 @@ route.post('/', async (c) => {
   // Session vetoes from the current re-roll; merged with the persisted history.
   // Bounded: this is client-supplied and goes straight into the prompt, so an
   // unbounded list is somebody else's token bill.
-  const sessionVetoes: string[] = Array.isArray(body?.vetoedTitles)
-    ? body.vetoedTitles
-        .filter((t): t is string => typeof t === 'string' && t.length > 0)
-        .slice(0, 60)
-        .map((t) => t.slice(0, 200))
+  // Everything below is client-supplied and goes straight into the prompt, so
+  // each field is bounded — an unbounded list is somebody else's token bill.
+  const strings = (v: unknown, max: number, len: number): string[] =>
+    Array.isArray(v)
+      ? v.filter((t): t is string => typeof t === 'string' && t.length > 0).slice(0, max).map((t) => t.slice(0, len))
+      : [];
+
+  const sessionVetoes = strings(body?.vetoedTitles, 60, 200);
+  const hints = strings(body?.hints, 12, 60);
+  const query = typeof body?.query === 'string' ? body.query.trim().slice(0, 500) : '';
+
+  const conversation: SuggestionTurn[] = Array.isArray(body?.conversation)
+    ? body.conversation
+        .filter((t): t is SuggestionTurn =>
+          !!t && (t.role === 'user' || t.role === 'assistant') && typeof t.text === 'string' && t.text.length > 0)
+        .slice(-8)
+        .map((t) => ({ role: t.role, text: t.text.slice(0, 500) }))
     : [];
 
   const userRef = fs.collection('users').doc(uid);
@@ -233,10 +260,25 @@ route.post('/', async (c) => {
     return c.json({ error: 'Meal preferences not set.', action: 'redirect_to_preferences' }, 404);
   }
 
-  const preferences = userData.preferences as MealPreferences;
+  const stored = userData.preferences as MealPreferences;
   const storedRecent: string[] = Array.isArray(userData?.mealSuggestions?.recentTitles)
     ? userData.mealSuggestions.recentTitles
     : [];
+
+  // A PRESENT override field replaces the stored one for this request only, and
+  // is never written back. Present-and-empty is the whole point: it is how "I am
+  // vegan, but tonight I'm cooking for my family" reaches the model.
+  const overrides = body?.overrides;
+  const dietaryNeeds = overrides && 'dietaryNeeds' in overrides
+    ? strings(overrides.dietaryNeeds, 12, 60)
+    : (stored.dietaryNeeds ?? []);
+
+  const storedDisliked = Array.isArray(stored.dislikedIngredients)
+    ? stored.dislikedIngredients.join(', ')
+    : stored.dislikedIngredients;
+  const disliked = overrides && 'dislikedIngredients' in overrides
+    ? String(overrides.dislikedIngredients ?? '').trim().slice(0, 500)
+    : storedDisliked;
 
   // Dedupe case-insensitively; a re-roll and the stored history overlap heavily.
   const avoid = [...storedRecent, ...sessionVetoes].reduce<string[]>((acc, title) => {
@@ -244,17 +286,19 @@ route.post('/', async (c) => {
     return acc;
   }, []);
 
-  // Seeds. Cuisine leans on the user's stated preferences when they have any,
-  // and otherwise roams — a fixed pool of three preferred cuisines is its own
-  // kind of rut.
-  const cuisinePool = preferences.cuisines?.length ? preferences.cuisines : CUISINE_POOL;
+  // Seeds exist to stop every request landing in the same neighbourhood of
+  // dish-space. They are a substitute for direction, so when the person has
+  // actually given direction — hints or a typed request — the cuisine and
+  // effort seeds stand down rather than argue with it. The method seed stays
+  // either way; it varies technique without contradicting a stated craving.
+  const steered = hints.length > 0 || query.length > 0;
   const seeds = {
-    cuisine: pick(cuisinePool),
+    cuisine: pick(CUISINE_POOL),
     method: pick(COOKING_METHODS),
     effort: pick(EFFORT_LEVELS),
   };
 
-  const slots = PROTEIN_SLOTS[dietOf(preferences.dietaryNeeds)]!;
+  const slots = PROTEIN_SLOTS[dietOf(dietaryNeeds)]!;
   const composition = slots.map((slot, i) => `  ${i + 1}. built around ${pick(slot)}`).join('\n');
 
   const [corpus, cookbook] = await Promise.all([
@@ -265,24 +309,32 @@ route.post('/', async (c) => {
   const parts: string[] = ['Suggest 3 dinners.', ''];
 
   parts.push('Compose the set like this:', composition, '');
-  parts.push(
-    `Let one of the three lean ${seeds.cuisine}. Somewhere in the set, use ${seeds.method}.`,
-    `Pitch the effort at: ${seeds.effort}.`,
-    '',
-  );
+  parts.push(`Somewhere in the set, use ${seeds.method}.`);
+  if (!steered) {
+    parts.push(
+      `Let one of the three lean ${seeds.cuisine}.`,
+      `Pitch the effort at: ${seeds.effort}.`,
+    );
+  }
+  parts.push('');
 
-  if (preferences.dietaryNeeds?.length) parts.push(`Dietary needs (hard constraints): ${preferences.dietaryNeeds.join(', ')}.`);
-  if (preferences.cookingStyles?.length) parts.push(`Preferred cooking styles: ${preferences.cookingStyles.join(', ')}.`);
-  if (preferences.cuisines?.length) parts.push(`Cuisines they like: ${preferences.cuisines.join(', ')}.`);
-
-  const disliked = Array.isArray(preferences.dislikedIngredients)
-    ? preferences.dislikedIngredients.join(', ')
-    : preferences.dislikedIngredients;
+  if (dietaryNeeds.length) parts.push(`Dietary needs (hard constraints): ${dietaryNeeds.join(', ')}.`);
   if (disliked) parts.push(`Must NOT contain: ${disliked}.`);
 
-  // Free text from the preferences screen. The old prompt builder declared this
-  // field and then never read it, so anything typed here was silently dropped.
-  if (preferences.query) parts.push(`In their words: ${preferences.query}`);
+  // Hints and the typed request are what the person wants TONIGHT, so they are
+  // stated last and stated loudest — a stored preference should never outrank
+  // the thing they just asked for.
+  if (hints.length) parts.push(`They are in the mood for: ${hints.join(', ')}.`);
+  if (query) parts.push(`In their words: "${query}"`);
+
+  if (conversation.length) {
+    parts.push(
+      '',
+      'Earlier in this conversation:',
+      ...conversation.map((t) => `  ${t.role === 'user' ? 'They said' : 'You suggested'}: ${t.text}`),
+      'Treat the latest request as a refinement of that, not a fresh start.',
+    );
+  }
 
   if (cookbook.length) {
     parts.push('', `Dishes they have saved to their own cookbook: ${cookbook.join(', ')}.`);

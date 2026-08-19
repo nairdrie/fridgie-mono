@@ -26,6 +26,7 @@ import {
     Modal,
     NativeScrollEvent,
     NativeSyntheticEvent,
+    KeyboardAvoidingView,
     Platform,
     RefreshControl,
     SafeAreaView,
@@ -91,7 +92,7 @@ const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bo
     );
 };
 
-const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: () => void }) => {
+const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisible: boolean; onClose: () => void; onNavigate: (path: string) => void; onDismiss: () => void }) => {
     const router = useRouter();
     const { user, refreshAuthUser } = useAuth();
 
@@ -107,7 +108,11 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
     };
 
     return (
-        <Modal visible={isVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+        <Modal visible={isVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose} onDismiss={onDismiss}>
+            <KeyboardAvoidingView
+                style={styles.modalViewContainer}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
             <SafeAreaView style={styles.modalViewContainer}>
                 <View style={styles.modalHeader}>
                     <Text style={styles.modalHeaderTitle}>Settings</Text>
@@ -115,7 +120,10 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
                         <Ionicons name="close-circle-outline" size={30} color={primary} />
                     </TouchableOpacity>
                 </View>
-                <ScrollView style={styles.modalScrollView}>
+                {/* Without persistTaps the first tap on an editable row's Save
+                    button is swallowed dismissing the keyboard, so saving a name
+                    takes two taps and looks like the button does nothing. */}
+                <ScrollView style={styles.modalScrollView} keyboardShouldPersistTaps="handled">
                     <Text style={styles.sectionTitle}>Profile Information</Text>
                     <EditableInfoRow
                         label="Name"
@@ -143,11 +151,11 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
                         />
                     }
                     <Text style={styles.sectionTitle}>Preferences</Text>
-                    <TouchableOpacity style={styles.manageGroups} onPress={() => router.push('/groups')}>
+                    <TouchableOpacity style={styles.manageGroups} onPress={() => onNavigate('/groups')}>
                         <Ionicons name="people" size={16} color={primary}></Ionicons>
                         <Text style={styles.editMealPreferencesText}>Manage Groups</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.editMealPreferences} onPress={() => router.push('/meal-preferences')}>
+                    <TouchableOpacity style={styles.editMealPreferences} onPress={() => onNavigate('/meal-preferences')}>
                         <Ionicons name="open-outline" size={16} color={primary}></Ionicons>
                         <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
                     </TouchableOpacity>
@@ -160,6 +168,7 @@ const SettingsModal = ({ isVisible, onClose }: { isVisible: boolean; onClose: ()
                     </TouchableOpacity>
                 </ScrollView>
             </SafeAreaView>
+            </KeyboardAvoidingView>
         </Modal>
     );
 };
@@ -245,10 +254,37 @@ export default function UserProfile() {
 
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     
+    // Settings is a native modal, so a route pushed from inside it lands *behind*
+    // it and the tap looks like a no-op. Dismiss Settings first, push on the way
+    // out, then reopen it when that screen pops — so Settings reads as a step in
+    // the nav stack and back returns to it.
+    const pendingSettingsRoute = useRef<string | null>(null);
+    const shouldReopenSettings = useRef(false);
+
+    const flushPendingSettingsRoute = useCallback(() => {
+        const path = pendingSettingsRoute.current;
+        if (!path) return;
+        pendingSettingsRoute.current = null;
+        shouldReopenSettings.current = true;
+        router.push(path as any);
+    }, [router]);
+
+    const handleSettingsNavigate = useCallback((path: string) => {
+        pendingSettingsRoute.current = path;
+        setSettingsModalVisible(false);
+        // onDismiss is iOS-only; elsewhere the dismissal is immediate enough to
+        // push right away.
+        if (Platform.OS !== 'ios') flushPendingSettingsRoute();
+    }, [flushPendingSettingsRoute]);
+
     const [isFocused, setIsFocused] = useState(false);
     useFocusEffect(
         useCallback(() => {
             setIsFocused(true);
+            if (shouldReopenSettings.current) {
+                shouldReopenSettings.current = false;
+                setSettingsModalVisible(true);
+            }
             return () => setIsFocused(false);
         }, [])
     );
@@ -411,6 +447,7 @@ export default function UserProfile() {
             <SafeAreaView style={styles.container}>
 
                 <SectionList
+                    keyboardShouldPersistTaps="handled"
                     sections={[{
                         title: 'My Cookbook',
                         data: filteredRecipes,
@@ -496,7 +533,12 @@ export default function UserProfile() {
                         </View>
                     </View>
                 </Modal>
-                <SettingsModal isVisible={settingsModalVisible} onClose={() => setSettingsModalVisible(false)} />
+                <SettingsModal
+                    isVisible={settingsModalVisible}
+                    onClose={() => setSettingsModalVisible(false)}
+                    onNavigate={handleSettingsNavigate}
+                    onDismiss={flushPendingSettingsRoute}
+                />
                 <NotificationsModal
                     isVisible={isNotificationsVisible}
                     onClose={() => setNotificationsVisible(false)}
