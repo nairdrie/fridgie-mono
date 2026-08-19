@@ -122,8 +122,12 @@ step "Bootstrapping the Cloud Run service"
 # first run must not invent a service with the wrong settings. Google's public
 # hello image brings it into existence; the first real deploy replaces it.
 if gcloud run services describe "$SERVICE" --region="$REGION" >/dev/null 2>&1; then skip; else
+  # --no-allow-unauthenticated explicitly: without it gcloud prompts, and with
+  # --quiet it would silently pick a default. Public access is granted as its
+  # own binding immediately below, so it is deliberate rather than incidental.
   gcloud run deploy "$SERVICE" --region="$REGION" \
     --image=us-docker.pkg.dev/cloudrun/container/hello \
+    --no-allow-unauthenticated \
     --min-instances=0 --max-instances=1 --quiet
 fi
 # Public invocation, granted ONCE, by you, never by CI. The app authenticates
