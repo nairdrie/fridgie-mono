@@ -17,6 +17,14 @@ import {
 
 const route = new Hono();
 
+/**
+ * Ceiling on page markup handed to the model, in characters (~34K tokens,
+ * roughly $0.10 of Sonnet input). Generous for a real recipe page once scripts
+ * and styles are stripped; the point is to bound the worst case, not the
+ * typical one.
+ */
+const MAX_PAGE_CHARS = 120_000;
+
 // Both prompts below are constant, so each one caches independently on its own
 // prefix. Nothing per-request may be appended to them.
 
@@ -103,6 +111,14 @@ route.post('/', async (c) => {
       });
 
       const $ = cheerio.load(html);
+
+      // Strip what cannot contain a recipe before anything is measured or sent.
+      // On an ad-heavy blog this is most of the bytes, and every one of them was
+      // being billed as input tokens. Deliberately conservative: nav/header/
+      // footer/aside stay, because recipe sites routinely put the title or the
+      // ingredient card inside them.
+      $('script, style, noscript, svg, iframe, link, meta, template').remove();
+
       const mainContentHtml =
         $('main').html() ||
         $('[role="main"]').html() ||
@@ -115,8 +131,21 @@ route.post('/', async (c) => {
         throw new Error('Could not extract sufficient HTML from the page.');
       }
 
+      // Hard ceiling on what reaches the model. There was only a MINIMUM length
+      // check here, so a 400KB page went straight through at roughly 114K input
+      // tokens — about $0.34 a call — and this endpoint is reachable by anyone
+      // who can register an account, which is self-service.
+      const trimmed = mainContentHtml.length > MAX_PAGE_CHARS
+        ? mainContentHtml.slice(0, MAX_PAGE_CHARS)
+        : mainContentHtml;
+      if (trimmed.length < mainContentHtml.length) {
+        console.warn(
+          `Recipe page truncated: ${mainContentHtml.length} -> ${MAX_PAGE_CHARS} chars (${url})`,
+        );
+      }
+
       systemPrompt = htmlParsingSystemPrompt;
-      userInput = `Here is the HTML from the recipe page:\n\n${mainContentHtml}`;
+      userInput = `Here is the HTML from the recipe page:\n\n${trimmed}`;
     }
 
     // --- COMMON AI LOGIC ---

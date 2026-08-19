@@ -486,7 +486,11 @@ export async function listenToList(
     }
     if (closed) return;
 
-    ws = new WebSocket(`${wsUrl}/ws/list/${id}?groupId=${groupId}&token=${idToken}`);
+    // The token goes in the WebSocket subprotocol rather than the query string:
+    // query strings land in every access log along the way (Cloud Run writes
+    // full URLs to Cloud Logging), and this reconnects on a backoff, so a token
+    // in the URL would be re-logged for the life of the session.
+    ws = new WebSocket(`${wsUrl}/ws/list/${id}?groupId=${groupId}`, ['bearer', idToken]);
 
     ws.onopen = () => {
       attempt = 0;

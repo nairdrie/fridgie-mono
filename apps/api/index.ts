@@ -44,7 +44,18 @@ serve({
 
     // If this is our WS path, do the upgrade
     if (url.pathname.startsWith('/api/ws/list/')) {
-      const token = url.searchParams.get('token');
+      // The token arrives as a WebSocket subprotocol, not a query parameter.
+      // Query strings are logged verbatim by essentially every proxy and access
+      // log — Cloud Run writes the full request URL to Cloud Logging — so a
+      // token there becomes a live credential sitting in log retention, copied
+      // again on every reconnect. Headers are not logged.
+      //
+      // The query parameter is still accepted so that already-installed clients
+      // keep working; drop that branch once no old build is in the wild.
+      const offered = (req.headers.get('sec-websocket-protocol') ?? '')
+        .split(',').map((p) => p.trim()).filter(Boolean);
+      const viaSubprotocol = offered[0] === 'bearer' && offered.length > 1;
+      const token = viaSubprotocol ? offered[1]! : url.searchParams.get('token');
       if (!token) {
         // No token provided, reject the connection
         return new Response('Missing authentication token', { status: 401 });
@@ -69,7 +80,12 @@ serve({
         const listId = url.pathname.split('/').pop()!;
 
         // ✅ Success! Upgrade the connection and pass the verified uid
-        if (server.upgrade(req, { data: { listId, groupId, uid } })) {
+        // RFC 6455 requires the server to echo back one of the offered
+        // subprotocols; omitting it makes the client abort the handshake.
+        if (server.upgrade(req, {
+          data: { listId, groupId, uid },
+          ...(viaSubprotocol ? { headers: { 'Sec-WebSocket-Protocol': 'bearer' } } : {}),
+        })) {
           return undefined;
         }
         return new Response('WebSocket upgrade failed', { status: 400 });

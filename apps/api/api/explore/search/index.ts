@@ -7,14 +7,21 @@ import { fs } from '@/utils/firebase';
 
 // --- ⚙️ Configuration ---
 const algoliaAppId = process.env.ALGOLIA_APP_ID || Bun.env.ALGOLIA_APP_ID;
-const algoliaAdminKey = process.env.ALGOLIA_READ_KEY || Bun.env.ALGOLIA_READ_KEY; // Use ADMIN key on the backend
+// This route only ever SEARCHES, so a search-only key is sufficient and is what
+// belongs here. The variable was named `algoliaSearchKey` with a comment saying
+// to use the admin key, while reading ALGOLIA_READ_KEY — so the code disagreed
+// with itself about how privileged this credential is. Renamed to match what
+// the route actually needs; verify in the Algolia dashboard that the value in
+// ALGOLIA_READ_KEY really is search-only, since an admin key here could delete
+// the index.
+const algoliaSearchKey = process.env.ALGOLIA_READ_KEY || Bun.env.ALGOLIA_READ_KEY;
 
-if (!algoliaAppId || !algoliaAdminKey) {
-    throw new Error("Missing Algolia App ID or Admin Key in environment variables.");
+if (!algoliaAppId || !algoliaSearchKey) {
+    throw new Error("Missing ALGOLIA_APP_ID or ALGOLIA_READ_KEY in environment variables.");
 }
 
 // --- 🚀 Algolia Client Initialization ---
-const client = algoliasearch(algoliaAppId, algoliaAdminKey);
+const client = algoliasearch(algoliaAppId, algoliaSearchKey);
 
 // --- 🌐 Hono Route Definition ---
 const route = new Hono();
