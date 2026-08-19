@@ -1,36 +1,47 @@
 // firebase.ts
 import admin from 'firebase-admin'
-import { initializeApp as initClientApp } from 'firebase/app'
-import { getDatabase as getClientDatabase } from 'firebase/database'
 import { getDatabase } from 'firebase-admin/database'
-import { readFileSync } from 'fs'
 import { getFirestore } from 'firebase-admin/firestore'
+import { existsSync, readFileSync } from 'fs'
 
-const rtdbUrl = 'https://grocerease-5abbb-default-rtdb.firebaseio.com' // 👈 correct RTDB URL
-// --- Client SDK (for onValue, streaming)
-const clientApp = initClientApp({
-  apiKey: 'dummy', // Required but unused in server-side
-  databaseURL: rtdbUrl,
-})
+const rtdbUrl = 'https://grocerease-5abbb-default-rtdb.firebaseio.com'
+const projectId = process.env.GOOGLE_CLOUD_PROJECT ?? 'grocerease-5abbb'
+const LOCAL_KEY = './utils/firebase-service-account.json'
 
-export const clientRtdb = getClientDatabase(clientApp)
-
-let serviceAccount;
-// --- Server SDK (for admin operations)
-if(process.env.FIREBASE_CREDENTIALS) {
-  serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS)
+/**
+ * Credential resolution, most explicit first:
+ *
+ *   1. FIREBASE_CREDENTIALS — inline service-account JSON. An escape hatch;
+ *      the deployed pipeline never sets it.
+ *   2. utils/firebase-service-account.json — the local development file.
+ *   3. Application Default Credentials — what runs on Cloud Run. The attached
+ *      service account IS the credential, so no private key exists in the
+ *      image, in Secret Manager, in GitHub, or on disk anywhere. Authority
+ *      comes from IAM roles on that account instead.
+ *
+ * The existsSync guard is load-bearing, not tidiness: the previous version
+ * called readFileSync unconditionally, which throws at MODULE LOAD when the
+ * file is absent — so in a container the ADC branch below would never be
+ * reached.
+ */
+function resolveCredential() {
+  if (process.env.FIREBASE_CREDENTIALS) {
+    return admin.credential.cert(JSON.parse(process.env.FIREBASE_CREDENTIALS))
+  }
+  if (existsSync(LOCAL_KEY)) {
+    return admin.credential.cert(JSON.parse(readFileSync(LOCAL_KEY, 'utf8')))
+  }
+  return admin.credential.applicationDefault()
 }
-else {
-  serviceAccount = JSON.parse(
-    readFileSync('./utils/firebase-service-account.json', 'utf8')
-  )
-}
-
 
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: rtdbUrl, // 👈 correct RTDB URL
+    credential: resolveCredential(),
+    databaseURL: rtdbUrl,
+    // Explicit on purpose. Cloud Run does not inject GOOGLE_CLOUD_PROJECT the
+    // way App Engine and Cloud Functions do, and verifyIdToken checks a token's
+    // `aud` against this — so discovery is not something to rely on here.
+    projectId,
   })
 }
 

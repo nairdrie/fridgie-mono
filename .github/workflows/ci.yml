@@ -6,22 +6,29 @@ on:
   pull_request:
 
 concurrency:
+  # Cancel redundant PR runs, but NEVER cancel a run on main — that could kill a
+  # deploy between "promote traffic" and "verify".
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Nothing by default; each job opts in to exactly what it needs.
+permissions: {}
 
 jobs:
   api:
     name: api — typecheck & test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
 
-      # packages/shared is source-only but declares its own dependency, and the
-      # API imports from it — so it has to be installed for resolution to work.
+      # packages/shared is source-only but declares its own dependency
+      # (lexorank), and the API imports from it — so it has to be installed for
+      # resolution to work.
       - name: Install shared
         working-directory: packages/shared
         run: npm ci --no-audit --no-fund
@@ -41,9 +48,10 @@ jobs:
   mobile:
     name: mobile — typecheck & bundle
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -63,18 +71,212 @@ jobs:
         run: npx tsc --noEmit
 
       # Typechecking alone would not catch a broken Metro resolution of
-      # packages/shared — the runtime shared modules only fail at bundle time.
+      # packages/shared — apps/mobile/package.json does NOT depend on
+      # @fridgie/shared; resolution is via tsconfig paths + metro watchFolders,
+      # so the runtime shared modules only fail at bundle time.
       - name: Bundle
         working-directory: apps/mobile
         run: npx expo export --platform ios --output-dir .ci-bundle-check
 
   docker:
     name: api — docker build
+    # PR-only: on main, deploy-api builds and pushes the same image, so building
+    # it here too would just double the work.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
       # Build context is the repo root, not apps/api — the image needs
       # packages/shared. Building from apps/api would fail.
       - name: Build image
         run: docker build -f apps/api/Dockerfile -t fridgie-api .
+
+  deploy-api:
+    name: api — deploy to Cloud Run
+    needs: [api]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write        # ONLY this job may mint a GCP token
+    env:
+      PROJECT_ID: grocerease-5abbb
+      REGION: us-central1
+      SERVICE: fridgie-api
+      RUNTIME_SA: fridgie-api-run@grocerease-5abbb.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@v4
+
+      # An unset `vars.*` interpolates to an empty string that gcloud accepts
+      # silently, and the failure then surfaces as "the container failed to
+      # start and listen on the port defined by PORT" — which sends you hunting
+      # PORT. Assert first so the error names the actual cause.
+      - name: Assert required repository variables
+        run: |
+          [ -n "${{ vars.GCP_WIF_PROVIDER }}" ] || { echo "::error::repository variable GCP_WIF_PROVIDER is not set"; exit 1; }
+          [ -n "${{ vars.GCP_DEPLOYER_SA }}" ] || { echo "::error::repository variable GCP_DEPLOYER_SA is not set"; exit 1; }
+
+      - uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push
+        id: image
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/fridgie/api:${GITHUB_SHA}"
+          echo "ref=$IMAGE" >> "$GITHUB_OUTPUT"
+
+          docker build -f apps/api/Dockerfile -t "$IMAGE" .
+
+          # The Dockerfile copies apps/api/utils WHOLESALE. The only thing
+          # keeping a service-account key out of the image is one line in the
+          # ROOT .dockerignore (apps/api/.dockerignore is inert — the context is
+          # the root). Assert rather than trust.
+          if docker run --rm --entrypoint sh "$IMAGE" -c \
+             'test -f /usr/src/app/apps/api/utils/firebase-service-account.json'; then
+            echo "::error::service-account key leaked into the image"; exit 1
+          fi
+
+          docker push "$IMAGE"
+
+      - name: Deploy no-traffic candidate
+        id: deploy
+        run: |
+          set -euo pipefail
+          IMAGE='${{ steps.image.outputs.ref }}'
+
+          if ! gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "::error::service $SERVICE does not exist yet — run the one-time bootstrap deploy first"; exit 1
+          fi
+
+          PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format=json \
+                  | jq -r '[.status.traffic[] | select(.percent==100)][0].revisionName // empty')
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+
+          # Full flag set on EVERY deploy: `gcloud run deploy` patches and
+          # inherits, so the workflow is the single source of truth for service
+          # config rather than something that drifts.
+          # Do NOT add --use-http2 (breaks the WebSocket upgrade) or
+          # --no-cpu-throttling (forfeits the free tier).
+          gcloud run deploy "$SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" --image="$IMAGE" \
+            --service-account="$RUNTIME_SA" \
+            --min-instances=0 --max-instances=4 --concurrency=20 \
+            --cpu=1 --memory=1Gi --timeout=3600 \
+            --execution-environment=gen2 --cpu-boost --cpu-throttling \
+            --set-env-vars="NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" \
+            --set-secrets="ANTHROPIC_API_KEY=fridgie-anthropic-api-key:latest" \
+            --revision-suffix="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" \
+            --no-traffic --tag=candidate --quiet
+
+          NEW=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+                 --format='value(status.latestCreatedRevisionName)')
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format=json \
+                 | jq -r '[.status.traffic[] | select(.tag=="candidate")][0].url')
+          echo "revision=$NEW" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Candidate $NEW at $URL"
+
+      - name: Smoke-test the candidate
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+          REV: ${{ steps.deploy.outputs.revision }}
+        run: |
+          set -euo pipefail
+          code=000
+          for i in $(seq 1 10); do
+            code=$(curl -sS -o /tmp/h -w '%{http_code}' --max-time 30 "$URL/api/health?deep=1" || echo 000)
+            [ "$code" = 200 ] && break
+            echo "attempt $i: HTTP $code"; sleep 5
+          done
+          [ "$code" = 200 ] || { echo "health failed:"; cat /tmp/h; exit 1; }
+
+          # ?deep=1 did real RTDB and Firestore reads, so this proves the runtime
+          # service account's Application Default Credentials actually work —
+          # the one thing that cannot fail locally, where a service-account file
+          # is always present.
+          jq -e '.rtdb == "ok" and .firestore == "ok"' /tmp/h
+
+          # Prove we are talking to the revision we just built, not a cached one.
+          jq -e --arg r "$REV" '.revision == $r' /tmp/h
+
+          # The WS upgrade branch lives in Bun.serve's fetch(), AHEAD of Hono.
+          # With no token it must answer 401. A 404 means the branch broke and
+          # everything is falling through to Hono — i.e. live list sync is dead
+          # while every HTTP route still looks perfectly healthy.
+          ws=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/ws/list/smoketest")
+          [ "$ws" = 401 ] || { echo "WS upgrade path returned $ws, expected 401"; exit 1; }
+
+      - name: Promote candidate to 100% traffic
+        run: |
+          gcloud run services update-traffic "$SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --to-revisions="${{ steps.deploy.outputs.revision }}=100" --quiet
+
+      - name: Roll back
+        if: failure() && steps.deploy.outputs.prev != ''
+        run: |
+          echo "Deploy failed — restoring ${{ steps.deploy.outputs.prev }}"
+          gcloud run services update-traffic "$SERVICE" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --to-revisions="${{ steps.deploy.outputs.prev }}=100" --quiet
+
+  build-mobile:
+    name: mobile — EAS preview build (installable)
+    needs: [mobile]
+    # Deliberately NOT `needs: deploy-api`. A slow EAS free-tier queue must never
+    # block the API from going live, and a failed API deploy must not block
+    # shipping a client that talks to the already-deployed API.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read      # NEVER give this job id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: npm
+
+      - name: Install shared
+        working-directory: packages/shared
+        run: npm ci --no-audit --no-fund
+
+      # eas-cli evaluates app.json locally through @expo/config, which loads the
+      # config plugins (expo-router, expo-build-properties, google-signin) from
+      # node_modules. Without this, `eas build` fails resolving the config
+      # before it ever contacts the EAS API.
+      - name: Install mobile
+        working-directory: apps/mobile
+        run: npm ci --no-audit --no-fund
+
+      # --profile preview: Android APK + iOS ad-hoc IPA, both installable
+      # directly on hardware. `production` would emit an AAB, which cannot be
+      # installed on any device at all.
+      #
+      # --no-wait returns as soon as the build is QUEUED. Free-tier queues run
+      # 10-60+ minutes; waiting would bill all of it to GitHub Actions minutes.
+      - name: Queue EAS build
+        working-directory: apps/mobile
+        run: |
+          eas build --profile preview --platform all \
+            --non-interactive --no-wait \
+            --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME}"
+          echo "### EAS builds queued" >> "$GITHUB_STEP_SUMMARY"
+          echo "Install links: https://expo.dev/accounts/_/projects/fridgie/builds" >> "$GITHUB_STEP_SUMMARY"
