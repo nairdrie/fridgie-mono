@@ -28,6 +28,19 @@ export interface GroupInvitation {
   inviterName: string;
 }
 
+/**
+ * Default request ceiling. Comfortably above a Cloud Run cold start (~1-2s)
+ * plus a slow mobile network, and far below the OS default.
+ */
+const DEFAULT_TIMEOUT_MS = 30_000
+
+/**
+ * The AI routes call Claude and legitimately take much longer — reading a
+ * photographed recipe is a vision call over a multi-megabyte upload. Timing
+ * those out at 30s would break a working feature.
+ */
+const AI_TIMEOUT_MS = 120_000
+
 export class ApiError extends Error {
   status: number;
 
@@ -80,7 +93,15 @@ async function authorizedFetch(
   input: RequestInfo,
   init: RequestInit = {},
   /** Statuses to return rather than throw on, so the caller can read the body. */
-  allowStatus: number[] = []
+  allowStatus: number[] = [],
+  /**
+   * Wall-clock ceiling for the request. Without one, `fetch` inherits the OS
+   * TCP timeout — so a host that resolves but does not answer (a retired
+   * server whose DNS record still points at it, a dropped connection, a
+   * captive portal) hangs for a minute or more instead of failing. Startup
+   * awaits getGroups() before rendering, so that hang IS the loading spinner.
+   */
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<Response> {
   await authStatePromise;
   let user = auth.currentUser
@@ -90,13 +111,30 @@ async function authorizedFetch(
   }
   const token = await getIdToken(user, true)
 
-  const res = await fetch(input, {
-    ...init,
-    headers: {
-      ...(init.headers as Record<string, string>),
-      Authorization: `Bearer ${token}`,
-    },
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  let res: Response
+  try {
+    res = await fetch(input, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...(init.headers as Record<string, string>),
+        Authorization: `Bearer ${token}`,
+      },
+    })
+  } catch (err: any) {
+    // An abort and a genuine network failure are the same thing to a caller:
+    // the server could not be reached. Say so, rather than surfacing
+    // "Aborted", which reads like the user cancelled something.
+    if (err?.name === 'AbortError') {
+      throw new ApiError(`The server did not respond within ${Math.round(timeoutMs / 1000)}s.`, 0)
+    }
+    throw new ApiError(err?.message || 'Could not reach the server.', 0)
+  } finally {
+    clearTimeout(timer)
+  }
 
   if (!res.ok && !allowStatus.includes(res.status)) {
     // Try to get a more specific error message from the response body
@@ -183,7 +221,8 @@ export async function categorizeList(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items })
-    }
+    },
+    [], AI_TIMEOUT_MS
   )
   return res.json()
 }
@@ -422,7 +461,7 @@ export async function getMealSuggestions(vetoedTitles?: string[]): Promise<Recip
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ vetoedTitles }),
-  });
+  }, [], AI_TIMEOUT_MS);
   return res.json();
 }
 
@@ -557,7 +596,7 @@ export async function importRecipeFromPhoto(imageDataUrl: string): Promise<Recip
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image: imageDataUrl }),
-  });
+  }, [], AI_TIMEOUT_MS);
   return res.json();
 }
 
@@ -566,7 +605,7 @@ export async function importRecipeFromUrl(url: string): Promise<Recipe> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
-  });
+  }, [], AI_TIMEOUT_MS);
   console.log("import results:", res);
   return res.json();
 }
