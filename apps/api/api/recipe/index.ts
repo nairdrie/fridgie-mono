@@ -1,5 +1,6 @@
 // api/recipe/index.ts
 import { Hono } from 'hono'
+import { invalidateSearchIndex } from '@/utils/searchIndex';
 import { fs } from '@/utils/firebase' // Use Firestore admin
 import { auth } from '@/middleware/auth'
 
@@ -37,6 +38,7 @@ route.post('/', async (c) => {
   if (!id) {
     const data = { ...recipeDetails, createdBy: uid, createdAt: new Date() }
     const docRef = await fs.collection('recipes').add(data)
+    invalidateSearchIndex()  // new recipe -> searchable now, not in <=5 min
     return c.json({ id: docRef.id, ...data }, 201)
   }
 
@@ -46,6 +48,7 @@ route.post('/', async (c) => {
   if (!recipeDoc.exists) {
     const data = { ...recipeDetails, createdBy: uid, createdAt: new Date() }
     await docRef.set(data)
+    invalidateSearchIndex()
     return c.json({ id, ...data }, 201)
   }
 
@@ -64,10 +67,12 @@ route.post('/', async (c) => {
       forkedFromId: rootId,
     }
     const forkRef = await fs.collection('recipes').add(forkData)
+    invalidateSearchIndex()
     return c.json({ id: forkRef.id, ...forkData }, 201)
   }
 
   await docRef.update({ ...recipeDetails, updatedAt: new Date() })
+  invalidateSearchIndex()
   return c.json({ id, ...existing, ...recipeDetails })
 })
 

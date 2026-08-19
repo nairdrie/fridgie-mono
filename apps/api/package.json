@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
-    "algoliasearch": "^5.37.0",
     "axios": "^1.11.0",
     "cheerio": "^1.1.2",
     "cookie": "^1.0.2",
@@ -22,6 +21,7 @@
     "firebase-admin": "^13.4.0",
     "hono": "4.7.10",
     "lexorank": "^1.0.5",
+    "minisearch": "^7.2.0",
     "openai": "^4.100.0",
     "uuid": "^14.0.2"
   },
