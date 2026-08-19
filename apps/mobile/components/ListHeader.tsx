@@ -1,4 +1,3 @@
-import { useAuth } from '@/context/AuthContext';
 import { useLists } from '@/context/ListContext';
 import { List, ListView } from '@/types/types';
 import { primary } from '@/utils/styles';
@@ -28,8 +27,7 @@ const DEVICE_HEIGHT =
 
 export default function ListHeader() {
   const router = useRouter();
-  const { allLists, selectedList, selectList, selectedView, selectView, loadError, refreshLists } = useLists();
-  const { groupsError, refreshGroups } = useAuth();
+  const { allLists, selectedList, selectList, selectedView, selectView } = useLists();
   const [isModalVisible, setModalVisible] = useState(false);
 
  // State to hold the width of a single segment for the animation
@@ -97,31 +95,10 @@ export default function ListHeader() {
     };
   });
 
-  // A failed load used to render nothing at all, and nothing ever retried — so
-  // if the API was unreachable when the app opened, the header stayed gone until
-  // a restart. Show why, and offer a way out.
-  //
-  // Both failures have to be covered. Groups load first, and without one there
-  // is no list to fetch, so a groups failure produces a null selectedList with
-  // no list-level error — which looked identical to "nothing to show".
-  const failure = groupsError ?? loadError;
-  if (!selectedList && failure) {
-    const retry = () => { if (groupsError) refreshGroups(); refreshLists(); };
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.errorBar}>
-          <Ionicons name="cloud-offline-outline" size={20} color="#8a8a8a" />
-          <Text style={styles.errorText} numberOfLines={1}>
-            {groupsError ? "Couldn't load your groups" : "Couldn't load your lists"}
-          </Text>
-          <TouchableOpacity onPress={retry} style={styles.retryButton} accessibilityRole="button">
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
+  // The unreachable-server state is owned by app/(tabs)/_layout.tsx, one level
+  // above both this header and the screen bodies. Rendering it here as well let
+  // a failed header sit above a plausible empty list, which reads as "nothing
+  // planned" rather than "could not load".
   if (!selectedList)
     return <></>;
 
@@ -230,29 +207,6 @@ export default function ListHeader() {
 }
 
 const styles = StyleSheet.create({
-  errorBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  errorText: {
-    flex: 1,
-    fontSize: 15,
-    color: '#8a8a8a',
-  },
-  retryButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#f0f0f0',
-  },
-  retryText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: primary,
-  },
   safeArea: {
     backgroundColor: '#fff', // Match your header background
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,

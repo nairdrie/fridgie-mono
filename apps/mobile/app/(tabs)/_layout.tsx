@@ -1,5 +1,8 @@
+import React from 'react';
+import ConnectionError from '@/components/ConnectionError';
 import ListHeader from '@/components/ListHeader';
 import { useAuth } from '@/context/AuthContext';
+import { useLists } from '@/context/ListContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { primary } from '@/utils/styles';
 import IonIcons from '@expo/vector-icons/Ionicons';
@@ -9,8 +12,37 @@ import { Image, StyleSheet } from 'react-native';
 
 export default function TabLayout() {
     // const { profile, loading, user } = useAuth();
-    const { loading, user } = useAuth();
+    const { loading, user, groups, groupsError, refreshGroups } = useAuth();
+    const { selectedList, loadError, refreshLists } = useLists();
     const { notificationCount } = useNotifications(); // 2. Get the count from the context
+    const [retrying, setRetrying] = React.useState(false);
+
+    // One place decides the app is unreachable, above BOTH the navigator's
+    // header and the screen bodies — so they cannot disagree and show a broken
+    // header over a convincing empty list.
+    //
+    // The condition is "we have nothing to show AND something failed", not
+    // merely "something failed": a transient error while the week is already on
+    // screen should not blow away what the user is looking at.
+    const unreachable = (groupsError && groups.length === 0) || (loadError && !selectedList);
+
+    React.useEffect(() => {
+      if (!unreachable) setRetrying(false);
+    }, [unreachable]);
+
+    if (unreachable) {
+      return (
+        <ConnectionError
+          retrying={retrying}
+          onRetry={() => {
+            setRetrying(true);
+            if (groupsError) refreshGroups();
+            refreshLists();
+          }}
+        />
+      );
+    }
+
   return (
     <Tabs screenOptions={{ 
         tabBarActiveTintColor: primary,
