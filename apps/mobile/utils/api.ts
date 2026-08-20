@@ -207,11 +207,20 @@ export async function updateList(
   return json
 }
 
+/**
+ * Files items into supermarket aisles and returns the whole list, re-ranked.
+ *
+ * `itemIds` names the rows that still need a department. With it the server
+ * files only those and leaves every other row where it is — the path an
+ * ordinary add takes, so it runs constantly. Omit it to re-sort the entire
+ * list, which is what the Sort by Category button means.
+ */
 export async function categorizeList(
   groupId: string,
   listId: string,
-  items: Item[]
-): Promise<Item[]> {
+  items: Item[],
+  itemIds?: string[]
+): Promise<{ items: Item[]; rev?: number }> {
   // Must be wrapped in an object — the server reads `body.items`. Sending a bare
   // array made it silently fall back to its own (stale) DB snapshot and then
   // overwrite the list with it, dropping unsaved edits including overrideBase.
@@ -220,11 +229,16 @@ export async function categorizeList(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items })
+      body: JSON.stringify({ items, clientId: CLIENT_ID, ...(itemIds ? { itemIds } : {}) })
     },
     [], AI_TIMEOUT_MS
   )
-  return res.json()
+
+  // The revision this write committed at. Taking it here is what keeps the
+  // caller's next save from arriving stale — and losing whatever was typed
+  // while the request was in flight to the rebase that follows.
+  const rev = Number(res.headers.get('X-List-Rev'))
+  return { items: await res.json(), rev: Number.isFinite(rev) && rev > 0 ? rev : undefined }
 }
 
 // ─────── GROUPS ────────────────────────────────────────────────────────────

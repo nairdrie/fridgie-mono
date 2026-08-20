@@ -8,7 +8,8 @@ import { type Item, type Meal, type Recipe } from '@/utils/types'
 import { mutateList } from '@/utils/listStore'
 import { maxRank, sanitizeItems } from '@/utils/rank'
 import { normalizeQuantity } from '@/utils/quantity'
-import { categorizeItems, isBlankItem, isRealItem } from '@/utils/categorize'
+import { categorizeNewItems } from '@/utils/categorize'
+import { keepUnanswered } from '@/utils/sections'
 
 const route = new Hono()
 
@@ -39,6 +40,10 @@ route.post('/', groupAuth, async (c) => {
         recipeId: recipe.id,
     }
 
+    // Filled in by the transaction below: the rows this add put on the list,
+    // and the only ones the categorization step is allowed to move.
+    const addedItemIds: string[] = []
+
     try {
         const result = await mutateList(groupId, listId, (current) => {
             const currentMeals: Meal[] = Array.isArray(current.meals)
@@ -55,6 +60,10 @@ route.post('/', groupAuth, async (c) => {
             let listRank = maxRank(currentItems, 'listOrder') ?? LexoRank.middle()
             let mealRank = LexoRank.middle()
 
+            // A transaction body can run more than once; each attempt starts
+            // from the ids of that attempt, never an accumulation of all of them.
+            addedItemIds.length = 0
+
             const newItems: Item[] = (recipe.ingredients || []).map((ingredient) => {
                 listRank = listRank.genNext()
                 const item: Item = {
@@ -70,6 +79,7 @@ route.post('/', groupAuth, async (c) => {
                 // RTDB rejects undefined values, so only set quantity when present
                 const quantity = normalizeQuantity(ingredient.quantity)
                 if (quantity) item.quantity = quantity
+                addedItemIds.push(item.id)
                 return item
             })
 
@@ -86,10 +96,13 @@ route.post('/', groupAuth, async (c) => {
 
         // A recipe's ingredients land on the end of the list, which on a
         // department-sorted list means they sit below the last aisle instead of
-        // in it. Re-sort here rather than on the client: the client only learns
-        // about this meal from the broadcast, so it would have to categorize
-        // against a snapshot it may not have received yet and would write the
-        // new ingredients straight back out of existence.
+        // in it. File them here rather than on the client: the client only
+        // learns about this meal from the broadcast, so it would have to
+        // categorize against a snapshot it may not have received yet and would
+        // write the new ingredients straight back out of existence.
+        //
+        // Only the ingredients just added are filed — the rest of the list keeps
+        // the aisles and the order it already had.
         //
         // Best-effort — a model outage must not fail an otherwise-good add, it
         // just leaves the list unsorted until the next sort.
@@ -102,11 +115,13 @@ route.post('/', groupAuth, async (c) => {
         if ((result.list?.sort ?? 'category') === 'category') {
             try {
                 const committed: Item[] = Array.isArray(result.list.items) ? result.list.items : []
-                const sorted = await categorizeItems(
-                    committed.filter(isRealItem),
-                    committed.filter(isBlankItem),
-                )
-                await mutateList(groupId, listId, (current) => ({ ...current, items: sorted }))
+                const sorted = await categorizeNewItems(committed, addedItemIds)
+                await mutateList(groupId, listId, (current) => ({
+                    ...current,
+                    // Anything saved while the model was thinking is not in
+                    // `sorted`; without this the write would delete it.
+                    items: keepUnanswered(sorted, sanitizeItems(current.items).items),
+                }))
             } catch (error) {
                 console.error('Post-add categorization failed; list left unsorted:', error)
             }

@@ -6,7 +6,7 @@ import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutAnimation, Pressable, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Keyboard, LayoutAnimation, Pressable, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as Haptics from 'expo-haptics';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import Modal from 'react-native-modal';
@@ -111,7 +111,7 @@ function MealCard({
             setAllItems(prev =>
                 prev.map(i =>
                     i.id === item.id
-                        ? { ...i, text: newText, quantity: quantity || i.quantity }
+                        ? { ...i, text: newText, quantity: quantity || i.quantity, section: undefined }
                         : i
                 )
             );
@@ -134,8 +134,11 @@ function MealCard({
         setIsDaySelectorVisible(prev => !prev);
     };
 
+    // An ingredient is a grocery row too, and the aisle it was filed under was
+    // decided from the old text — drop it so the list re-files this row once the
+    // edit settles.
     const handleUpdateIngredientText = (id: string, text: string) => {
-        setAllItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item)));
+        setAllItems(prev => prev.map(item => (item.id === id ? { ...item, text, section: undefined } : item)));
         markDirty();
     };
 
@@ -237,7 +240,16 @@ function MealCard({
                             handleDeleteIngredient(item.id);
                         }
                     }}
-                    onSubmitEditing={() => handleAddIngredient(getIndex())}
+                    onSubmitEditing={() => {
+                        // Return on a row with nothing in it is the user
+                        // finishing, not asking for one more empty row.
+                        if ((item.text ?? '').trim() === '') {
+                            setEditingId('');
+                            Keyboard.dismiss();
+                            return;
+                        }
+                        handleAddIngredient(getIndex());
+                    }}
                     onBlur={() => handleItemBlur(item)}
                     blurOnSubmit={false}
                     returnKeyType="next"

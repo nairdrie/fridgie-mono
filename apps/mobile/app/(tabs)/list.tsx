@@ -50,7 +50,13 @@ export default function HomeScreen() {
     const [sort, setSort] = useState<List['sort']>('category');
 
     const [editingId, setEditingId] = useState<string>('');
+    // Any filing in flight, automatic or asked for. Gates the auto-file effect
+    // so two passes can't race.
     const [isCategorizing, setIsCategorizing] = useState(false);
+    // Only a whole-list re-sort the user asked for. Filing happens constantly
+    // now, and turning the Sort button into a spinner every time an item lands
+    // would make the list look busy doing something nobody requested.
+    const [isSorting, setIsSorting] = useState(false);
     const [isKeyboardVisible, setKeyboardVisible] = useState(false);
     const inputRefs = useRef<Record<string, TextInput | null>>({});
 
@@ -152,28 +158,18 @@ export default function HomeScreen() {
     // initial empty state.
     const hasLoadedRef = useRef(false);
 
-    // Ids of items the server has already filed under a department. Anything with
-    // text that ISN'T in here was added or typed locally since the last sort, and
-    // is what the auto-sort effect below reacts to.
-    const sortedItemIdsRef = useRef<Set<string>>(new Set());
-    // Ids we tried and failed to sort. Without this the auto-sort effect would
+    // Ids we tried and failed to file. Without this the auto-sort effect would
     // spin on every render for as long as the request keeps failing.
     const sortFailedIdsRef = useRef<Set<string>>(new Set());
 
     const hasText = (i: Item) => !i.isSection && (i.text ?? '').trim() !== '';
 
-    // Only a row that is still on the list can be mid-edit. `editingId` also
-    // holds MEAL ids — handleAddMeal focuses a meal's name field through the
-    // same ref map — and no blur handler on that field ever clears it, so a
-    // bare `if (editingId)` guard latched off for the rest of the session the
-    // first time a meal was added by hand. It can go stale the same way when a
-    // focused input is unmounted, which React Native does not report as a blur.
-    const isEditingListItem = !!editingId && items.some(i => i.id === editingId);
-
-    const markSorted = (list: Item[]) => {
-        sortedItemIdsRef.current = new Set(list.filter(hasText).map(i => i.id));
-        sortFailedIdsRef.current = new Set();
-    };
+    // An item carries the aisle the server filed it under. Its ABSENCE is what
+    // marks a row as still needing one — this used to be an in-memory set of
+    // ids, which meant a list reopened after the app was closed looked entirely
+    // sorted and the rows added just before closing never got a department.
+    const needsSection = (i: Item) =>
+        hasText(i) && !i.section && !sortFailedIdsRef.current.has(i.id);
 
     const applyRemoteList = (list: List) => {
         applyingRemoteRef.current = true;
@@ -186,21 +182,11 @@ export default function HomeScreen() {
         const withOrder = sanitizeListOrders(rawItems)
             .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
 
-        // Section rows are the evidence that a snapshot has been categorized —
-        // a categorize result always carries them — and marking those as sorted
-        // is what stops another member's sort (or the server's own sort after a
-        // cookbook add) from being redone here.
-        //
-        // A first snapshot is NOT evidence of anything on its own. Treating one
-        // as already sorted wrote off every list that had never been
-        // categorized: ingredients added to an empty list and still uncategorized
-        // when the app was closed came back marked as done, so the auto-sort
-        // effect below never ran for that list again. A list the user really did
-        // order by hand is opted out by `sort: 'custom'`, which the effect
-        // checks first — that, not this, is what protects a hand-ordered list.
-        if (withOrder.some(i => i.isSection)) markSorted(withOrder);
-
-        setItems(withOrder.length > 0 ? withOrder : [{ id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false }]);
+        // An empty list is left empty. It used to be given a blank placeholder
+        // row, which the grocery view renders as an unlabelled checkbox — one
+        // more empty row to clean up, and one the user never asked for. The view
+        // has a real empty state and offers to add the first item itself.
+        setItems(withOrder);
         setMeals(Array.isArray(list.meals) ? list.meals : []);
         setSort(list.sort || 'category');
     };
@@ -224,7 +210,6 @@ export default function HomeScreen() {
         setIsListLoading(true);
         // These track ids on the list being left behind; the snapshot for the
         // new one decides its own state.
-        sortedItemIdsRef.current = new Set();
         sortFailedIdsRef.current = new Set();
 
         // listenToList fetches an auth token before it opens the socket, so the
@@ -350,7 +335,14 @@ export default function HomeScreen() {
 
     useEffect(() => {
         const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
-        const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+        const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+            setKeyboardVisible(false);
+            // With the keyboard down nothing is being typed into, whatever the
+            // focus state says. React Native does not report a blur when the
+            // keyboard is dismissed by a drag or the Android back gesture, and
+            // a stale editingId holds off both filing and blank-row cleanup.
+            setEditingId('');
+        });
         return () => {
             keyboardDidHideListener.remove();
             keyboardDidShowListener.remove();
@@ -523,9 +515,60 @@ export default function HomeScreen() {
         }
     };
 
-    const handleAutoCategorize = async () => {
+    /**
+     * Folds a categorize response back into local state.
+     *
+     * Filing now happens while the keyboard is still up, so the answer can
+     * arrive after the user has typed more, added a row or deleted one. Taking
+     * the response wholesale would undo all of that, so only the filing
+     * decision — where a row sits and which aisle it is in — is taken from the
+     * server; everything else stays as the user last left it.
+     */
+    const applyFiledItems = (filed: Item[]) => {
+        setItems(current => {
+            const byId = new Map(current.map(i => [i.id, i]));
+            const merged = filed
+                // Section rows are the server's to invent; anything else that is
+                // no longer here was deleted locally and must stay deleted.
+                .filter(i => i.isSection || byId.has(i.id))
+                .map(i => {
+                    const local = byId.get(i.id);
+                    if (!local) return i;
+                    // Renamed since we asked: the aisle we got back is for the
+                    // old text, so leave the row unfiled and let the next pass
+                    // decide where it really goes.
+                    const renamed = (local.text ?? '') !== (i.text ?? '');
+                    return renamed
+                        ? { ...local, listOrder: i.listOrder }
+                        : { ...local, listOrder: i.listOrder, section: i.section };
+                });
+
+            // Rows added locally after the request went out aren't in the answer
+            // and the ranks it came back with are new, so put them on the end.
+            const answered = new Set(filed.map(i => i.id));
+            let rank = nextListRank(merged);
+            for (const item of current) {
+                if (answered.has(item.id)) continue;
+                merged.push({ ...item, listOrder: rank.toString() });
+                rank = rank.genNext();
+            }
+
+            return sanitizeListOrders(merged);
+        });
+    };
+
+    /**
+     * Files items into supermarket aisles.
+     *
+     * With `itemIds` only those rows move and the rest of the list is left
+     * alone — that is the automatic path, and it runs on every add. Without
+     * them the whole list is re-sorted, which is what the Sort by Category
+     * button asks for.
+     */
+    const handleAutoCategorize = async (itemIds?: string[]) => {
         if (!selectedGroup || !selectedList?.id) return;
         setIsCategorizing(true);
+        if (!itemIds) setIsSorting(true);
         markDirty();
 
         // Always the committed state. Every caller used to have the option of
@@ -534,50 +577,76 @@ export default function HomeScreen() {
         const currentItems = items;
 
         try {
-            const newItems = await categorizeList(selectedGroup.id, selectedList.id, currentItems);
-            const sorted = sanitizeListOrders(newItems);
-            setItems(sorted);
-            markSorted(sorted);
+            const { items: newItems, rev } = await categorizeList(selectedGroup.id, selectedList.id, currentItems, itemIds);
+            applyFiledItems(sanitizeListOrders(newItems));
+            // This write moved the list on; adopt its revision so the save that
+            // follows isn't rejected as stale and rebased over the merge above.
+            if (typeof rev === 'number') revRef.current = rev;
+            sortFailedIdsRef.current = new Set();
             setSort('category'); // Set sort mode to category
-            setEditingId('');
+            // Re-sorting the whole list rearranges everything, so there is no row
+            // left to go back to. Filing one new row is not a reason to drop the
+            // user out of the one they are typing in.
+            if (!itemIds) setEditingId('');
         } catch (err) {
             console.error('Auto-categorization failed', err);
             // Give up on these particular items until something else changes,
             // so the auto-sort effect doesn't retry them on every render.
-            for (const item of currentItems) {
-                if (hasText(item)) sortFailedIdsRef.current.add(item.id);
-            }
+            const failed = itemIds ?? currentItems.filter(hasText).map(i => i.id);
+            for (const id of failed) sortFailedIdsRef.current.add(id);
         } finally {
             setIsCategorizing(false);
+            setIsSorting(false);
         }
     };
 
-    // Items that have text but no department yet — a hand-typed grocery row, an
-    // ingredient typed into a meal, a recipe's ingredients.
-    const unsortedCount = items.filter(i =>
-        hasText(i)
-        && !sortedItemIdsRef.current.has(i.id)
-        && !sortFailedIdsRef.current.has(i.id)
-    ).length;
+    // Rows that have text but no department yet — a hand-typed grocery row, an
+    // ingredient typed into a meal, a recipe's ingredients, a generated meal
+    // plan. The row currently being typed into is deliberately left out: filing
+    // it would move it out from under the cursor. It gets picked up by the next
+    // pass, which the blur ending the edit triggers.
+    const unsortedIds = items.filter(i => needsSection(i) && i.id !== editingId).map(i => i.id);
+    // A string, so the effect below re-runs when WHICH rows need filing changes
+    // rather than on every keystroke that leaves the count the same.
+    const unsortedKey = unsortedIds.join(',');
 
-    // Keep a department-sorted list sorted. Every path that puts items on the
-    // list ends here, rather than each one remembering to sort for itself:
-    // adding a row, typing an ingredient into a meal, saving a recipe, and
-    // generating meals all just change `items`.
+    // Department order is what a grocery list is for, so it is not a mode the
+    // user has to ask for: every path that puts an item on the list ends here
+    // and the item is filed into its aisle. Adding a row, typing an ingredient
+    // into a meal, saving a recipe and generating meals all just change `items`.
     useEffect(() => {
         if (sort !== 'category') return;
-        if (unsortedCount === 0) return;
+        if (unsortedIds.length === 0) return;
         if (isCategorizing) return;
         if (!hasLoadedRef.current || !selectedGroup || !selectedList?.id) return;
-        // Mid-edit, re-sorting would move the row out from under the cursor.
-        // The blur that ends editing clears this and re-runs the effect.
-        if (isEditingListItem) return;
 
-        // Long enough that adding several items in a row costs one sort, not one
-        // per item.
-        const timer = setTimeout(() => { handleAutoCategorize().catch(console.error); }, 900);
+        // Long enough that typing a run of items costs one call, not one per
+        // item, and short enough to feel like the list is filing itself.
+        const timer = setTimeout(() => { handleAutoCategorize(unsortedIds).catch(console.error); }, 700);
         return () => clearTimeout(timer);
-    }, [unsortedCount, sort, isCategorizing, isEditingListItem, items, selectedGroup?.id, selectedList?.id]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [unsortedKey, sort, isCategorizing, items, selectedGroup?.id, selectedList?.id]);
+
+    // Rows with nothing in them are scaffolding: one you added and never typed
+    // into, an ingredient abandoned in the meal plan, an unnamed heading, the
+    // placeholder an empty list used to be given. They render as a bare checkbox
+    // or a blank heading and, left alone, they pile up. Once the keyboard is
+    // down and nothing is focused they have served their purpose.
+    //
+    // The delay is load-bearing: moving between two rows blurs the first before
+    // it focuses the second, and for that moment nothing is being edited.
+    // Pruning on the spot would delete the blank row the user just tapped into.
+    useEffect(() => {
+        if (editingId || isKeyboardVisible) return;
+        const isBlank = (i: Item) => (i.text ?? '').trim() === '';
+        if (!items.some(isBlank)) return;
+
+        const timer = setTimeout(() => {
+            setItems(prev => prev.filter(i => !isBlank(i)));
+            markDirty();
+        }, 400);
+        return () => clearTimeout(timer);
+    }, [items, editingId, isKeyboardVisible]);
 
     const handleToggleCookbookById = async (recipeId: string) => {
         const isInCookbook = cookbookRecipeIds.has(recipeId);
@@ -629,9 +698,17 @@ export default function HomeScreen() {
     if (isSection) setSort('custom');
 
     if (!selectedList) return;
+
+    // An empty row already waiting for text IS the row being asked for. Without
+    // this, every tap stacked up another unlabelled checkbox.
+    const blank = items.find(i => !i.isSection && !i.mealId && (i.text ?? '').trim() === '');
+    if (!isSection && blank) {
+        setEditingId(blank.id);
+        return;
+    }
+
     const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: isSection };
-    const newItems = items.length === 1 && items[0].text === '' ? [newItem] : [...items, newItem];
-    setItems(newItems);
+    setItems([...items, newItem]);
     setEditingId(newItem.id);
     markDirty();
 };
@@ -787,7 +864,6 @@ export default function HomeScreen() {
                         setItems={setItems}
                         sort={sort}
                         setSort={setSort}
-                        onCategorize={handleAutoCategorize}
                         editingId={editingId}
                         setEditingId={setEditingId}
                         inputRefs={inputRefs}
@@ -827,7 +903,7 @@ export default function HomeScreen() {
                  {/* --- Start of new/moved code: Sort Button --- */}
                  {selectedView === ListView.GroceryList && (
                     <TouchableOpacity style={styles.sortButton} onPress={() => setIsSortModalVisible(true)} disabled={isCategorizing}>
-                        {isCategorizing ? (
+                        {isSorting ? (
                             <>
                                 <ActivityIndicator size="small" color={primary} />
                                 <Text style={styles.sortButtonText}>Sorting…</Text>

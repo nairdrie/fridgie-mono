@@ -2,6 +2,23 @@ import { LexoRank } from 'lexorank';
 import { v4 as uuid } from 'uuid';
 import { adminRtdb } from './firebase';
 import { completeJson, models } from './claude';
+import {
+  buildCategoryIndex,
+  cacheKeysFor,
+  canonicalKey,
+  findCategory,
+  normalizeItemText,
+  type CategoryIndex,
+} from './itemMatch';
+import {
+  compareSections,
+  isBlankItem,
+  isRealItem,
+  placeItems,
+  type PlaceableItem,
+} from './sections';
+
+export { isBlankItem, isRealItem, normalizeItemText };
 
 /** Supermarket aisles, in the order they tend to appear. */
 export const SECTIONS = [
@@ -10,6 +27,9 @@ export const SECTIONS = [
   'Snacks & Candy', 'Health & Beauty', 'Household Essentials', 'Pet Supplies',
   'International', 'Floral', 'Alcohol',
 ] as const;
+
+/** Where anything the model dropped or renamed ends up. Not a real aisle. */
+export const FALLBACK_SECTION = 'Other';
 
 // An invented section name would fall through to the "Other" bucket below; as
 // an enum the schema simply won't allow one.
@@ -40,18 +60,147 @@ correct, pluralise, or tidy it. Every item must appear in exactly one section.
 Only include sections that end up with at least one item.
 `;
 
-/** Normalizes text for consistent cache keys. */
-const normalizeItemText = (text: string) => text.toLowerCase().replace(/\s+/g, '');
-
-/** A real, categorizable row: not a section header, and not blank. */
-export const isRealItem = (i: any) => !i?.isSection && String(i?.text ?? '').trim() !== '';
+const CACHE_PATH = 'itemCategoryCache';
 
 /**
- * Blank placeholder rows (every list is created with one `text: ''` item) must
- * survive categorization without being treated as uncategorizable — otherwise
- * they get swept into a spurious "Other" section on every single run.
+ * Categorization now runs on every add rather than only when the user taps
+ * Sort, and each run used to download the whole cache node first. Holding the
+ * snapshot briefly turns a burst of adds into one read.
+ *
+ * Going stale is harmless by construction: the worst a miss can do is send an
+ * item to the model that another instance had already resolved, and writes
+ * merge into the held copy so this process always sees its own results.
  */
-export const isBlankItem = (i: any) => !i?.isSection && String(i?.text ?? '').trim() === '';
+const CACHE_TTL_MS = 60_000;
+let cachedIndex: { index: CategoryIndex; cache: Record<string, string>; at: number } | null = null;
+
+async function loadCategoryIndex(): Promise<CategoryIndex> {
+  const now = Date.now();
+  if (cachedIndex && now - cachedIndex.at < CACHE_TTL_MS) return cachedIndex.index;
+
+  const snap = await adminRtdb.ref(CACHE_PATH).once('value');
+  const cache: Record<string, string> = snap.val() || {};
+  const index = buildCategoryIndex(cache);
+  cachedIndex = { index, cache, at: now };
+  return index;
+}
+
+/**
+ * Persists resolved categories and folds them into the in-process snapshot.
+ *
+ * Best-effort: by the time this runs the answer is already in hand, and failing
+ * to write the cache only costs the next caller a model call. Letting it throw
+ * would throw that answer away too.
+ */
+async function rememberCategories(updates: Record<string, string>): Promise<void> {
+  if (Object.keys(updates).length === 0) return;
+  if (cachedIndex) {
+    Object.assign(cachedIndex.cache, updates);
+    cachedIndex.index = buildCategoryIndex(cachedIndex.cache);
+  }
+  try {
+    await adminRtdb.ref(CACHE_PATH).update(updates);
+  } catch (error) {
+    console.error('Could not write the item category cache:', error);
+  }
+}
+
+/** Drops the held cache snapshot; the next resolve re-reads it. */
+export function resetCategoryCache(): void {
+  cachedIndex = null;
+}
+
+/**
+ * The section for every distinct text in `texts`.
+ *
+ * The cache answers first — the literal wording, then its canonical form, then
+ * a near-miss spelling — and only what is left over is sent to the model, in a
+ * single call. Anything the model declines to place is absent from the result;
+ * callers decide what that means.
+ *
+ * Throws only if the model call itself fails.
+ */
+export async function resolveCategories(texts: string[]): Promise<Map<string, string>> {
+  const resolved = new Map<string, string>();
+  const distinct = [...new Set(texts.map((t) => String(t ?? '')).filter((t) => t.trim() !== ''))];
+  if (distinct.length === 0) return resolved;
+
+  const index = await loadCategoryIndex();
+  const unknown: string[] = [];
+  const backfill: Record<string, string> = {};
+
+  for (const text of distinct) {
+    const match = findCategory(text, index);
+    if (!match) {
+      unknown.push(text);
+      continue;
+    }
+    resolved.set(text, match.section);
+    // A hit on the legacy whitespace-stripped key teaches us nothing about the
+    // next phrasing of the same item; writing the canonical key back migrates
+    // the entry the first time it is used.
+    if (match.source === 'exact' && !index.byKey.has(canonicalKey(text))) {
+      for (const key of cacheKeysFor(text)) backfill[key] = match.section;
+    }
+  }
+
+  if (unknown.length > 0) {
+    const parsed: { sections: { name: string; items: string[] }[] } = await completeJson({
+      model: models.categorize,
+      system: categorizeSystemPrompt,
+      user: `Sort these items:\n${JSON.stringify(unknown)}`,
+      schema: categorizationSchema,
+      effort: 'low',
+    });
+
+    // The model is told to copy text through verbatim; when it tidies one
+    // anyway, match it back to what we asked about by canonical form so the
+    // answer is not thrown away.
+    const byCanonical = new Map(unknown.map((text) => [canonicalKey(text), text]));
+
+    for (const section of parsed.sections ?? []) {
+      if (!section?.name || !Array.isArray(section.items)) continue;
+      for (const returned of section.items) {
+        const text = byCanonical.get(canonicalKey(String(returned ?? ''))) ?? String(returned ?? '');
+        if (!text.trim()) continue;
+        resolved.set(text, section.name);
+        for (const key of cacheKeysFor(text)) backfill[key] = section.name;
+      }
+    }
+  }
+
+  await rememberCategories(backfill);
+  return resolved;
+}
+
+/**
+ * Files `itemIds` into their aisles without disturbing the rest of the list.
+ *
+ * This is the path every add takes — typing a row, saving a recipe, generating
+ * a meal plan — so it must stay cheap and must not re-decide, re-rank or
+ * re-heading anything the user is not touching.
+ *
+ * Throws if the model call fails — callers decide whether that is fatal.
+ */
+export async function categorizeNewItems(
+  items: PlaceableItem[],
+  itemIds: string[],
+): Promise<PlaceableItem[]> {
+  const wanted = new Set(itemIds);
+  const targets = items.filter((i) => wanted.has(i.id) && isRealItem(i));
+  if (targets.length === 0) return items.map((i) => ({ ...i }));
+
+  const resolved = await resolveCategories(targets.map((i) => String(i.text ?? '')));
+
+  const placements = new Map<string, string>();
+  for (const item of targets) {
+    // An item the model refused to place still has to leave the "not yet
+    // sorted" pile, or the client asks about it again on every render.
+    placements.set(item.id, resolved.get(String(item.text ?? '')) ?? FALLBACK_SECTION);
+  }
+
+  return placeItems(items, placements);
+}
 
 /**
  * Sorts `sourceItems` into supermarket sections and returns a fresh, fully
@@ -59,121 +208,63 @@ export const isBlankItem = (i: any) => !i?.isSection && String(i?.text ?? '').tr
  * alphabetical, anything the model dropped under a trailing "Other", and the
  * blank placeholders last so they stay outside every section.
  *
- * Previously categorized items come back from `itemCategoryCache` for free;
- * only genuinely new text reaches the model. Existing item objects are carried
- * through untouched apart from `listOrder`, so quantities, `mealId` and
- * override fields all survive.
+ * This is the "Sort by Category" button — it re-decides the whole list. Adding
+ * an item goes through `categorizeNewItems` instead.
+ *
+ * Existing item objects are carried through untouched apart from `listOrder`
+ * and `section`, so quantities, `mealId` and override fields all survive.
  *
  * Throws if the model call fails — callers decide whether that is fatal.
  */
 export async function categorizeItems(
-  sourceItems: any[],
-  blankItems: any[] = [],
-): Promise<any[]> {
-  if (sourceItems.length === 0) return [...blankItems];
+  sourceItems: PlaceableItem[],
+  blankItems: PlaceableItem[] = [],
+): Promise<PlaceableItem[]> {
+  if (sourceItems.length === 0) return blankItems.map((i) => ({ ...i }));
 
-  // Lookup from item text back to the original objects. A list can legitimately
-  // hold the same text twice (two meals both needing onions), so each key holds
-  // a queue that is drained as the categorized names are matched back up.
-  const itemMap = new Map<string, any[]>();
+  const resolved = await resolveCategories(sourceItems.map((i) => String(i.text ?? '')));
+
+  // A list can legitimately hold the same text twice (two meals both needing
+  // onions), so group by section rather than by text and keep every object.
+  const bySection = new Map<string, PlaceableItem[]>();
   for (const item of sourceItems) {
-    const key = String(item.text ?? '').toLowerCase();
-    if (!itemMap.has(key)) itemMap.set(key, []);
-    itemMap.get(key)!.push(item);
-  }
-
-  const cacheRef = adminRtdb.ref('itemCategoryCache');
-  const cacheSnap = await cacheRef.once('value');
-  const cache: { [key: string]: string } = cacheSnap.val() || {};
-
-  const itemsForAI: string[] = [];
-  const allCategorizedItems = new Map<string, string[]>();
-
-  for (const item of sourceItems) {
-    const cachedCategory = cache[normalizeItemText(String(item.text ?? ''))];
-    if (cachedCategory) {
-      if (!allCategorizedItems.has(cachedCategory)) allCategorizedItems.set(cachedCategory, []);
-      allCategorizedItems.get(cachedCategory)!.push(item.text);
-    } else {
-      itemsForAI.push(item.text);
-    }
-  }
-
-  if (itemsForAI.length > 0) {
-    const parsed: { sections: { name: string; items: string[] }[] } = await completeJson({
-      model: models.categorize,
-      system: categorizeSystemPrompt,
-      user: `Sort these items:\n${JSON.stringify(itemsForAI)}`,
-      schema: categorizationSchema,
-      effort: 'low',
-    });
-
-    const cacheUpdates: { [key: string]: string } = {};
-
-    for (const sec of parsed.sections) {
-      if (!Array.isArray(sec.items) || sec.items.length === 0) continue;
-      if (!allCategorizedItems.has(sec.name)) allCategorizedItems.set(sec.name, []);
-      const existingItems = allCategorizedItems.get(sec.name)!;
-
-      for (const itemText of sec.items) {
-        existingItems.push(itemText);
-        cacheUpdates[normalizeItemText(itemText)] = sec.name;
-      }
-    }
-    if (Object.keys(cacheUpdates).length > 0) {
-      await cacheRef.update(cacheUpdates);
-    }
+    const section = resolved.get(String(item.text ?? '')) ?? FALLBACK_SECTION;
+    if (!bySection.has(section)) bySection.set(section, []);
+    bySection.get(section)!.push(item);
   }
 
   let rank = LexoRank.middle();
-  const newItems: any[] = [];
+  const nextRank = () => {
+    const value = rank.toString();
+    rank = rank.genNext();
+    return value;
+  };
 
-  for (const categoryName of Array.from(allCategorizedItems.keys()).sort()) {
-    const itemsInSection = allCategorizedItems.get(categoryName)!;
+  // "Other" is not an aisle; it is where the unplaceable ends up, so it goes
+  // last rather than alphabetically between Meat and Pantry.
+  const names = [...bySection.keys()]
+    .filter((name) => name !== FALLBACK_SECTION)
+    .sort(compareSections);
+  if (bySection.has(FALLBACK_SECTION)) names.push(FALLBACK_SECTION);
 
+  const newItems: PlaceableItem[] = [];
+  for (const name of names) {
     newItems.push({
       id: uuid(),
-      text: categoryName,
+      text: name,
       checked: false,
       isSection: true,
-      listOrder: rank.toString(),
+      listOrder: nextRank(),
     });
-    rank = rank.genNext();
-
-    for (const text of itemsInSection) {
-      const matchingItems = itemMap.get(text.toLowerCase());
-      if (matchingItems && matchingItems.length > 0) {
-        newItems.push({ ...matchingItems.shift(), listOrder: rank.toString() });
-        rank = rank.genNext();
-      } else {
-        console.warn(`Categorized item "${text}" could not be found in the original item map.`);
-      }
-    }
-  }
-
-  // Items the model renamed or skipped never matched the map above; they must
-  // not vanish from the user's list, so append them under an "Other" section.
-  const leftovers: any[] = [];
-  for (const remaining of itemMap.values()) leftovers.push(...remaining);
-  if (leftovers.length > 0) {
-    newItems.push({
-      id: uuid(),
-      text: 'Other',
-      checked: false,
-      isSection: true,
-      listOrder: rank.toString(),
-    });
-    rank = rank.genNext();
-    for (const item of leftovers) {
-      newItems.push({ ...item, listOrder: rank.toString() });
-      rank = rank.genNext();
+    for (const item of bySection.get(name)!) {
+      newItems.push({ ...item, listOrder: nextRank(), section: name });
     }
   }
 
   // Blank placeholder rows go back on the end, outside any section.
   for (const item of blankItems) {
-    newItems.push({ ...item, listOrder: rank.toString() });
-    rank = rank.genNext();
+    const { section, ...rest } = item;
+    newItems.push({ ...rest, listOrder: nextRank() });
   }
 
   return newItems;
