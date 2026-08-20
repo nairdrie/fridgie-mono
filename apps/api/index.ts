@@ -9,7 +9,9 @@ import type { DataSnapshot } from 'firebase-admin/database'
 
 // 1️⃣ Hono app for HTTP routes
 const app = new Hono()
-app.use('/api/*', cors())
+// `X-List-Rev` carries the revision a categorize write committed at; a browser
+// build cannot read a custom response header unless it is exposed here.
+app.use('/api/*', cors({ origin: '*', exposeHeaders: ['X-List-Rev'] }))
 
 // Utility: filepath → Hono route (`api/foo/[id].ts` → `/foo/:id`)
 function toRoute(file: string) {

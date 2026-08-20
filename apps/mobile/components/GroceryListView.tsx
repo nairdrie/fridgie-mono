@@ -15,6 +15,7 @@ import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { forwardRef, useCallback, useMemo, useState } from 'react';
 import {
+    Keyboard,
     Pressable,
     StyleSheet,
     Text,
@@ -42,7 +43,6 @@ interface GroceryListViewProps {
   markDirty: () => void;
   sort?: List['sort'];
   setSort: (sort: List['sort']) => void;
-  onCategorize: () => Promise<void>;
 }
 
 const GroceryListView = forwardRef<any, GroceryListViewProps>(({
@@ -55,7 +55,6 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
     markDirty,
     sort = 'custom',
     setSort,
-    onCategorize
 }, ref) => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [selectedItem, setSelectedItem] = useState<AggregatedItem | null>(null);
@@ -124,8 +123,13 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
 
     // Renaming an aggregated row renames every source item (including meal
     // ingredients) so the group stays together instead of splitting mid-keystroke.
+    //
+    // The aisle on file was decided from the old text, so it goes with it — the
+    // list re-files the row once the edit settles.
     const updateAggregatedText = (aggItem: AggregatedItem, text: string) => {
-        setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id) ? { ...item, text } : item));
+        setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id)
+            ? { ...item, text, section: undefined }
+            : item));
         markDirty();
     };
 
@@ -135,9 +139,21 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         markDirty();
     };
 
+    /** An empty row already waiting for text, if the list has one. */
+    const findBlankRow = () => items.find(i => !i.isSection && !i.mealId && (i.text ?? '').trim() === '');
+
     const addItemAfter = (currentItem?: AggregatedItem | Item) => {
+        // Asked for a row on the end: if one is already sitting there empty,
+        // that IS the row. Without this every tap on the space below the list
+        // stacked up another unlabelled checkbox. Inserting after a specific row
+        // is a different request and still gets its own row.
         if (!currentItem) {
-            const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false };
+            const blank = findBlankRow();
+            if (blank) {
+                setEditingId(blank.id);
+                return;
+            }
+            const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: false };
             setItems(prev => [...prev, newItem]);
             setEditingId(newItem.id);
             markDirty();
@@ -156,6 +172,17 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         setItems(prev => [...prev, newItem]);
         setEditingId(newItem.id);
         markDirty();
+    };
+
+    // Return on a row with nothing in it is the user finishing, not asking for
+    // one more empty row. The empty one they are on gets cleaned up too.
+    const submitRow = (currentItem: AggregatedItem | Item) => {
+        if (!currentItem.isSection && (currentItem.text ?? '').trim() === '') {
+            setEditingId('');
+            Keyboard.dismiss();
+            return;
+        }
+        addItemAfter(currentItem);
     };
 
     const deleteItem = (aggItem: AggregatedItem) => {
@@ -193,7 +220,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 prev.map(i => {
                     if (!aggItem.sourceIds.includes(i.id)) return i;
                     // Text applies to every source; a typed-in quantity only to the base.
-                    const updated = { ...i, text: newText };
+                    const updated = { ...i, text: newText, section: undefined };
                     if (i.id === baseItemId && quantity) updated.quantity = quantity;
                     return updated;
                 })
@@ -357,7 +384,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                         onChangeText={text => updateSectionText(item.id, text)}
                         onFocus={() => setEditingId(item.id)}
                         onBlur={() => setEditingId('')}
-                        onSubmitEditing={() => addItemAfter(item)}
+                        onSubmitEditing={() => submitRow(item)}
                         onKeyPress={({ nativeEvent }) => {
                             if (nativeEvent.key === 'Backspace' && item.text === '') {
                                 const currentIndex = aggregatedItems.findIndex(i => i.id === item.id);
@@ -421,7 +448,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 <TextInput
                     ref={assignRef(baseItemId)} value={aggItem.text} style={[styles.editInput, aggItem.checked && styles.checked]}
                     onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => setEditingId(baseItemId)}
-                    onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => addItemAfter(aggItem)}
+                    onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => submitRow(aggItem)}
                     onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && aggItem.text === '') { deleteItem(aggItem); } }}
                     returnKeyType="next" blurOnSubmit={false}
                 />
@@ -437,7 +464,7 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
 
     return (
         <View style={{ flex: 1 }}>
-            { aggregatedItems.length == 0 &&
+            { aggregatedItems.length === 0 ? (
                 <View style={styles.emptyMealsContainer}>
                     <Text style={styles.emptyMealsText}>Your list is empty</Text>
                     <TouchableOpacity
@@ -446,15 +473,29 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                         <Text style={styles.addMealText}>+ Add Item</Text>
                     </TouchableOpacity>
                 </View>
-            }
-            <DraggableFlatList
-                ref={ref}
-                data={aggregatedItems} onDragEnd={({ data }) => reRankItems(data)}
-                keyExtractor={item => item.id} renderItem={renderItem as any}
-                keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
-                initialNumToRender={20} maxToRenderPerBatch={10} windowSize={10}
-                contentContainerStyle={{ paddingBottom: 80 }}
-            />
+            ) : (
+                <DraggableFlatList
+                    ref={ref}
+                    data={aggregatedItems} onDragEnd={({ data }) => reRankItems(data)}
+                    keyExtractor={item => item.id} renderItem={renderItem as any}
+                    keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
+                    initialNumToRender={20} maxToRenderPerBatch={10} windowSize={10}
+                    style={styles.list}
+                    contentContainerStyle={styles.listContent}
+                    // The blank space under the last row is still the list, and
+                    // tapping it is how you say "another one". addItemAfter
+                    // hands back the empty row already sitting there rather than
+                    // adding a second, so this survives being tapped repeatedly.
+                    ListFooterComponent={
+                        <Pressable
+                            style={styles.tapToAdd}
+                            onPress={() => addItemAfter()}
+                            accessibilityRole="button"
+                            accessibilityLabel="Add item"
+                        />
+                    }
+                />
+            )}
             <QuantityEditorModal
                 isVisible={isModalVisible} item={selectedItem}
                 onSave={handleSaveQuantity} onClose={closeQuantityEditor}
@@ -468,6 +509,11 @@ GroceryListView.displayName = 'GroceryListView';
 export default GroceryListView;
 
 const styles = StyleSheet.create({
+    list: { flex: 1 },
+    listContent: { flexGrow: 1, paddingBottom: 80 },
+    // Grows to whatever is left below the last row, with enough of a floor that
+    // a full list still has somewhere to tap.
+    tapToAdd: { flexGrow: 1, minHeight: 120 },
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, minHeight: 36 },
     dragHandle: { paddingHorizontal: 15, paddingVertical: 5 },
     dragIcon: { fontSize: 18, color: '#ccc' },

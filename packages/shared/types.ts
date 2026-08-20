@@ -31,6 +31,15 @@ export type Item = {
    * ignored. Stored opaquely; the server never interprets it.
    */
   overrideBase?: string;
+  /**
+   * The aisle this item has been filed under, stamped by the server when it
+   * categorizes. Its absence is what marks a row as still needing a department,
+   * which is how auto-categorization survives an app restart and a second
+   * device: position alone cannot tell a newly appended row from one that
+   * genuinely belongs to the last section. Cleared by the client whenever the
+   * text changes, so a renamed item is re-filed.
+   */
+  section?: string;
 };
 
 /** Item as it crosses the wire: open/extensible, unknown keys preserved. */
