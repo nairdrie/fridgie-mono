@@ -136,6 +136,13 @@ export default function MealPlanView({
       <FlatList
         data={sortedMeals}
         keyExtractor={(item) => item.id}
+        // A ScrollView left on the default 'never' captures the first tap
+        // anywhere outside a focused input, spends it on dismissing the
+        // keyboard, and never passes it to the child. An ingredient's ✕ only
+        // exists while that ingredient's input is focused, so every press on it
+        // was being eaten here before it reached the button. 'handled' still
+        // dismisses the keyboard for taps no child claims.
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item: meal }) => (
           <MealCard
             meal={meal}

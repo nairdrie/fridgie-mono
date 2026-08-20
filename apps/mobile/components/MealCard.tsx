@@ -148,19 +148,17 @@ function MealCard({
         const index = ingredients.findIndex(i => i.id === id);
         if (index === -1) return;
         delete inputRefs.current[id];
-        
-    setAllItems(prev => prev.filter(item => item.id !== id));
-    markDirty();
 
-        if (isKeyboardVisible) {
-  const nextFocusId = ingredients[Math.max(0, index - 1)]?.id;
-  if (nextFocusId) {
-    setEditingId(nextFocusId);
-  }
-        } else {
-            setEditingId('');
-        }
-};
+        setAllItems(prev => prev.filter(item => item.id !== id));
+        markDirty();
+
+        // Deleting the first ingredient used to clamp to ingredients[0] — the
+        // row being deleted — so editingId pointed at an item that no longer
+        // existed. Nothing could clear it from there, and the list screen's
+        // auto-sort bails out while editingId is set.
+        const prevFocusId = index > 0 ? ingredients[index - 1].id : '';
+        setEditingId(isKeyboardVisible ? prevFocusId : '');
+    };
 
     const handleAddIngredient = (afterIndex: number | undefined) => {
         if(afterIndex === undefined) afterIndex = ingredients.length -1;
@@ -449,6 +447,12 @@ function MealCard({
                         // Require a deliberate movement before a drag takes over
                         // the gesture, rather than the first pixel of travel.
                         activationDistance={16}
+                        // The ingredient row's ✕ is only rendered while that
+                        // row's input has focus, so its every press arrives with
+                        // the keyboard up. On the default ('never') this list
+                        // captures that press to dismiss the keyboard and the
+                        // button never sees it — the delete looked like a no-op.
+                        keyboardShouldPersistTaps="handled"
                         initialNumToRender={15}
                         maxToRenderPerBatch={10}
                         windowSize={10}

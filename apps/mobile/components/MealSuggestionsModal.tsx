@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Keyboard,
     KeyboardAvoidingView,
     Modal,
     Platform,
@@ -16,6 +17,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import uuid from 'react-native-uuid';
 
 import { Item, Meal, MealPreferences, Recipe, SuggestionTurn } from '@/types/types';
@@ -51,6 +53,15 @@ type Bubble =
     | { id: string; role: 'assistant'; kind: 'text'; text: string }
     | { id: string; role: 'assistant'; kind: 'suggestions'; recipes: Recipe[] };
 
+/** The sheet's own bottom padding, before the home indicator is accounted for. */
+const SHEET_BOTTOM_PAD = 12;
+
+/**
+ * What a re-roll says, in the transcript and to the model alike — one string so
+ * the conversation the model is replayed matches the one on screen.
+ */
+const REROLL_ASK = 'None of those — show me three different ones.';
+
 const LOADING_MESSAGES = [
     'Consulting our chefs...',
     'Rummaging through the pantry...',
@@ -76,9 +87,31 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
     const [selectedSuggestions, setSelectedSuggestions] = useState<Record<string, boolean>>({});
     // Titles already shown this session, so a follow-up doesn't repeat them.
     const [vetoedMeals, setVetoedMeals] = useState<string[]>([]);
+    // The terms of the last ask. Sending clears the composer and the chips, so
+    // without this a re-roll would have nothing left to ask again on.
+    const [lastAsk, setLastAsk] = useState<{ query: string; hints: string[] }>({ query: '', hints: [] });
 
     const scrollRef = useRef<ScrollView | null>(null);
     const router = useRouter();
+
+    // The composer sits at the bottom of the screen, where on a modern iPhone
+    // the home indicator and the display's rounded corners both are. Without
+    // the inset it renders into both.
+    const insets = useSafeAreaInsets();
+    // ...but the keyboard covers that area when it's up, and the avoider above
+    // already lifts the sheet clear of it, so the inset would then just be a gap.
+    const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+    const bottomPad = isKeyboardOpen ? SHEET_BOTTOM_PAD : Math.max(insets.bottom, SHEET_BOTTOM_PAD);
+
+    useEffect(() => {
+        // `will` on iOS so the padding moves with the keyboard's own animation
+        // rather than snapping a frame after it has finished.
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const show = Keyboard.addListener(showEvent, () => setIsKeyboardOpen(true));
+        const hide = Keyboard.addListener(hideEvent, () => setIsKeyboardOpen(false));
+        return () => { show.remove(); hide.remove(); };
+    }, []);
 
     const activeNeeds = useMemo(
         () => (prefs?.dietaryNeeds ?? []).filter(n => !disabledNeeds.includes(n)),
@@ -114,6 +147,7 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
         setDislikesOff(false);
         setSelectedSuggestions({});
         setVetoedMeals([]);
+        setLastAsk({ query: '', hints: [] });
         setIsSuggesting(false);
 
         const fetchPreferences = async () => {
@@ -162,30 +196,26 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
             })
             .filter((t): t is SuggestionTurn => t !== null);
 
-    const generate = async () => {
-        if (isSuggesting) return;
-        // The overrides sent below are built from `prefs`. Firing before it has
-        // loaded would send an empty dietaryNeeds — i.e. quietly drop the
-        // constraints — and hand a vegan a beef stew.
-        if (isLoadingPrefs) return;
+    /**
+     * One request, however it was asked for.
+     *
+     * `spoken` is what goes in the transcript; `query`/`hints` are the terms the
+     * model is steered by. They differ for a re-roll, whose ask ("none of
+     * those") is a refinement of the brief rather than the brief itself — so it
+     * travels as `extraTurns` while the original brief still travels as `query`.
+     */
+    const requestSuggestions = async (ask: {
+        spoken: string;
+        query: string;
+        hints: string[];
+        extraTurns?: SuggestionTurn[];
+    }) => {
+        push({ id: uuid.v4() as string, role: 'user', kind: 'text', text: ask.spoken });
 
-        const query = input.trim();
-        const hints = selectedHints;
+        // Read before the push above has committed, which is what keeps the turn
+        // being made now from also arriving as history.
+        const conversation = [...conversationForApi(), ...(ask.extraTurns ?? [])];
 
-        // Echo what was asked for, so the transcript reads as a conversation even
-        // when they just tapped the button with nothing typed.
-        const spoken = [query, hints.length ? hints.join(', ') : ''].filter(Boolean).join(' · ');
-        push({
-            id: uuid.v4() as string,
-            role: 'user',
-            kind: 'text',
-            text: spoken || 'Suggest 3 dinners',
-        });
-
-        const conversation = conversationForApi();
-
-        setInput('');
-        setSelectedHints([]);
         // Deliberately NOT clearing selections: earlier sets stay on screen and
         // stay tickable, so asking for more must not silently drop the dish they
         // already picked.
@@ -196,8 +226,8 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                 vetoedTitles: vetoedMeals,
                 // Always sent, so what the chips show is exactly what applies.
                 overrides: { dietaryNeeds: activeNeeds, dislikedIngredients: activeDislikes },
-                hints,
-                query,
+                hints: ask.hints,
+                query: ask.query,
                 conversation,
             });
 
@@ -215,6 +245,43 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
         } finally {
             setIsSuggesting(false);
         }
+    };
+
+    const generate = async () => {
+        if (isSuggesting) return;
+        // The overrides sent below are built from `prefs`. Firing before it has
+        // loaded would send an empty dietaryNeeds — i.e. quietly drop the
+        // constraints — and hand a vegan a beef stew.
+        if (isLoadingPrefs) return;
+
+        const query = input.trim();
+        const hints = selectedHints;
+
+        setLastAsk({ query, hints });
+        setInput('');
+        setSelectedHints([]);
+
+        // Echo what was asked for, so the transcript reads as a conversation even
+        // when they just tapped the button with nothing typed.
+        const spoken = [query, hints.length ? hints.join(', ') : ''].filter(Boolean).join(' · ');
+        await requestSuggestions({ spoken: spoken || 'Suggest 3 dinners', query, hints });
+    };
+
+    /**
+     * Three more, on the same brief. The query and hints of the last ask go back
+     * unchanged, so the mood, cuisine and typed request still apply; what makes
+     * the next three different is `vetoedMeals`, which by now holds every title
+     * shown this session and reaches the model as "do not repeat or closely
+     * echo". The dietary chips are re-read at send time, as for any other ask.
+     */
+    const reroll = async () => {
+        if (isSuggesting || isLoadingPrefs) return;
+        await requestSuggestions({
+            spoken: REROLL_ASK,
+            query: lastAsk.query,
+            hints: lastAsk.hints,
+            extraTurns: [{ role: 'user', text: REROLL_ASK }],
+        });
     };
 
     const toggleHint = (tag: string) =>
@@ -237,6 +304,16 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
         [transcript],
     );
     const selectedCount = allSuggested.filter(r => selectedSuggestions[r.id]).length;
+
+    // Only the newest set offers a re-roll. Older ones stay on screen and stay
+    // tickable, but re-rolling them is meaningless — a re-roll asks for what
+    // comes next, not for a set from three asks ago to be redone.
+    const lastSuggestionId = useMemo(() => {
+        for (let i = transcript.length - 1; i >= 0; i -= 1) {
+            if (transcript[i].kind === 'suggestions') return transcript[i].id;
+        }
+        return null;
+    }, [transcript]);
 
     const handleAddSelectedMeals = async () => {
         const chosen = allSuggested.filter(r => selectedSuggestions[r.id]);
@@ -292,7 +369,7 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             >
                 <Pressable style={styles.backdrop} onPress={onClose} />
-                <View style={styles.sheet}>
+                <View style={[styles.sheet, { paddingBottom: bottomPad }]}>
                     <View style={styles.header}>
                         <View style={{ width: 28 }} />
                         <Text style={styles.headerTitle}>Suggest Meals</Text>
@@ -372,7 +449,12 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                         style={styles.transcript}
                         contentContainerStyle={styles.transcriptContent}
                         keyboardShouldPersistTaps="handled"
-                        keyboardDismissMode="interactive"
+                        // 'interactive' is iOS dragging the keyboard itself down,
+                        // which needs the scroll view to extend under it. The
+                        // avoider lifts this sheet clear of the keyboard instead,
+                        // so nothing here ever overlaps it and the gesture had
+                        // nothing to grab. 'on-drag' dismisses on the same swipe.
+                        keyboardDismissMode="on-drag"
                         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
                     >
                         {transcript.length === 0 && !isSuggesting && (
@@ -406,6 +488,17 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                                 </TouchableOpacity>
                                             );
                                         })}
+
+                                        {bubble.id === lastSuggestionId && !isSuggesting && (
+                                            <TouchableOpacity
+                                                style={styles.rerollButton}
+                                                onPress={reroll}
+                                                disabled={isLoadingPrefs}
+                                            >
+                                                <Ionicons name="refresh" size={16} color={primary} />
+                                                <Text style={styles.rerollText}>Show 3 different options</Text>
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
                                 );
                             }
@@ -496,7 +589,8 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderTopLeftRadius: 20,
         borderTopRightRadius: 20,
-        paddingBottom: 12,
+        // paddingBottom is set inline — it depends on the home indicator and on
+        // whether the keyboard is currently covering it.
         maxHeight: '92%',
         flexShrink: 1,
     },
@@ -560,6 +654,21 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
     },
     suggestionCardSelected: { borderColor: primary, backgroundColor: '#F4FAF8' },
+    rerollButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        alignSelf: 'flex-start',
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: '#E4E4E7',
+        backgroundColor: '#FAFAFA',
+        marginTop: 2,
+    },
+    rerollText: { color: primary, fontSize: 14, fontWeight: '600' },
     checkbox: {
         width: 22,
         height: 22,

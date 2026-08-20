@@ -209,7 +209,10 @@ export default function AddFromCookbookModal({ isVisible, onClose, listId }: Add
 const styles = StyleSheet.create({
     emptyText: { textAlign: 'center', marginTop: 20, color: '#6c757d' },
     modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-    modalContent: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#f8f9fa', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '70%', minHeight: '45%' },
+    // paddingTop over the uniform 20: the title is the first thing in the
+    // sheet, and 20 put it hard against a 20-radius top edge, so it read as
+    // clipped rather than headed.
+    modalContent: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#f8f9fa', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingTop: 28, maxHeight: '70%', minHeight: '45%' },
     modalTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 8 },
     modalSubtitle: { fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 16 },
     searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e9ecef', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },

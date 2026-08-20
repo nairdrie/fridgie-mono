@@ -150,7 +150,10 @@ export default function AddToMealPlanModal({ isVisible, onClose, recipe }: AddTo
 const styles = StyleSheet.create({
     emptyText: { textAlign: 'center', marginTop: 20, color: '#6c757d' },
     modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-    modalContent: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#f8f9fa', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '60%', minHeight: '40%' },
+    // paddingTop over the uniform 20: the title is the first thing in the
+    // sheet, and 20 put it hard against a 20-radius top edge, so it read as
+    // clipped rather than headed.
+    modalContent: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#f8f9fa', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingTop: 28, maxHeight: '60%', minHeight: '40%' },
     modalTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 8 },
     modalSubtitle: { fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 24 },
     weekItem: { backgroundColor: '#fff', paddingVertical: 16, paddingHorizontal: 20, borderRadius: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, borderWidth: 1, borderColor: '#e9ecef' },
