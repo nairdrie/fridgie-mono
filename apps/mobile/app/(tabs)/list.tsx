@@ -54,6 +54,11 @@ export default function HomeScreen() {
     const [isKeyboardVisible, setKeyboardVisible] = useState(false);
     const inputRefs = useRef<Record<string, TextInput | null>>({});
 
+    // True from the moment a different week is selected until that week's first
+    // snapshot lands. Distinct from the context's `isLoading`, which covers
+    // fetching the set of weeks, not the contents of one.
+    const [isListLoading, setIsListLoading] = useState(true);
+
     const [isSuggestionModalVisible, setSuggestionModalVisible] = useState(false);
     const [isCookbookModalVisible, setCookbookModalVisible] = useState(false);
 
@@ -173,6 +178,7 @@ export default function HomeScreen() {
     const applyRemoteList = (list: List) => {
         applyingRemoteRef.current = true;
         hasLoadedRef.current = true;
+        setIsListLoading(false);
         if (typeof list.rev === 'number') revRef.current = list.rev;
 
         const rawItems = Array.isArray(list.items) ? list.items : [];
@@ -204,23 +210,48 @@ export default function HomeScreen() {
         if (!selectedList?.id || !selectedGroup?.id) {
             setItems([]);
             setMeals([]);
+            setIsListLoading(false);
             return;
         }
         hasLoadedRef.current = false;
         revRef.current = undefined;
+        // Nothing on screen belongs to the week we are switching to. Holding on
+        // to the previous list's items and meals until a snapshot arrives shows
+        // one week's food under another week's heading, which reads as real
+        // rather than as still loading.
+        setItems([]);
+        setMeals([]);
+        setIsListLoading(true);
         // These track ids on the list being left behind; the snapshot for the
         // new one decides its own state.
         sortedItemIdsRef.current = new Set();
         sortFailedIdsRef.current = new Set();
 
-        let unsubscribe: () => void;
+        // listenToList fetches an auth token before it opens the socket, so the
+        // unsubscribe it hands back can arrive AFTER this effect has been torn
+        // down. Waiting on the variable alone meant a week switched during that
+        // window left the old socket open forever, and its snapshot landed on
+        // top of the new week. The flag closes over the teardown instead.
+        let cancelled = false;
+        let unsubscribe: (() => void) | undefined;
         const setupListener = async () => {
             try {
-                unsubscribe = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
-                    if (!list) return;
+                const stop = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
+                    if (!list || cancelled) return;
 
-                    // Our own write echoing back — never re-apply it.
-                    if (list.lastClientId === CLIENT_ID) {
+                    // The first snapshot for a list is its load, not an update
+                    // to something we already hold, so it applies no matter who
+                    // wrote it last. Both guards below are about updates.
+                    const isInitialLoad = !hasLoadedRef.current;
+
+                    // Our own write echoing back — never re-apply it. Once
+                    // loaded, that is: `lastClientId` is stored ON the list
+                    // document, so the first snapshot of a list this session
+                    // wrote to earlier still carries our id. Hard-ignoring that
+                    // one left the previous week on screen and, with
+                    // hasLoadedRef never set, silently disabled saving for the
+                    // week the user was actually looking at.
+                    if (!isInitialLoad && list.lastClientId === CLIENT_ID) {
                         if (typeof list.rev === 'number') revRef.current = list.rev;
                         return;
                     }
@@ -234,17 +265,23 @@ export default function HomeScreen() {
                     // Another client's edit, while we're mid-keystroke: defer.
                     // Our next save sends the older rev, so the server 409s it
                     // and we rebase rather than overwriting their change.
-                    if (!serverInitiated && Date.now() < dirtyUntilRef.current) return;
+                    if (!isInitialLoad && !serverInitiated && Date.now() < dirtyUntilRef.current) return;
 
                     applyRemoteList(list);
                 });
+                if (cancelled) {
+                    stop();
+                    return;
+                }
+                unsubscribe = stop;
             } catch (error) {
                 console.error("Failed to set up list listener:", error);
             }
         };
         setupListener();
         return () => {
-            if (unsubscribe) unsubscribe();
+            cancelled = true;
+            unsubscribe?.();
         };
         // Depend on stable IDs: presence updates re-create the group object and
         // would otherwise tear the socket down on every status change.
@@ -728,7 +765,7 @@ export default function HomeScreen() {
         }));
     }, [meals, cookbookRecipeIds]);
 
-    if (isLoading) {
+    if (isLoading || (selectedList && isListLoading)) {
         return <View style={styles.container}><ActivityIndicator /></View>;
     }
 
