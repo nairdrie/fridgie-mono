@@ -37,6 +37,17 @@ COPY . .
 
 # copy production dependencies and source code into final image
 FROM base AS release
+
+# ffmpeg samples still frames out of a TikTok video for the recipe importer.
+# Recipe videos put their quantities in on-screen text while the audio says
+# "add a bit of this", so the frames are where the numbers actually are — see
+# apps/api/utils/tiktok.ts. Installed before the USER switch below, since apt
+# needs root. Costs roughly 250MB of image; the importer degrades to
+# caption-and-transcript rather than failing if it is ever dropped.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=install /temp/prod/node_modules ./apps/api/node_modules
 COPY --from=install /temp/shared/node_modules ./packages/shared/node_modules
 COPY --from=prerelease /usr/src/app/apps/api/package.json ./apps/api/

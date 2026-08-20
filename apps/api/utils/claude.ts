@@ -34,6 +34,11 @@ export const models = {
    *  the hardest of the four — Sonnet 5 has the same high-resolution vision
    *  tier as Opus. Raise to claude-opus-5 if transcription disappoints. */
   recipePhoto: 'claude-sonnet-5',
+  /** Reading a cooking video: sampled frames plus a caption and an ASR
+   *  transcript. Vision again rather than extraction — the quantities are in
+   *  the on-screen text, not the speech — so it tracks the photo route's tier
+   *  rather than the URL importer's. */
+  recipeVideo: 'claude-sonnet-5',
   /** Creative work under real constraints (diet, protein slots, vetoes). The
    *  most quality-sensitive route, and the first to raise if output slips. */
   mealSuggest: 'claude-sonnet-5',

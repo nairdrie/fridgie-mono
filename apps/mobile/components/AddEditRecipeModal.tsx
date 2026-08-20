@@ -140,15 +140,28 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       setCreationMode('manual');
     } catch (error: any) {
       console.error("Failed to import recipe", error);
-      // The URL importer now distinguishes "that page has no recipe" from
-      // "the import broke", the same way the photo importer does.
-      const notARecipe = typeof error?.message === 'string' && error.message.includes('RECIPE_NOT_FOUND');
-      Alert.alert(
-        notARecipe ? 'No recipe found' : 'Import failed',
-        notARecipe
-          ? "That page doesn't seem to have a recipe on it. Try a different link."
-          : "Couldn't get the recipe from that URL. Please try a different link."
-      );
+      // The importer names its failures now, and they want different advice:
+      // a page with no recipe on it is the user's link to fix, a video we
+      // couldn't open is not.
+      const code = typeof error?.message === 'string' ? error.message : '';
+      const [title, body] =
+        code.includes('RECIPE_NOT_FOUND')
+          ? ['No recipe found', "That page doesn't seem to have a recipe on it. Try a different link."]
+        : code.includes('VIDEO_UNAVAILABLE')
+          ? ["Couldn't read that video", 'It may be private, deleted, or unavailable in your region.']
+        : code.includes('FETCH_FAILED')
+          ? ["Couldn't open that link", "The site didn't respond. Check the link, or try again in a moment."]
+        : code.includes('NO_CONTENT')
+          ? ['Nothing to read there', "That page didn't have any recipe text on it. Try the recipe's own page."]
+        : ['Import failed', "Couldn't get the recipe from that URL. Please try a different link."];
+
+      // A screenshot always works, and on a cooking video it is the *best*
+      // input we have — the ingredient overlay a video puts on screen is
+      // exactly what the photo importer is good at reading.
+      Alert.alert(title, body, [
+        { text: 'Back', style: 'cancel' },
+        { text: 'Use a screenshot', onPress: () => setCreationMode('photo') },
+      ]);
     } finally {
       setIsImporting(false);
     }
