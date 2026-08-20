@@ -152,10 +152,16 @@ export default function LoginScreen() {
       if (err.code === 'auth/credential-already-in-use') {
         setPendingCredential(credential);
         setShowConflictModal(true);
-      } else if (err.code === 'auth/operation-not-allowed') {
-        // The provider is off in the Firebase console, or the build's bundle id
-        // isn't an audience it accepts. Nothing the user can do about either, so
-        // don't send them round the loop retrying. See docs/auth-provider-setup.md.
+      } else if (
+        err.code === 'auth/operation-not-allowed' ||
+        err.code === 'auth/invalid-credential'
+      ) {
+        // The provider is off in the Firebase console, or the token's audience
+        // isn't one this project accepts — a bundle id or OAuth client id that
+        // Firebase doesn't recognise. Nothing the user can do about either, so
+        // don't send them round the loop retrying, and keep the raw Identity
+        // Toolkit wording in the log where it's useful rather than on the screen.
+        // See docs/auth-provider-setup.md.
         console.error("Provider not configured in Firebase:", err);
         setError("This sign-in method isn't available right now. Please try another way to sign in.");
       } else {
