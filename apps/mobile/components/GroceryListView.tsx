@@ -512,6 +512,15 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     // and throws. Scrolling a new row into view is a nicety;
                     // losing the screen over it is not a trade worth making.
                     onScrollToIndexFailed={() => {}}
+                    // `style` reaches the FlatList, which DraggableFlatList
+                    // renders inside a view of its own — and that view is styled
+                    // ONLY by containerStyle. Left unstyled it takes its height
+                    // from its children, and a flex:1 child of a container with
+                    // no height of its own resolves to nothing to fill: both
+                    // measure zero and the list renders as blank white space.
+                    // (Web flexbox falls back to content height here; Yoga does
+                    // not, so this looks fine everywhere except on a device.)
+                    containerStyle={styles.list}
                     style={styles.list}
                     contentContainerStyle={styles.listContent}
                     // The blank space under the last row is still the list, and
