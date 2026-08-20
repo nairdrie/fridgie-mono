@@ -13,7 +13,7 @@ import { nextListRank, safeParseRank } from '@/utils/rank';
 import { primary } from '@/utils/styles';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
-import React, { forwardRef, useCallback, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
     Keyboard,
     Pressable,
@@ -32,6 +32,12 @@ type AggregatedItem = Item & {
  totalQuantity: string;
 };
 
+/** What the screen can ask of the list, via its ref. */
+export interface GroceryListHandle {
+  /** Bring the row holding `itemId` into view, if it is on screen at all. */
+  scrollToItemId: (itemId: string) => void;
+}
+
 // --- COMPONENT PROPS ---
 interface GroceryListViewProps {
   items: Item[];
@@ -45,7 +51,7 @@ interface GroceryListViewProps {
   setSort: (sort: List['sort']) => void;
 }
 
-const GroceryListView = forwardRef<any, GroceryListViewProps>(({
+const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     items,
     setItems,
     editingId,
@@ -68,7 +74,10 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 sections.push(item);
                 continue;
             }
-            const key = item.text.trim().toLowerCase() || `__blank-${item.id}__`;
+            // `?? ''` rather than `.trim()` on the raw field: a row that reached
+            // us without text is a rendering bug at worst, but reading through
+            // undefined here throws mid-render and takes the whole screen with it.
+            const key = (item.text ?? '').trim().toLowerCase() || `__blank-${item.id}__`;
             if (!itemMap.has(key)) {
                 itemMap.set(key, []);
             }
@@ -108,9 +117,27 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
         }
 
         const combined = [...result, ...sections];
-        combined.sort((a, b) => a.listOrder.localeCompare(b.listOrder));
+        combined.sort((a, b) => (a.listOrder ?? '').localeCompare(b.listOrder ?? ''));
         return combined;
     }, [items]);
+
+    // The FlatList is unmounted whenever the list is empty, so this is null as
+    // often as it is set — every use goes through scrollToItemId below.
+    const flatListRef = useRef<any>(null);
+
+    useImperativeHandle(ref, () => ({
+        scrollToItemId: (itemId: string) => {
+            // Rows are aggregates, not items: one row can stand for several
+            // item ids, and identical texts collapse into one. Look the id up
+            // through that mapping instead of assuming the two arrays line up —
+            // scrollToIndex throws on an out-of-range index, and an exception
+            // here blanks the screen.
+            const index = aggregatedItems.findIndex(row =>
+                'sourceIds' in row ? (row as AggregatedItem).sourceIds.includes(itemId) : row.id === itemId);
+            if (index < 0 || index >= aggregatedItems.length) return;
+            flatListRef.current?.scrollToIndex?.({ index, animated: true, viewPosition: 0.5 });
+        },
+    }), [aggregatedItems]);
 
     const assignRef = useCallback((id: string) => (ref: TextInput | null) => {
         inputRefs.current[id] = ref;
@@ -475,11 +502,16 @@ const GroceryListView = forwardRef<any, GroceryListViewProps>(({
                 </View>
             ) : (
                 <DraggableFlatList
-                    ref={ref}
+                    ref={flatListRef}
                     data={aggregatedItems} onDragEnd={({ data }) => reRankItems(data)}
                     keyExtractor={item => item.id} renderItem={renderItem as any}
                     keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
                     initialNumToRender={20} maxToRenderPerBatch={10} windowSize={10}
+                    // A row added a moment ago has not been measured yet, and
+                    // without this scrollToIndex treats that as unrecoverable
+                    // and throws. Scrolling a new row into view is a nicety;
+                    // losing the screen over it is not a trade worth making.
+                    onScrollToIndexFailed={() => {}}
                     style={styles.list}
                     contentContainerStyle={styles.listContent}
                     // The blank space under the last row is still the list, and

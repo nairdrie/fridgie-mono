@@ -22,9 +22,17 @@ export function nextListRank(items: Item[]): LexoRank {
 /**
  * Repairs items whose listOrder is missing or unparseable, preserving each
  * item's position — the same algorithm the server applies on write.
- * Returns the same array reference when nothing needed repair.
+ *
+ * Takes `unknown` because this is also the first thing a websocket payload
+ * meets. RTDB hands back a stored array as a keyed object once it has a hole in
+ * it, and the shared sanitizer already knows how to read that shape; the caller
+ * checking `Array.isArray` first would throw the whole list away instead.
+ *
+ * Always returns an array — the same reference when the input was one and
+ * nothing needed repair, so callers can still compare.
  */
-export function sanitizeListOrders(items: Item[]): Item[] {
+export function sanitizeListOrders(items: unknown): Item[] {
   const { items: repaired, changed } = sanitizeItems(items);
-  return changed ? (repaired as unknown as Item[]) : items;
+  if (!changed && Array.isArray(items)) return items as Item[];
+  return repaired as unknown as Item[];
 }
