@@ -93,7 +93,13 @@ route.post('/', groupAuth, async (c) => {
         //
         // Best-effort — a model outage must not fail an otherwise-good add, it
         // just leaves the list unsorted until the next sort.
-        if (result.list?.sort === 'category') {
+        //
+        // An absent `sort` means the list has never been given one, not that it
+        // was set to something else — a list is created without the key and the
+        // client reads it as 'category' (its default). Requiring the key to be
+        // present meant a meal added to a brand new list, the one case where the
+        // whole list is the recipe's ingredients, was the one case left unsorted.
+        if ((result.list?.sort ?? 'category') === 'category') {
             try {
                 const committed: Item[] = Array.isArray(result.list.items) ? result.list.items : []
                 const sorted = await categorizeItems(

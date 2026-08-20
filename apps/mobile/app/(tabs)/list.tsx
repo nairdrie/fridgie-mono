@@ -92,6 +92,10 @@ export default function HomeScreen() {
         fabAnimation.value = withTiming(0, { duration: 150 });
         // 2. Sync the React state to ensure consistency.
         setIsFabMenuOpen(false);
+        // 3. The row that was being edited belongs to the view we just left and
+        // has been unmounted. React Native does not fire onBlur for that, so
+        // nothing else would ever clear this.
+        setEditingId('');
     }, [selectedView]);
 
     // Marks a short window in which the user is actively editing. This is no
@@ -153,6 +157,14 @@ export default function HomeScreen() {
 
     const hasText = (i: Item) => !i.isSection && (i.text ?? '').trim() !== '';
 
+    // Only a row that is still on the list can be mid-edit. `editingId` also
+    // holds MEAL ids — handleAddMeal focuses a meal's name field through the
+    // same ref map — and no blur handler on that field ever clears it, so a
+    // bare `if (editingId)` guard latched off for the rest of the session the
+    // first time a meal was added by hand. It can go stale the same way when a
+    // focused input is unmounted, which React Native does not report as a blur.
+    const isEditingListItem = !!editingId && items.some(i => i.id === editingId);
+
     const markSorted = (list: Item[]) => {
         sortedItemIdsRef.current = new Set(list.filter(hasText).map(i => i.id));
         sortFailedIdsRef.current = new Set();
@@ -160,7 +172,6 @@ export default function HomeScreen() {
 
     const applyRemoteList = (list: List) => {
         applyingRemoteRef.current = true;
-        const isFirstSnapshot = !hasLoadedRef.current;
         hasLoadedRef.current = true;
         if (typeof list.rev === 'number') revRef.current = list.rev;
 
@@ -169,12 +180,19 @@ export default function HomeScreen() {
         const withOrder = sanitizeListOrders(rawItems)
             .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
 
-        // Treat the snapshot as already sorted on first load, and whenever it
-        // carries section rows — a categorize result always does. Both cases
-        // matter: the first stops opening an old, hand-ordered list from
-        // instantly reshuffling it, and the second stops another member's sort
-        // (or the server's own sort after a cookbook add) from being redone here.
-        if (isFirstSnapshot || withOrder.some(i => i.isSection)) markSorted(withOrder);
+        // Section rows are the evidence that a snapshot has been categorized —
+        // a categorize result always carries them — and marking those as sorted
+        // is what stops another member's sort (or the server's own sort after a
+        // cookbook add) from being redone here.
+        //
+        // A first snapshot is NOT evidence of anything on its own. Treating one
+        // as already sorted wrote off every list that had never been
+        // categorized: ingredients added to an empty list and still uncategorized
+        // when the app was closed came back marked as done, so the auto-sort
+        // effect below never ran for that list again. A list the user really did
+        // order by hand is opted out by `sort: 'custom'`, which the effect
+        // checks first — that, not this, is what protects a hand-ordered list.
+        if (withOrder.some(i => i.isSection)) markSorted(withOrder);
 
         setItems(withOrder.length > 0 ? withOrder : [{ id: uuid.v4() as string, text: '', checked: false, listOrder: LexoRank.middle().toString(), isSection: false }]);
         setMeals(Array.isArray(list.meals) ? list.meals : []);
@@ -190,6 +208,10 @@ export default function HomeScreen() {
         }
         hasLoadedRef.current = false;
         revRef.current = undefined;
+        // These track ids on the list being left behind; the snapshot for the
+        // new one decides its own state.
+        sortedItemIdsRef.current = new Set();
+        sortFailedIdsRef.current = new Set();
 
         let unsubscribe: () => void;
         const setupListener = async () => {
@@ -512,13 +534,13 @@ export default function HomeScreen() {
         if (!hasLoadedRef.current || !selectedGroup || !selectedList?.id) return;
         // Mid-edit, re-sorting would move the row out from under the cursor.
         // The blur that ends editing clears this and re-runs the effect.
-        if (editingId) return;
+        if (isEditingListItem) return;
 
         // Long enough that adding several items in a row costs one sort, not one
         // per item.
         const timer = setTimeout(() => { handleAutoCategorize().catch(console.error); }, 900);
         return () => clearTimeout(timer);
-    }, [unsortedCount, sort, isCategorizing, editingId, items, selectedGroup?.id, selectedList?.id]);
+    }, [unsortedCount, sort, isCategorizing, isEditingListItem, items, selectedGroup?.id, selectedList?.id]);
 
     const handleToggleCookbookById = async (recipeId: string) => {
         const isInCookbook = cookbookRecipeIds.has(recipeId);
