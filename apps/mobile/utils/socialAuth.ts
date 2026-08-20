@@ -10,6 +10,7 @@ import {
   statusCodes,
 } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import {
   AuthCredential,
   FacebookAuthProvider,
@@ -107,20 +108,44 @@ export async function signInWithFacebook(): Promise<AuthCredential | null> {
   return FacebookAuthProvider.credential(token.accessToken);
 }
 
-/** Apple: the system sheet. Returns null if the user dismissed it. */
+/** Hex, so the nonce survives the trip to Apple as a plain ASCII string. */
+const toHex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+/**
+ * Apple: the system sheet. Returns null if the user dismissed it.
+ *
+ * Needs the Apple provider enabled in the Firebase console (Authentication ->
+ * Sign-in method) with `com.nairdrie.fridgie` as an allowed audience; without
+ * that the credential comes back `auth/operation-not-allowed`. See
+ * docs/auth-provider-setup.md.
+ */
 export async function signInWithApple(): Promise<AuthCredential | null> {
+  // The nonce is what stops a stolen identity token being replayed: Apple stamps
+  // the hash we send into the token, and Firebase re-hashes the raw value we
+  // hand it and checks the two agree. Send the hash, keep the raw one.
+  const rawNonce = toHex(Crypto.getRandomBytes(32));
+  const hashedNonce = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    rawNonce
+  );
+
   try {
     const { identityToken } = await AppleAuthentication.signInAsync({
       requestedScopes: [
         AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
         AppleAuthentication.AppleAuthenticationScope.EMAIL,
       ],
+      nonce: hashedNonce,
     });
 
     if (!identityToken) {
       throw new SocialAuthError('Apple did not return an identity token.');
     }
-    return new OAuthProvider('apple.com').credential({ idToken: identityToken });
+    return new OAuthProvider('apple.com').credential({
+      idToken: identityToken,
+      rawNonce,
+    });
   } catch (err: any) {
     if (err?.code === 'ERR_REQUEST_CANCELED') return null;
     throw err;
