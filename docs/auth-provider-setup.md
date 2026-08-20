@@ -30,12 +30,19 @@ is the server side agreeing to honour it.
 
 This toggle alone clears `auth/operation-not-allowed`.
 
-The **Services ID** and the **OAuth code flow** fields (Apple Team ID, Key ID,
-private key `.p8`) on that same screen are for the web redirect flow, which we do
-not use — the app only ever signs in through the native sheet. Fill them in
-anyway when you get to the App Store: Apple requires an app offering Sign in with
-Apple to also delete accounts and revoke the token, and Firebase can only revoke
-with the OAuth code flow configured.
+Leave the rest of that screen alone. All of it serves the **web** redirect flow,
+which we do not use — the app only ever signs in through the native sheet:
+
+- **Services ID** — the console labels it "not required for Apple" itself.
+- **OAuth code flow configuration (optional)** — Apple Team ID, Key ID, private
+  key `.p8`. Fill these in before App Store submission, though: Apple requires an
+  app offering Sign in with Apple to also delete accounts and revoke the token,
+  and Firebase can only revoke with the code flow configured.
+- **The authorisation callback URL** — `https://grocerease-5abbb.firebaseapp.com/__auth/handler`.
+  The screen says "to complete setup, add this to your app configuration in the
+  Apple Developer console", which reads as mandatory and is not. It is the
+  redirect Apple sends a *browser* back to. Adding it, and the domain
+  verification it leads to, achieves nothing for a native sign-in.
 
 **3. Make `com.nairdrie.fridgie` an accepted audience.**
 
