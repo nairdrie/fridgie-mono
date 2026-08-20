@@ -1,7 +1,7 @@
 // ListScreen.tsx
 
 import AddEditRecipeModal from '@/components/AddEditRecipeModal';
-import GroceryListView from '@/components/GroceryListView'; // Import the new component
+import GroceryListView, { type GroceryListHandle } from '@/components/GroceryListView'; // Import the new component
 import MealPlanView from '@/components/MealPlanView';
 import AddFromCookbookModal from '@/components/AddFromCookbookModal';
 import MealSuggestionsModal from '@/components/MealSuggestionsModal';
@@ -36,6 +36,14 @@ import { addUserCookbookRecipe, categorizeList, CLIENT_ID, getUserCookbook, list
 import { cancelMealRatingReminder, scheduleMealRatingReminder } from '../../utils/mealReminders';
 import { parseWeekStart } from '../../utils/date';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
+
+// RTDB stores a JS array as a keyed object and only hands it back as an array
+// while the keys stay 0..n with no gaps. Reading a stored list as "array or
+// nothing" throws the whole thing away the first time that isn't true, which
+// shows up as a week that has emptied itself.
+function asArray<T>(value: T[] | undefined): T[] {
+    return Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value) : [];
+}
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -83,7 +91,7 @@ export default function HomeScreen() {
 
     const [isFocused, setIsFocused] = useState(false);
 
-    const listRef = useRef<any>(null); 
+    const listRef = useRef<GroceryListHandle | null>(null);
     
     // --- Start of new/moved code ---
     const [isSortModalVisible, setIsSortModalVisible] = useState(false);
@@ -123,6 +131,12 @@ export default function HomeScreen() {
     // Last rev we have seen for the selected list, sent with every save so the
     // server can reject writes built on a stale snapshot.
     const revRef = useRef<number | undefined>(undefined);
+
+    // The list on screen right now, readable from an async callback that closed
+    // over an older one. Requests in flight when the week changes answer about
+    // the list they were asked about, not the one being looked at.
+    const selectedListIdRef = useRef<string | undefined>(undefined);
+    selectedListIdRef.current = selectedList?.id;
 
     // Animate FAB menu
     useEffect(() => {
@@ -172,22 +186,26 @@ export default function HomeScreen() {
         hasText(i) && !i.section && !sortFailedIdsRef.current.has(i.id);
 
     const applyRemoteList = (list: List) => {
+        if (!list) return;
         applyingRemoteRef.current = true;
         hasLoadedRef.current = true;
         setIsListLoading(false);
         if (typeof list.rev === 'number') revRef.current = list.rev;
 
-        const rawItems = Array.isArray(list.items) ? list.items : [];
-        // Repair missing/invalid LexoRanks (e.g. legacy 'NEEDS-RANK' rows).
-        const withOrder = sanitizeListOrders(rawItems)
-            .sort((a: Item, b: Item) => a.listOrder.localeCompare(b.listOrder));
+        // Repair missing/invalid LexoRanks (e.g. legacy 'NEEDS-RANK' rows), and
+        // read `items` in whichever shape RTDB stored it — an array with a hole
+        // in it comes back as a keyed object, and demanding Array.isArray here
+        // meant showing an empty list rather than the one we were sent.
+        const withOrder = sanitizeListOrders(list.items)
+            .sort((a: Item, b: Item) => (a.listOrder ?? '').localeCompare(b.listOrder ?? ''));
 
         // An empty list is left empty. It used to be given a blank placeholder
         // row, which the grocery view renders as an unlabelled checkbox — one
         // more empty row to clean up, and one the user never asked for. The view
         // has a real empty state and offers to add the first item itself.
         setItems(withOrder);
-        setMeals(Array.isArray(list.meals) ? list.meals : []);
+        // `meals` can come back keyed too, for the same reason.
+        setMeals(asArray(list.meals));
         setSort(list.sort || 'category');
     };
 
@@ -222,7 +240,15 @@ export default function HomeScreen() {
         const setupListener = async () => {
             try {
                 const stop = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
-                    if (!list || cancelled) return;
+                    if (cancelled) return;
+                    // A null snapshot is the server saying there is nothing at
+                    // that path. That is an answer, so stop waiting on one:
+                    // holding the spinner up leaves the screen blank forever
+                    // over a list that is simply not there.
+                    if (!list) {
+                        setIsListLoading(false);
+                        return;
+                    }
 
                     // The first snapshot for a list is its load, not an update
                     // to something we already hold, so it applies no matter who
@@ -291,7 +317,11 @@ export default function HomeScreen() {
                         // instead of overwriting it; without this the last
                         // writer silently wins and the other user's edit is gone.
                         console.warn('List save was stale; rebasing onto rev', err.rev);
-                        applyRemoteList(err.list);
+                        if (err.list) applyRemoteList(err.list);
+                        // Nothing to rebase onto. Keeping the rejected revision
+                        // would make every following save 409 the same way, so
+                        // let the next one through and take the snapshot after.
+                        else revRef.current = undefined;
                         return;
                     }
                     console.error(err);
@@ -316,21 +346,16 @@ export default function HomeScreen() {
         if (!editingId) return;
         requestAnimationFrame(() => focusAtEnd(editingId));
 
-        // --- START OF FIX ---
-    // After focusing, also scroll the item into view
-    const findAndScrollToItem = () => {
-        // Find the index of the item (or its aggregate) in the currently rendered list
-        const index = items.findIndex(i => i.id === editingId);
-
-        // Check if the listRef and index are valid
-        if (listRef.current && index > -1) {
-            listRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-        }
-    };
-
-    // Add a small delay to ensure the keyboard is fully visible before scrolling
-    setTimeout(findAndScrollToItem, 100); 
-    // --- END OF FIX ---
+        // Ask the view to bring the row into sight, rather than computing an
+        // index here. `items` is not what the grocery list renders: identical
+        // texts are merged into one row, so an index into `items` overshoots the
+        // rendered array by one per duplicate — and scrollToIndex past the end
+        // throws, which takes the whole screen down. Only the view knows how its
+        // own rows map back to item ids.
+        //
+        // The delay lets the keyboard finish coming up first.
+        const timer = setTimeout(() => listRef.current?.scrollToItemId?.(editingId), 100);
+        return () => clearTimeout(timer);
     }, [editingId, items]);
 
     useEffect(() => {
@@ -527,6 +552,15 @@ export default function HomeScreen() {
     const applyFiledItems = (filed: Item[]) => {
         setItems(current => {
             const byId = new Map(current.map(i => [i.id, i]));
+
+            // An answer that names rows and matches none of them is not an
+            // answer about this list — it is about a state we have since
+            // replaced, most often because the snapshot for another week landed
+            // while the model was thinking. Merging it keeps only the section
+            // headings it invented and drops every row, which then saves.
+            const namesRows = filed.some(i => !i.isSection);
+            if (namesRows && !filed.some(i => !i.isSection && byId.has(i.id))) return current;
+
             const merged = filed
                 // Section rows are the server's to invent; anything else that is
                 // no longer here was deleted locally and must stay deleted.
@@ -575,9 +609,15 @@ export default function HomeScreen() {
         // passing its own not-yet-applied array instead, which is exactly how a
         // list got sorted without the items that had just been added to it.
         const currentItems = items;
+        // The list this answer will be about. Filing is a model call, so the
+        // user can be on another week by the time it lands, and the merge below
+        // matches on item id: against a different week nothing matches, so every
+        // row of THAT list would be treated as locally deleted.
+        const askedForListId = selectedList.id;
 
         try {
             const { items: newItems, rev } = await categorizeList(selectedGroup.id, selectedList.id, currentItems, itemIds);
+            if (selectedListIdRef.current !== askedForListId) return;
             applyFiledItems(sanitizeListOrders(newItems));
             // This write moved the list on; adopt its revision so the save that
             // follows isn't rejected as stale and rebased over the merge above.
@@ -590,6 +630,7 @@ export default function HomeScreen() {
             if (!itemIds) setEditingId('');
         } catch (err) {
             console.error('Auto-categorization failed', err);
+            if (selectedListIdRef.current !== askedForListId) return;
             // Give up on these particular items until something else changes,
             // so the auto-sort effect doesn't retry them on every render.
             const failed = itemIds ?? currentItems.filter(hasText).map(i => i.id);
@@ -795,7 +836,7 @@ export default function HomeScreen() {
     // --- Start of new/moved code ---
     const reRankAlphabetically = (currentItems: Item[]) => {
         const itemsWithoutSections = currentItems.filter(item => !item.isSection);
-        const sortedAlphabetically = [...itemsWithoutSections].sort((a, b) => a.text.localeCompare(b.text));
+        const sortedAlphabetically = [...itemsWithoutSections].sort((a, b) => (a.text ?? '').localeCompare(b.text ?? ''));
         
         let rank = LexoRank.middle();
         const rankMap = new Map<string, string>();

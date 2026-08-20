@@ -530,6 +530,11 @@ export async function listenToList(
       const authError = new Error("User is not authenticated.");
       console.error(authError);
       onError?.(authError);
+      // Retry rather than give up. Auth is restored asynchronously at startup,
+      // so this branch is usually "not signed in YET" — and a listener that
+      // never connects leaves the screen waiting for a first snapshot that can
+      // no longer arrive.
+      scheduleReconnect();
       return;
     }
 
