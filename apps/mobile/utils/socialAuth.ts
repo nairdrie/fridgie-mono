@@ -20,15 +20,19 @@ import {
 import { Platform } from 'react-native';
 import { AccessToken, LoginManager, Settings } from 'react-native-fbsdk-next';
 
+// These belong to Google Cloud project 598650352064, not to the Firebase project
+// (grocerease-5abbb, project number 725621365755). That is on purpose: the
+// Android OAuth client `com.nairdrie.fridgie` and its signing SHA-1 are
+// registered against lives there too, and that registration is what lets
+// GoogleSignin.signIn() mint a token at all.
+//
 // The client id is what Google stamps into the id token's `aud` claim, and
-// Firebase accepts an audience only when it either belongs to grocerease-5abbb
-// (project number 725621365755) or is listed under the Google provider's
-// "Whitelist client IDs from external projects". The two ids below belong to
-// Google Cloud project 598650352064 and are neither, so Firebase rejects the
-// credential with auth/invalid-credential — "...is not authorized to be used in
-// the project with project_number: 725621365755". The web client that *does*
-// belong to the Firebase project is already in google-services.json. See
-// docs/auth-provider-setup.md.
+// Firebase accepts a foreign audience only when it is listed under the Google
+// provider's "Whitelist client IDs from external projects". Both ids below have
+// to stay in that list. Drop one and sign-in fails with auth/invalid-credential
+// — "...is not authorized to be used in the project with project_number:
+// 725621365755" — which reads like a code regression and isn't one, because the
+// list lives only in the console. See docs/auth-provider-setup.md.
 export const GOOGLE_IOS_CLIENT_ID =
   '598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj.apps.googleusercontent.com';
 export const GOOGLE_WEB_CLIENT_ID =

@@ -90,7 +90,7 @@ id token's `aud` claim, and Firebase accepts an audience only when it is either
   configuration → **Whitelist client IDs from external projects**.
 
 `utils/socialAuth.ts` ships ids owned by Google Cloud project `598650352064`,
-which is neither, so signing in on a real device fails at
+so without the whitelist entry signing in on a real device fails at
 `signInWithCredential`:
 
 ```
@@ -105,33 +105,45 @@ Note *which* id the error names. On Android the token is minted for the **web**
 client — `webClientId`, not the Android client — so that is the audience Firebase
 checks and the one that has to be authorised. On iOS it's `iosClientId`.
 
-### The two ways out
+### What to do
 
-**Whitelist the external ids.** Paste both `598650352064-…` ids into the
-whitelist field above. No code change, and it keeps working with whatever
-`598650352064` already has registered — including the Android OAuth client that
-the debug SHA-1 is signed against, which is what lets `GoogleSignin.signIn()`
-return a token at all today.
+The list needs exactly the two ids `GoogleSignin.configure` is given, and nothing
+else does anything:
 
-**Or move the audience into the Firebase project.** Point `GOOGLE_WEB_CLIENT_ID`
-at `725621365755-vqpeiaprvh5jlcpnlkuum4m7bg7025qb.apps.googleusercontent.com` —
-already in `google-services.json`, already owned by `grocerease-5abbb`. Firebase
-accepts it with nothing whitelisted, but Google will only *mint* against it once
-the app is registered in the same project, so this needs, first:
+```
+598650352064-bjkgnsj14of6fs4f9ggkmi9tlqptuiat.apps.googleusercontent.com   ← webClientId
+598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj.apps.googleusercontent.com   ← iosClientId
+```
 
-- the release **and** debug SHA-1 registered on the Android app in
-  Project settings → Your apps, then a re-downloaded `google-services.json`;
-- an iOS OAuth client for `com.nairdrie.fridgie` in `grocerease-5abbb`, whose
-  reversed id replaces the `iosUrlScheme` in `app.json`.
+Then **Save** — the screen keeps unsaved additions on display, so a list that
+looks right is not yet a list that is right. That is the whole fix: no code
+change, no rebuild, not even an app restart. Both entries are load-bearing and
+exist only in the console, so a project rebuilt from scratch loses them and the
+error returns looking like a regression in the app.
 
-Skip the SHA-1 half and the audience error is simply replaced by
-`DEVELOPER_ERROR` (status code 10) from the Google SDK, before Firebase is ever
-reached.
+**The Android client id does not belong here, and putting it here instead is the
+easy mistake.** It is the id the screen's own "you must provide the SHA-1
+fingerprint for each app" banner points you at, and it is never an audience:
+Android asks Google for a token minted *for the web client*, so the web client is
+what Firebase checks. A whitelist holding the Android id but not the web id fails
+exactly as if it were empty — same `auth/invalid-credential`, same wording, and
+the id it names is the one you didn't add.
 
-The `google-services.json` in the repo is evidence the first step hasn't been
-done: its only `oauth_client` entry is `client_type: 3`, the web client. The
-Gradle plugin emits a `client_type: 1` entry per registered signing certificate,
-so a file with none means no SHA-1 was registered when it was downloaded.
+### Why the clients aren't in the Firebase project
+
+Because the Android OAuth client that `com.nairdrie.fridgie` and its signing
+SHA-1 are registered against is in `598650352064` as well, and *that* is what
+lets `GoogleSignin.signIn()` return a token before Firebase is ever involved.
+The whitelist costs one console field; matching it on the Firebase side would
+cost re-registering the debug and release SHA-1 there, re-downloading
+`google-services.json`, and creating an iOS client for the bundle id — and until
+all of that were done Google would fail with `DEVELOPER_ERROR` (status code 10),
+earlier in the flow and with less to go on.
+
+Nothing of that has been done, for the record: the only `oauth_client` entry in
+`google-services.json` is `client_type: 3`, the web client. The Gradle plugin
+emits a `client_type: 1` entry per registered signing certificate, so a file with
+none means no SHA-1 is registered on that side.
 
 ## Facebook
 
