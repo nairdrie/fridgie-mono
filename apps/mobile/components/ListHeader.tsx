@@ -3,7 +3,7 @@ import { List, ListView } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -39,6 +39,15 @@ export default function ListHeader() {
   //   setActiveView(selectedView);
   // }, [selectedView]);
   
+
+  // Newest week first: next week sits at the top, then this week, then backwards.
+  const weeksNewestFirst = useMemo(
+    () =>
+      [...allLists].sort(
+        (a, b) => parseWeekStart(b.weekStart).getTime() - parseWeekStart(a.weekStart).getTime()
+      ),
+    [allLists]
+  );
 
   const handleSelectList = (list: List) => {
     setModalVisible(false);
@@ -172,7 +181,7 @@ export default function ListHeader() {
               <Text style={styles.sheetTitle}>Select a Week</Text>
 
               <FlatList
-                data={allLists}
+                data={weeksNewestFirst}
                 keyExtractor={(list) => list.id}
                 contentContainerStyle={{ paddingBottom: 16 }}
                 renderItem={({ item }) => (
