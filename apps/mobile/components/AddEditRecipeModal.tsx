@@ -3,9 +3,19 @@ import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import uuid from 'react-native-uuid';
 import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
+
+/** Long enough for the sheet's slide-out to finish, short enough not to read as a stall. */
+const SHEET_DISMISS_MS = 260;
+
+/**
+ * How long a launch gets to bring something to the front before it is treated
+ * as never coming. Only counted while the app stays in the foreground, so a
+ * slow camera app costs nothing.
+ */
+const LAUNCH_STALLED_AFTER_MS = 6000;
 
 interface AddEditRecipeModalProps {
   isVisible: boolean;
@@ -196,22 +206,72 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
   /**
+   * Runs a picker launch that is allowed to take as long as the user does, but
+   * not allowed to never come back at all.
+   *
+   * A timeout on the promise itself would be wrong — it settles when the photo
+   * is taken, so someone lining up a shot would trip it. What separates the two
+   * cases is the app: a camera or a picker that really opened puts the app in
+   * the background, and one that never opened leaves it in the foreground. So
+   * watch that instead. Still in the foreground seconds later means nothing
+   * opened, and the launch is not coming back.
+   *
+   * A launch given up on is left running rather than cancelled — there is no
+   * cancelling it — but its result is dropped, so a camera that surfaces later
+   * can be backed out of without a photo arriving from nowhere.
+   */
+  const launchWatched = (
+    launch: () => Promise<ImagePicker.ImagePickerResult>
+  ): Promise<{ ok: ImagePicker.ImagePickerResult } | { stalled: true } | { failed: any }> =>
+    new Promise(resolve => {
+      let settled = false;
+      let leftForeground = false;
+      const finish = (value: any) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        subscription.remove();
+        resolve(value);
+      };
+      const subscription = AppState.addEventListener('change', state => {
+        if (state !== 'active') leftForeground = true;
+      });
+      const timer = setTimeout(() => {
+        if (!leftForeground) finish({ stalled: true });
+      }, LAUNCH_STALLED_AFTER_MS);
+      launch().then(result => finish({ ok: result }), error => finish({ failed: error }));
+    });
+
+  /**
    * Puts the camera or the photo library in front of the user and hands back
    * what they picked, or null once they have been told why they can't be.
    *
-   * Nobody asks for a permission here that the launcher will ask for itself.
-   * Doing both is what wedged "Take a Photo" on Android: two requestPermissions
-   * calls back to back, and React Native holds a permission result until the
-   * activity next resumes (ReactActivityDelegate.onResume). Nothing resumed it,
-   * so the tap did nothing at all — and the camera then opened out of nowhere
-   * several taps later, when going into the photo library and backing out of it
-   * resumed the activity and let go of the result that had been sitting there.
+   * ANDROID, THE CAMERA, AND A PERMISSION THAT NEVER COMES BACK
    *
-   * So each platform's launcher owns the permission it needs. Android's asks
-   * for the camera itself and refuses through an exception; iOS's won't open
-   * the camera unless the permission is already granted, so that one is asked
-   * for here. Neither needs a permission for the photo library — the system
-   * picker runs out of process and hands back only what was chosen.
+   * `launchCameraAsync` asks Android for the camera permission on every single
+   * launch, whether or not it was granted months ago — expo-image-picker's
+   * `ensureCameraPermissionsAreGranted` calls `askForPermissions` flat out,
+   * with no check first, and still does in the newest version. That goes
+   * through expo's PermissionsService to `Activity.requestPermissions`, and
+   * React Native does not deliver a permission result when it arrives: it
+   * parks it in `mPermissionsCallback` and only runs it from the activity's
+   * next `onResume` (ReactActivityDelegate.java). Nothing resumes the activity
+   * when the answer was already "granted", so the result sits parked, the
+   * promise never settles, and the tap does nothing at all — no dialog, no
+   * camera. It is also why the camera once appeared minutes later out of
+   * nowhere: going into the photo library and backing out of it resumed the
+   * activity, which finally ran the parked callback.
+   *
+   * Nothing here can change what the library does. What it can do is stop
+   * asking from behind a Dialog — the sheet is one, and the launch is made
+   * with it off the screen — and refuse to hang silently if that isn't
+   * enough. See `launchWatched`.
+   *
+   * iOS is unaffected and takes the plain path: its `launchCameraAsync` only
+   * *checks* the permission and refuses outright without it, so that one is
+   * asked for here. Neither platform needs a permission for the photo library
+   * — the system picker runs out of process and hands back only what was
+   * chosen — and that is exactly why "Choose an Image" always worked.
    */
   const openRecipePhotoPicker = async (
     source: 'camera' | 'library'
@@ -248,28 +308,44 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 
     // Launching can throw outright — no camera on the device, a permission
     // refused inside the launcher, an OS that won't present it. Uncaught, that
-    // surfaced as the whole screen dying rather than as a message.
-    try {
-      return source === 'camera'
-        ? await ImagePicker.launchCameraAsync(options)
-        : await ImagePicker.launchImageLibraryAsync(options);
-    } catch (error: any) {
-      console.error('Failed to open the image picker', error);
-      // Android turns a declined camera prompt into a rejection from the
-      // launcher rather than a status we could have read beforehand. Reading
-      // the permission afterwards is not requesting it, so it is safe here and
-      // is the difference between "allow it next time" and "go to Settings".
-      if (`${error?.code ?? ''} ${error?.message ?? ''}`.includes('USER_REJECTED_PERMISSIONS')) {
-        const permission = await ImagePicker.getCameraPermissionsAsync().catch(() => null);
-        cameraDenied(permission?.canAskAgain ?? false);
-        return null;
-      }
+    // surfaced as the whole screen dying rather than as a message. And it can
+    // fail to come back at all, which is what `launchWatched` is for.
+    const outcome = await launchWatched(() => (source === 'camera'
+      ? ImagePicker.launchCameraAsync(options)
+      : ImagePicker.launchImageLibraryAsync(options)));
+
+    if ('ok' in outcome) return outcome.ok;
+
+    if ('stalled' in outcome) {
+      console.warn(`The ${source} never opened — see openRecipePhotoPicker.`);
       Alert.alert(
-        source === 'camera' ? "Couldn't open the camera" : "Couldn't open your photos",
-        'Please try again, or enter the recipe manually.'
+        source === 'camera' ? "The camera didn't open" : "Your photos didn't open",
+        source === 'camera'
+          ? "Android didn't hand the camera over. Choosing a photo you've already taken works — or take one with your camera app and pick it here."
+          : 'Please try again, or enter the recipe manually.',
+        source === 'camera'
+          ? [{ text: 'Not now', style: 'cancel' }, { text: 'Choose an Image', onPress: () => handleImportFromPhoto('library') }]
+          : [{ text: 'OK' }]
       );
       return null;
     }
+
+    const error: any = outcome.failed;
+    console.error('Failed to open the image picker', error);
+    // Android turns a declined camera prompt into a rejection from the
+    // launcher rather than a status we could have read beforehand. Reading
+    // the permission afterwards is not requesting it, so it is safe here and
+    // is the difference between "allow it next time" and "go to Settings".
+    if (`${error?.code ?? ''} ${error?.message ?? ''}`.includes('USER_REJECTED_PERMISSIONS')) {
+      const permission = await ImagePicker.getCameraPermissionsAsync().catch(() => null);
+      cameraDenied(permission?.canAskAgain ?? false);
+      return null;
+    }
+    Alert.alert(
+      source === 'camera' ? "Couldn't open the camera" : "Couldn't open your photos",
+      'Please try again, or enter the recipe manually.'
+    );
+    return null;
   };
 
   /**
@@ -285,6 +361,11 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     setIsPickerBusy(true);
     let result: ImagePicker.ImagePickerResult | null;
     try {
+      // On Android this sheet is a Dialog sitting over the activity, and the
+      // camera permission is what gets stuck behind it. `isPickerBusy` takes
+      // the sheet off the screen; this waits for it to actually go before the
+      // OS is asked for anything.
+      if (Platform.OS === 'android') await new Promise(resolve => setTimeout(resolve, SHEET_DISMISS_MS));
       result = await openRecipePhotoPicker(source);
     } finally {
       setIsPickerBusy(false);
@@ -571,7 +652,16 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
     return (
-    <Modal animationType="slide" visible={isVisible} onRequestClose={onClose} transparent={true}>
+    // Stepping aside on Android while a picker is being launched: this sheet is
+    // a Dialog over the activity there, and asking for the camera permission
+    // from behind one is where the launch gets stuck. iOS presents fine over
+    // its own modal and keeps the sheet up.
+    <Modal
+      animationType="slide"
+      visible={isVisible && !(Platform.OS === 'android' && isPickerBusy)}
+      onRequestClose={onClose}
+      transparent={true}
+    >
       {/* The avoider has to be the FULL-SCREEN element, not the sheet. Wrapped
           around the sheet instead, `behavior="padding"` padded the inside of a
           content-sized box: the sheet simply grew downwards off the screen and
