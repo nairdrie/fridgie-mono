@@ -10,11 +10,28 @@ import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipe
 interface AddEditRecipeModalProps {
   isVisible: boolean;
   onClose: () => void;
+  /**
+   * The meal this recipe is being written for, when there is one. Null for a
+   * recipe going straight to the cookbook: nothing is planned for a day and
+   * nothing lands on a shopping list, so there is no meal to speak of.
+   */
   mealForRecipe: Meal | null;
-  onRecipeSave: (updatedMeal: Meal, newItems: Item[]) => void;
+  /**
+   * A recipe to open straight into the editor. The cookbook already holds the
+   * whole recipe by the time Edit is tapped, so it hands it over rather than
+   * sending the form back to fetch what it already has.
+   */
+  recipeToEdit?: Recipe | null;
+  /**
+   * `updatedMeal` and `newItems` are null and empty for a cookbook recipe —
+   * there is no meal to point at the recipe and no ingredients to shop for.
+   * `savedRecipe` is what the server stored, and its id is NOT necessarily the
+   * one that went in: saving someone else's recipe forks it.
+   */
+  onRecipeSave: (updatedMeal: Meal | null, newItems: Item[], savedRecipe: Recipe) => void;
 }
 
-export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, onRecipeSave }: AddEditRecipeModalProps) {
+export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, recipeToEdit = null, onRecipeSave }: AddEditRecipeModalProps) {
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [importUrl, setImportUrl] = useState('');
   // Seeded from the meal's own title: someone who typed "Chicken Katsu" into
@@ -23,6 +40,8 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   // also the place to add "for two" or "make it spicy".
   const [generateTitle, setGenerateTitle] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  // True from the tap until the camera or the photo library is done with us.
+  const [isPickerBusy, setIsPickerBusy] = useState(false);
   const [importSource, setImportSource] = useState<'link' | 'photo' | 'generate'>('link');
   const [isLoading, setIsLoading] = useState(false);
   const [creationMode, setCreationMode] = useState<'initial' | 'link' | 'photo' | 'generate' | 'manual'>('initial');
@@ -30,6 +49,10 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 
   // ✅ 1. State for the animated loading message
   const [importingMessage, setImportingMessage] = useState('Fetching your recipe...');
+
+  // Opened on a recipe that already exists, rather than at the four ways of
+  // starting one — so there is no earlier step to go back to.
+  const isEditingExisting = !!(recipeToEdit || mealForRecipe?.recipeId);
 
   const createBlankRecipe = (): Recipe => ({
     id: uuid.v4() as string,
@@ -98,7 +121,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   }, [isImporting, importSource]);
 
   useEffect(() => {
-    if (!isVisible || !mealForRecipe) {
+    if (!isVisible) {
       setEditingRecipe(null);
       return;
     }
@@ -106,9 +129,13 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     const setupRecipe = async () => {
       setIsLoading(true);
       setImportUrl('');
-      setGenerateTitle(mealForRecipe.name || '');
-      
-      if (mealForRecipe.recipeId) {
+      setGenerateTitle(mealForRecipe?.name || '');
+
+      // Handed a recipe outright — the cookbook's Edit already has it.
+      if (recipeToEdit) {
+        setCreationMode('manual');
+        setEditingRecipe(recipeToEdit);
+      } else if (mealForRecipe?.recipeId) {
         setCreationMode('manual');
         try {
           const existingRecipe = await getRecipe(mealForRecipe.recipeId);
@@ -119,6 +146,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
           onClose();
         }
       } else {
+        // No meal and no recipe: a blank one, headed for the cookbook.
         setCreationMode('initial');
         setEditingRecipe(createBlankRecipe());
       }
@@ -126,7 +154,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     };
 
     setupRecipe();
-  }, [isVisible, mealForRecipe]);
+  }, [isVisible, mealForRecipe, recipeToEdit]);
 
   const handleImportRecipe = async () => {
     if (!importUrl) return;
@@ -168,52 +196,101 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
   /**
-   * Reads a recipe out of a photo of a page. Lands in the same manual editor as
-   * a link import, so the user reviews and corrects before saving — reading
-   * handwriting produces a first draft, not an answer.
+   * Puts the camera or the photo library in front of the user and hands back
+   * what they picked, or null once they have been told why they can't be.
+   *
+   * Nobody asks for a permission here that the launcher will ask for itself.
+   * Doing both is what wedged "Take a Photo" on Android: two requestPermissions
+   * calls back to back, and React Native holds a permission result until the
+   * activity next resumes (ReactActivityDelegate.onResume). Nothing resumed it,
+   * so the tap did nothing at all — and the camera then opened out of nowhere
+   * several taps later, when going into the photo library and backing out of it
+   * resumed the activity and let go of the result that had been sitting there.
+   *
+   * So each platform's launcher owns the permission it needs. Android's asks
+   * for the camera itself and refuses through an exception; iOS's won't open
+   * the camera unless the permission is already granted, so that one is asked
+   * for here. Neither needs a permission for the photo library — the system
+   * picker runs out of process and hands back only what was chosen.
    */
-  const handleImportFromPhoto = async (source: 'camera' | 'library') => {
-    const permission = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (permission.status !== 'granted') {
-      Alert.alert(
-        'Permission needed',
-        source === 'camera'
-          ? 'Fridgie needs camera access to photograph a recipe.'
-          : 'Fridgie needs photo access to import a recipe image.'
-      );
-      return;
+  const openRecipePhotoPicker = async (
+    source: 'camera' | 'library'
+  ): Promise<ImagePicker.ImagePickerResult | null> => {
+    const cameraDenied = (canAskAgain: boolean) => Alert.alert(
+      'Camera access needed',
+      canAskAgain
+        ? 'Fridgie needs camera access to photograph a recipe.'
+        : 'Fridgie needs camera access to photograph a recipe. You can turn it on in Settings.'
+    );
+
+    if (source === 'camera' && Platform.OS !== 'android') {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        cameraDenied(permission.canAskAgain);
+        return null;
+      }
     }
 
     const options: ImagePicker.ImagePickerOptions = {
       // `MediaTypeOptions.Images` is deprecated in expo-image-picker 16 and gone
       // in 17; the array form is the supported spelling.
       mediaTypes: ['images'],
-      allowsEditing: true,
+      // Deliberately NOT allowsEditing. On iOS the crop box is always a square,
+      // so a portrait cookbook page came back with its top and bottom cut off —
+      // half the ingredients gone before the reader ever saw them. It also puts
+      // a second activity, the cropper, between the camera and the answer on
+      // Android. The whole photo is what the reader wants.
+      allowsEditing: false,
       // Text needs detail, but this travels as base64 — quality is a balance.
       quality: 0.6,
       base64: true,
     };
 
-    // Launching the picker can throw outright — no camera on the device, the
-    // OS refusing to present over a modal that is already up. Uncaught, that
+    // Launching can throw outright — no camera on the device, a permission
+    // refused inside the launcher, an OS that won't present it. Uncaught, that
     // surfaced as the whole screen dying rather than as a message.
-    let result: ImagePicker.ImagePickerResult;
     try {
-      result = source === 'camera'
+      return source === 'camera'
         ? await ImagePicker.launchCameraAsync(options)
         : await ImagePicker.launchImageLibraryAsync(options);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to open the image picker', error);
+      // Android turns a declined camera prompt into a rejection from the
+      // launcher rather than a status we could have read beforehand. Reading
+      // the permission afterwards is not requesting it, so it is safe here and
+      // is the difference between "allow it next time" and "go to Settings".
+      if (`${error?.code ?? ''} ${error?.message ?? ''}`.includes('USER_REJECTED_PERMISSIONS')) {
+        const permission = await ImagePicker.getCameraPermissionsAsync().catch(() => null);
+        cameraDenied(permission?.canAskAgain ?? false);
+        return null;
+      }
       Alert.alert(
         source === 'camera' ? "Couldn't open the camera" : "Couldn't open your photos",
         'Please try again, or enter the recipe manually.'
       );
-      return;
+      return null;
+    }
+  };
+
+  /**
+   * Reads a recipe out of a photo of a page. Lands in the same manual editor as
+   * a link import, so the user reviews and corrects before saving — reading
+   * handwriting produces a first draft, not an answer.
+   */
+  const handleImportFromPhoto = async (source: 'camera' | 'library') => {
+    // The camera takes a moment to come up, and a second tap in that moment
+    // asks for a second one. It also gives the tap something to show for
+    // itself, which is what "nothing happens" was really reporting.
+    if (isPickerBusy) return;
+    setIsPickerBusy(true);
+    let result: ImagePicker.ImagePickerResult | null;
+    try {
+      result = await openRecipePhotoPicker(source);
+    } finally {
+      setIsPickerBusy(false);
     }
 
-    if (result.canceled) return;
+    if (!result || result.canceled) return;
     const asset = result.assets?.[0];
     if (!asset?.base64) {
       Alert.alert('Error', "Couldn't read that image. Please try again.");
@@ -275,6 +352,10 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   const handleBackPress = () => {
     // Go back to the initial selection from any other state
     if (creationMode !== 'initial') {
+      // Leaving the photo step with a launch still marked in flight would come
+      // back to two dead buttons, which is the failure this was added to make
+      // visible rather than one to reproduce.
+      setIsPickerBusy(false);
       setCreationMode('initial');
       // Reset to a blank slate in case of a bad import
       setEditingRecipe(createBlankRecipe());
@@ -284,8 +365,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
   const handleSaveRecipe = async () => {
-    // (This function remains the same as before)
-    if (!editingRecipe || !mealForRecipe) return;
+    if (!editingRecipe) return;
     if(editingRecipe.photoURL && !editingRecipe.photoURL.startsWith('http')) {
       try {
         editingRecipe.photoURL = await uploadRecipePhoto(editingRecipe.photoURL, editingRecipe.id);
@@ -294,9 +374,14 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     try {
       const recipeToSave = { ...editingRecipe, ingredients: (editingRecipe.ingredients || []).filter(i => (i.name ?? '').trim() !== ''), instructions: (editingRecipe.instructions || []).filter(i => (i ?? '').trim() !== '') };
       const savedRecipe = await saveRecipe(recipeToSave);
-      const updatedMeal = { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name };
-      const newItemsForRecipe = savedRecipe.ingredients.map(ing => ({ id: uuid.v4() as string, text: ing.name.trim(), quantity: ing.quantity.trim(), checked: false, listOrder: 'NEEDS-RANK', isSection: false, mealId: mealForRecipe.id }));
-      onRecipeSave(updatedMeal, newItemsForRecipe);
+      // A cookbook recipe has no meal to point back at and nothing to shop for.
+      const updatedMeal = mealForRecipe
+        ? { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name }
+        : null;
+      const newItemsForRecipe = mealForRecipe
+        ? savedRecipe.ingredients.map(ing => ({ id: uuid.v4() as string, text: ing.name.trim(), quantity: ing.quantity.trim(), checked: false, listOrder: 'NEEDS-RANK', isSection: false, mealId: mealForRecipe.id }))
+        : [];
+      onRecipeSave(updatedMeal, newItemsForRecipe, savedRecipe);
       onClose();
     } catch (error) { console.error("Failed to save recipe", error); Alert.alert("Error", "Could not save recipe."); }
   };
@@ -408,12 +493,20 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       }
       return (
         <>
-          <TouchableOpacity style={styles.selectionButton} onPress={() => handleImportFromPhoto('camera')}>
+          <TouchableOpacity
+            style={[styles.selectionButton, isPickerBusy && styles.selectionButtonBusy]}
+            onPress={() => handleImportFromPhoto('camera')}
+            disabled={isPickerBusy}
+          >
             <Ionicons name="camera-outline" size={32} color={primary} />
             <Text style={styles.selectionButtonTitle}>Take a Photo</Text>
             <Text style={styles.selectionButtonDescription}>Lay the page flat in good light and fill the frame.</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.selectionButton} onPress={() => handleImportFromPhoto('library')}>
+          <TouchableOpacity
+            style={[styles.selectionButton, isPickerBusy && styles.selectionButtonBusy]}
+            onPress={() => handleImportFromPhoto('library')}
+            disabled={isPickerBusy}
+          >
             <Ionicons name="images-outline" size={32} color={primary} />
             <Text style={styles.selectionButtonTitle}>Choose an Image</Text>
             <Text style={styles.selectionButtonDescription}>Pick a photo or screenshot you already have.</Text>
@@ -493,12 +586,12 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             <View style={styles.modalContentContainer}>
               <View style={styles.modalHeader}>
                 {/* Header content remains the same */}
-                {creationMode !== 'initial' && !mealForRecipe?.recipeId ? (
+                {creationMode !== 'initial' && !isEditingExisting ? (
                   <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
                     <Ionicons name="chevron-back" size={28} color="#aaa" />
                   </TouchableOpacity>
                 ) : <View style={styles.backButton} /> }
-                <Text style={styles.modalTitle}>{mealForRecipe?.recipeId ? 'Edit' : 'Add'} Recipe</Text>
+                <Text style={styles.modalTitle}>{isEditingExisting ? 'Edit' : 'Add'} Recipe</Text>
                 <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                   <Ionicons name="close-circle" size={28} color="#aaa" />
                 </TouchableOpacity>
@@ -610,6 +703,9 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 3,
   },
+  // The camera can take a second to come up, and a button that looks untouched
+  // in that second reads as a button that didn't work.
+  selectionButtonBusy: { opacity: 0.5 },
   selectionButtonTitle: { fontSize: 20, fontWeight: 'bold', color: primary, marginTop: 12, marginBottom: 6 },
   selectionButtonDescription: { fontSize: 14, color: '#666', textAlign: 'center' },
   iconRow: { flexDirection: 'row', gap: 16 },

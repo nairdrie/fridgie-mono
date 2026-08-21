@@ -39,6 +39,14 @@ const getMealDate = (weekStart: string, dayOfWeek?: Meal['dayOfWeek']): Date => 
 /**
  * POST /api/cookbook
  * Adds a recipe to the user's personal cookbook.
+ *
+ * The cookbook holds the version the user actually chose, so the entry is filed
+ * under `recipeId` itself. Filing it under the root instead used to mean that
+ * editing someone else's recipe — which forks it — put the original straight
+ * back on the shelf and the user's own copy nowhere at all.
+ *
+ * Popularity still accrues to the root: a fork is one more person cooking the
+ * original, not a rival recipe starting from zero.
  */
 route.post('/', requireAccount, async (c) => {
   const uid = c.get('uid')
@@ -48,34 +56,37 @@ route.post('/', requireAccount, async (c) => {
     return c.json({ error: 'Missing recipeId' }, 400)
   }
 
-  // Find the root recipe to ensure we save a reference to the original
   const recipeDoc = await fs.collection('recipes').doc(recipeId).get()
   if (!recipeDoc.exists) {
     return c.json({ error: 'Recipe not found' }, 404)
   }
-  
-  const rootRecipeId = recipeDoc.data()?.forkedFromId || recipeId
-  const rootRecipeRef = fs.collection('recipes').doc(rootRecipeId)
-  const rootRecipeData = (await rootRecipeRef.get()).data()
+  const recipeData = recipeDoc.data()
 
-  // Add a reference to the user's cookbook subcollection
-  // We use the recipe ID as the document ID to prevent duplicates
-  const cookbookRef = fs.collection('users').doc(uid).collection('cookbook').doc(rootRecipeId)
+  const rootRecipeRef = fs.collection('recipes').doc(recipeData?.forkedFromId || recipeId)
+
+  // The recipe ID is the document ID, which is what prevents duplicates.
+  const cookbookRef = fs.collection('users').doc(uid).collection('cookbook').doc(recipeId)
 
   try {
     // Run a transaction to perform both writes atomically
     await fs.runTransaction(async (transaction) => {
+      // A root that has since been deleted is no reason to refuse the shelf
+      // space — read it first (Firestore wants every read before any write).
+      const rootExists = (await transaction.get(rootRecipeRef)).exists
+
       // 1. Add to the user's personal cookbook
       transaction.set(cookbookRef, {
-        name: rootRecipeData?.name,
-        photoURL: rootRecipeData?.photoURL || null,
+        name: recipeData?.name,
+        photoURL: recipeData?.photoURL || null,
         addedAt: FieldValue.serverTimestamp(),
       })
 
-      // 2. Increment the popularity counter on the root recipe
-      transaction.update(rootRecipeRef, {
-        'popularity.cookbooks': FieldValue.increment(1)
-      })
+      // 2. Credit the original with one more cook
+      if (rootExists) {
+        transaction.update(rootRecipeRef, {
+          'popularity.cookbooks': FieldValue.increment(1)
+        })
+      }
     })
 
     return c.json({ message: 'Recipe added to cookbook' }, 201)

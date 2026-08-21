@@ -1,11 +1,13 @@
 // components/Cookbook.tsx
 import { useAuth } from '@/context/AuthContext';
+import { addUserCookbookRecipe } from '@/utils/api';
 import { Item, Meal, Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     RefreshControl,
     StyleSheet,
@@ -34,7 +36,7 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
 
     // State for view/edit modals
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
-    const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
+    const [recipeToEdit, setRecipeToEdit] = useState<Recipe | null>(null);
 
     const { user } = useAuth();
 
@@ -67,18 +69,26 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
     };
 
     const handleEditRecipe = (recipe: Recipe) => {
-        const mealFromRecipe: Meal = {
-            id: recipe.id,
-            listId: 'cookbook-context',
-            name: recipe.name,
-            recipeId: recipe.id,
-        };
         setRecipeToViewId(null);
-        setMealForRecipeEdit(mealFromRecipe);
+        setRecipeToEdit(recipe);
     };
 
-    const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
-        setMealForRecipeEdit(null);
+    /**
+     * This is somebody else's shelf, so nothing here is being replaced — the
+     * copy the server just forked goes onto the viewer's own cookbook, where
+     * they will find it on their profile.
+     */
+    const handleRecipeSaved = async (_meal: Meal | null, _items: Item[], savedRecipe: Recipe) => {
+        const previousId = recipeToEdit?.id;
+        setRecipeToEdit(null);
+        if (previousId && previousId !== savedRecipe.id) {
+            try {
+                await addUserCookbookRecipe(savedRecipe.id);
+            } catch (error) {
+                console.error('Failed to add the copied recipe to the cookbook', error);
+                Alert.alert('Saved, but not filed', "Your copy was saved but couldn't be added to your cookbook.");
+            }
+        }
         onRefresh();
     };
 
@@ -160,9 +170,10 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
             />
             
             <AddEditRecipeModal
-                isVisible={!!mealForRecipeEdit}
-                onClose={() => setMealForRecipeEdit(null)}
-                mealForRecipe={mealForRecipeEdit}
+                isVisible={!!recipeToEdit}
+                onClose={() => setRecipeToEdit(null)}
+                mealForRecipe={null}
+                recipeToEdit={recipeToEdit}
                 onRecipeSave={handleRecipeSaved}
             />
         </View>

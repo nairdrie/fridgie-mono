@@ -1,6 +1,6 @@
 // components/GroceryListView.tsx
 
-import { Item, List } from '@/types/types';
+import { Item } from '@/types/types';
 import {
     aggregateQuantities,
     convert,
@@ -11,9 +11,10 @@ import {
 } from '@/utils/quantity';
 import { nextListRank, safeParseRank } from '@/utils/rank';
 import { primary } from '@/utils/styles';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
-import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
     Keyboard,
     Pressable,
@@ -26,6 +27,7 @@ import {
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
 import QuantityEditorModal from './QuantityEditorModal';
+import SwipeToDeleteRow from './SwipeToDeleteRow';
 
 type AggregatedItem = Item & {
  sourceIds: string[];
@@ -47,8 +49,12 @@ interface GroceryListViewProps {
   inputRefs: React.MutableRefObject<Record<string, TextInput | null>>;
   isKeyboardVisible: boolean;
   markDirty: () => void;
-  sort?: List['sort'];
-  setSort: (sort: List['sort']) => void;
+  /**
+   * The user has just put a row somewhere by hand. Filing runs constantly in
+   * the background, and an answer that was worked out before this happened
+   * would put the row back; the screen uses this to throw such an answer away.
+   */
+  onManualReorder?: () => void;
 }
 
 const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
@@ -59,11 +65,13 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     inputRefs,
     isKeyboardVisible,
     markDirty,
-    sort = 'custom',
-    setSort,
+    onManualReorder,
 }, ref) => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [selectedItem, setSelectedItem] = useState<AggregatedItem | null>(null);
+    // Checked items are put away, not shown crossed out in place, so the section
+    // starts closed — opening it is asking to see what you already have.
+    const [showChecked, setShowChecked] = useState(false);
 
     const aggregatedItems = useMemo((): (AggregatedItem | Item)[] => {
         const itemMap = new Map<string, Item[]>();
@@ -121,6 +129,53 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         return combined;
     }, [items]);
 
+    /**
+     * The list as it is actually shown: everything still to be bought, and
+     * separately everything already in the trolley.
+     *
+     * A checked item leaves the list and joins the section at the bottom rather
+     * than sitting crossed out in the middle of the aisle it came from. Its rank
+     * is untouched, so unchecking puts it back exactly where it was.
+     *
+     * A heading whose items have all been checked goes with them. The server
+     * already drops headings it has nothing to file under (see `placeItems`);
+     * leaving a run of empty aisles behind on screen would say the same thing
+     * twice. A heading with nothing under it at all is one the user has just
+     * written and not filled in yet, so that one stays.
+     */
+    const { openRows, checkedRows } = useMemo(() => {
+        const open: (AggregatedItem | Item)[] = [];
+        const checked: AggregatedItem[] = [];
+        // Backwards, so a heading is reached knowing what survived beneath it.
+        let openBelow = 0;
+        let rowsBelow = 0;
+        for (let i = aggregatedItems.length - 1; i >= 0; i--) {
+            const row = aggregatedItems[i];
+            if (row.isSection) {
+                if (openBelow > 0 || rowsBelow === 0 || editingId === row.id) open.push(row);
+                openBelow = 0;
+                rowsBelow = 0;
+                continue;
+            }
+            rowsBelow++;
+            if (row.checked) {
+                checked.push(row as AggregatedItem);
+            } else {
+                openBelow++;
+                open.push(row);
+            }
+        }
+        open.reverse();
+        checked.reverse();
+        return { openRows: open, checkedRows: checked };
+    }, [aggregatedItems, editingId]);
+
+    // Nothing left to put away: next time something is checked the section
+    // should open closed again rather than remembering a session-old choice.
+    useEffect(() => {
+        if (checkedRows.length === 0) setShowChecked(false);
+    }, [checkedRows.length]);
+
     // The FlatList is unmounted whenever the list is empty, so this is null as
     // often as it is set — every use goes through scrollToItemId below.
     const flatListRef = useRef<any>(null);
@@ -131,13 +186,13 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             // item ids, and identical texts collapse into one. Look the id up
             // through that mapping instead of assuming the two arrays line up —
             // scrollToIndex throws on an out-of-range index, and an exception
-            // here blanks the screen.
-            const index = aggregatedItems.findIndex(row =>
+            // here blanks the screen. A checked row isn't in the list at all.
+            const index = openRows.findIndex(row =>
                 'sourceIds' in row ? (row as AggregatedItem).sourceIds.includes(itemId) : row.id === itemId);
-            if (index < 0 || index >= aggregatedItems.length) return;
+            if (index < 0 || index >= openRows.length) return;
             flatListRef.current?.scrollToIndex?.({ index, animated: true, viewPosition: 0.5 });
         },
-    }), [aggregatedItems]);
+    }), [openRows]);
 
     const assignRef = useCallback((id: string) => (ref: TextInput | null) => {
         inputRefs.current[id] = ref;
@@ -162,6 +217,9 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
 
     const toggleCheck = (aggItem: AggregatedItem) => {
         const newCheckedState = !aggItem.checked;
+        // The row is about to leave for the section at the bottom (or come back
+        // from it), which is a big enough move to want confirming by touch.
+        Haptics.selectionAsync().catch(() => {});
         setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id) ? { ...item, checked: newCheckedState } : item));
         markDirty();
     };
@@ -212,14 +270,23 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         addItemAfter(currentItem);
     };
 
-    const deleteItem = (aggItem: AggregatedItem) => {
+    /**
+     * Removes a row.
+     *
+     * `focusPrevious` is for the ways of deleting that happen mid-edit —
+     * backspacing an empty row, tapping its ✕ — where the caret has to land
+     * somewhere and the row above is where it was heading anyway. A swipe is
+     * not one of those: it can be aimed at any row on screen, and dragging the
+     * keyboard up onto an unrelated one is not what was asked for.
+     */
+    const deleteItem = (aggItem: AggregatedItem, focusPrevious = false) => {
         // Deletes every source, including meal ingredients — checking and
         // deleting intentionally act on the whole aggregate.
         const sourceIdsToDelete = new Set(aggItem.sourceIds);
         const updatedItems = items.filter(item => !sourceIdsToDelete.has(item.id));
         setItems(updatedItems);
         markDirty();
-        if (isKeyboardVisible) {
+        if (focusPrevious && isKeyboardVisible) {
             const currentIndex = aggregatedItems.findIndex(i => i.id === aggItem.id);
             const prevItem = aggregatedItems[Math.max(0, currentIndex - 1)];
 
@@ -232,7 +299,9 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             } else {
                 setEditingId('');
             }
-        } else {
+        } else if (focusPrevious || aggItem.sourceIds.includes(editingId)) {
+            // A swipe on some other row leaves the row being typed into alone;
+            // only losing the row under the cursor ends the edit.
             setEditingId('');
         }
     };
@@ -257,8 +326,27 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         setEditingId('');
     };
 
+    /**
+     * Puts the rows the list just handed back into the order of the whole list.
+     *
+     * The draggable list only ever holds the rows on screen, so checked items
+     * and the headings hiding with them are missing from `data`. Dropping the
+     * dragged rows back into the slots they occupied keeps everything else
+     * exactly where it was — which is what makes unchecking an item return it to
+     * its aisle rather than to the bottom of the list.
+     */
+    const applyDragOrder = ({ data, from, to }: { data: (AggregatedItem | Item)[]; from: number; to: number }) => {
+        // A long press that ended where it started still reports a drag. Re-ranking
+        // the list over it would save nothing new and would throw away whichever
+        // filing is in flight, so treat it as the nothing it is.
+        if (from === to) return;
+        const onScreen = new Set(data.map(row => row.id));
+        let next = 0;
+        reRankItems(aggregatedItems.map(row => (onScreen.has(row.id) ? data[next++] ?? row : row)));
+        onManualReorder?.();
+    };
+
     const reRankItems = (data: (AggregatedItem | Item)[]) => {
-        setSort('custom');
         let rank = LexoRank.middle();
         const rankMap = new Map<string, string>();
         // Advance once per assigned id. genNext() is pure, so the old code gave
@@ -396,14 +484,35 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         closeQuantityEditor();
     };
 
-    const renderItem = useCallback(({ item, drag, isActive }: RenderItemParams<AggregatedItem | Item>) => {
+    /**
+     * One row, for the draggable list and for the checked section alike.
+     *
+     * `drag` is absent for a checked row: that section is a holding pen, not a
+     * part of the list you arrange, so the handle is rendered but inert to keep
+     * the two sets of rows lined up with each other.
+     */
+    const renderRow = useCallback((item: AggregatedItem | Item, drag?: () => void, isActive?: boolean) => {
+        const handle = drag ? (
+            <Pressable
+                onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); drag(); }}
+                disabled={isActive}
+                style={styles.dragHandle}
+                hitSlop={20}
+            >
+                <Text style={styles.dragIcon}>≡</Text>
+            </Pressable>
+        ) : (
+            <View style={styles.dragHandle}><Text style={[styles.dragIcon, styles.dragIconIdle]}>≡</Text></View>
+        );
+
         if (item.isSection) {
             const isEditing = editingId === item.id;
+            // No swipe on a heading. Swiping one away would leave the rows it
+            // was holding sitting under whichever aisle came before it, which
+            // reads as the list having broken rather than as a deletion.
             return (
-                <View style={styles.itemRow}>
-                    <Pressable onLongPress={drag} disabled={isActive} style={styles.dragHandle} hitSlop={20}>
-                        <Text style={styles.dragIcon}>≡</Text>
-                    </Pressable>
+                <View key={item.id} style={styles.itemRow}>
+                    {handle}
                     <TextInput
                         ref={assignRef(item.id)}
                         value={item.text}
@@ -456,38 +565,43 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         const isEditing = editingId === baseItemId;
 
         return (
-            <View style={styles.itemRow}>
-                <Pressable onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); drag(); }} disabled={isActive} style={styles.dragHandle} hitSlop={20}>
-                    <Text style={styles.dragIcon}>≡</Text>
-                </Pressable>
-                <TouchableOpacity style={styles.checkbox} onPress={() => toggleCheck(aggItem)}>
-                    {aggItem.checked && <Text>✓</Text>}
-                </TouchableOpacity>
-
-                {aggItem.totalQuantity && (
-                    <TouchableOpacity onPress={() => openQuantityEditor(aggItem)}>
-                        <View style={[styles.quantityLabel, aggItem.checked && styles.quantityChecked]}>
-                            <Text style={[styles.quantityText, aggItem.checked && styles.checked]}>{aggItem.totalQuantity}</Text>
-                        </View>
+            <SwipeToDeleteRow key={item.id} onDelete={() => deleteItem(aggItem)} enabled={!isActive}>
+                <View style={styles.itemRow}>
+                    {handle}
+                    <TouchableOpacity style={styles.checkbox} onPress={() => toggleCheck(aggItem)}>
+                        {aggItem.checked && <Text>✓</Text>}
                     </TouchableOpacity>
-                )}
 
-                <TextInput
-                    ref={assignRef(baseItemId)} value={aggItem.text} style={[styles.editInput, aggItem.checked && styles.checked]}
-                    onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => setEditingId(baseItemId)}
-                    onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => submitRow(aggItem)}
-                    onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && aggItem.text === '') { deleteItem(aggItem); } }}
-                    returnKeyType="next" blurOnSubmit={false}
-                />
+                    {aggItem.totalQuantity && (
+                        <TouchableOpacity onPress={() => openQuantityEditor(aggItem)}>
+                            <View style={[styles.quantityLabel, aggItem.checked && styles.quantityChecked]}>
+                                <Text style={[styles.quantityText, aggItem.checked && styles.checked]}>{aggItem.totalQuantity}</Text>
+                            </View>
+                        </TouchableOpacity>
+                    )}
 
-                {isEditing && (
-                    <TouchableOpacity onPressIn={() => deleteItem(aggItem)} style={styles.clearButton}>
-                        <Text style={styles.clearText}>✕</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
+                    <TextInput
+                        ref={assignRef(baseItemId)} value={aggItem.text} style={[styles.editInput, aggItem.checked && styles.checked]}
+                        onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => setEditingId(baseItemId)}
+                        onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => submitRow(aggItem)}
+                        onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && aggItem.text === '') { deleteItem(aggItem, true); } }}
+                        returnKeyType="next" blurOnSubmit={false}
+                    />
+
+                    {isEditing && (
+                        <TouchableOpacity onPressIn={() => deleteItem(aggItem, true)} style={styles.clearButton}>
+                            <Text style={styles.clearText}>✕</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </SwipeToDeleteRow>
         );
     }, [items, editingId, aggregatedItems]);
+
+    const renderItem = useCallback(
+        ({ item, drag, isActive }: RenderItemParams<AggregatedItem | Item>) => renderRow(item, drag, isActive),
+        [renderRow]
+    );
 
     return (
         <View style={{ flex: 1 }}>
@@ -503,10 +617,16 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             ) : (
                 <DraggableFlatList
                     ref={flatListRef}
-                    data={aggregatedItems} onDragEnd={({ data }) => reRankItems(data)}
+                    data={openRows} onDragEnd={applyDragOrder}
                     keyExtractor={item => item.id} renderItem={renderItem as any}
                     keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
                     initialNumToRender={20} maxToRenderPerBatch={10} windowSize={10}
+                    // Reordering is a vertical gesture, so say so: without this
+                    // the list claims the drag as soon as a finger moves at all,
+                    // in any direction, and a row can never be swiped sideways.
+                    // The cost is a few pixels of travel before a held row starts
+                    // following the finger.
+                    activationDistance={12}
                     // A row added a moment ago has not been measured yet, and
                     // without this scrollToIndex treats that as unrecoverable
                     // and throws. Scrolling a new row into view is a nicety;
@@ -523,17 +643,41 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     containerStyle={styles.list}
                     style={styles.list}
                     contentContainerStyle={styles.listContent}
-                    // The blank space under the last row is still the list, and
-                    // tapping it is how you say "another one". addItemAfter
-                    // hands back the empty row already sitting there rather than
-                    // adding a second, so this survives being tapped repeatedly.
                     ListFooterComponent={
-                        <Pressable
-                            style={styles.tapToAdd}
-                            onPress={() => addItemAfter()}
-                            accessibilityRole="button"
-                            accessibilityLabel="Add item"
-                        />
+                        <>
+                            {checkedRows.length > 0 && (
+                                <View style={styles.checkedSection}>
+                                    <Pressable
+                                        style={styles.checkedHeader}
+                                        onPress={() => setShowChecked(prev => !prev)}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ expanded: showChecked }}
+                                        accessibilityLabel={`Checked, ${checkedRows.length} item${checkedRows.length === 1 ? '' : 's'}`}
+                                    >
+                                        <Ionicons
+                                            name={showChecked ? 'chevron-down' : 'chevron-forward'}
+                                            size={14}
+                                            color="#8e8e93"
+                                        />
+                                        <Text style={styles.checkedHeaderText}>Checked</Text>
+                                        <Text style={styles.checkedCount}>{checkedRows.length}</Text>
+                                    </Pressable>
+                                    {showChecked && checkedRows.map(row => renderRow(row))}
+                                </View>
+                            )}
+                            {/* The blank space under the last row is still the
+                                list, and tapping it is how you say "another
+                                one". addItemAfter hands back the empty row
+                                already sitting there rather than adding a
+                                second, so this survives being tapped
+                                repeatedly. */}
+                            <Pressable
+                                style={styles.tapToAdd}
+                                onPress={() => addItemAfter()}
+                                accessibilityRole="button"
+                                accessibilityLabel="Add item"
+                            />
+                        </>
                     }
                 />
             )}
@@ -555,9 +699,16 @@ const styles = StyleSheet.create({
     // Grows to whatever is left below the last row, with enough of a floor that
     // a full list still has somewhere to tap.
     tapToAdd: { flexGrow: 1, minHeight: 120 },
-    itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, minHeight: 36 },
+    itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, minHeight: 36, backgroundColor: '#fff' },
     dragHandle: { paddingHorizontal: 15, paddingVertical: 5 },
     dragIcon: { fontSize: 18, color: '#ccc' },
+    // Kept in the layout rather than removed, so a checked row lines up with the
+    // rows above it instead of shifting left once it is put away.
+    dragIconIdle: { opacity: 0 },
+    checkedSection: { marginTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e5ea', backgroundColor: '#fff' },
+    checkedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 12 },
+    checkedHeaderText: { fontSize: 13, fontWeight: '600', color: '#8e8e93', letterSpacing: 0.5, textTransform: 'uppercase' },
+    checkedCount: { fontSize: 13, color: '#8e8e93' },
     checkbox: { width: 24, height: 24, marginRight: 10, borderWidth: 1, borderColor: '#999', alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
     editInput: { fontSize: 16, flex: 1, paddingVertical: 2, color: 'black' },
     checked: { textDecorationLine: 'line-through', color: '#999' },

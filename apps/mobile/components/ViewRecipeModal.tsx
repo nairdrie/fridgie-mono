@@ -63,10 +63,29 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
         fetchRecipe();
     }, [recipeId, isVisible, isInCookbook]);
 
+    /**
+     * Somebody else wrote this one. Editing it is allowed, but what actually
+     * happens is a copy: the server forks a recipe saved by anyone other than
+     * its author, and the copy stops tracking the original from that moment.
+     * That is a big enough difference to say out loud before the editor opens
+     * rather than after the save.
+     */
     const handleEditPress = () => {
-        if (recipe) {
+        if (!recipe) return;
+        const isAuthor = !recipe.authorUid || recipe.authorUid === user?.uid;
+        if (isAuthor) {
             onEdit(recipe);
+            return;
         }
+        const theirs = recipe.authorName ? `${recipe.authorName}'s version` : 'The original';
+        Alert.alert(
+            'Make your own copy?',
+            `${theirs} stays exactly as it is. You'll be editing a copy of your own, no longer linked to it — so any changes they make later won't reach yours.`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Make a Copy', onPress: () => onEdit(recipe) },
+            ]
+        );
     };
 
     const handleToggleCookbook = async () => {
@@ -142,11 +161,20 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                             <View style={styles.bodyContainer}>
                                                 <View style={styles.titleContainer}>
                                                     <Text style={styles.recipeTitle}>{recipe.name}</Text>
-                                                    { recipe.authorUid == user?.uid &&
-                                                        <TouchableOpacity style={styles.editButton} onPress={handleEditPress}>
-                                                          <Ionicons name="pencil" size={20} color="#fff" />
-                                                      </TouchableOpacity>
-                                                    }
+                                                    {/* Shown on everyone's recipes, not just your own. On
+                                                        someone else's it makes a copy, and says so first. */}
+                                                    <TouchableOpacity
+                                                        style={styles.editButton}
+                                                        onPress={handleEditPress}
+                                                        accessibilityRole="button"
+                                                        accessibilityLabel={
+                                                            recipe.authorUid && recipe.authorUid !== user?.uid
+                                                                ? 'Edit your own copy of this recipe'
+                                                                : 'Edit recipe'
+                                                        }
+                                                    >
+                                                        <Ionicons name="pencil" size={20} color="#fff" />
+                                                    </TouchableOpacity>
                                                 </View>
                                                 { recipe.authorName && 
                                                   <Text style={styles.recipeAuthor}>{recipe.authorName}</Text>
