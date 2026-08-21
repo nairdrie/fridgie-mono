@@ -406,7 +406,10 @@ export default function HomeScreen() {
         loadCollapsedState();
     }, []);
 
-    const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
+    // Always called with a meal from here: the editor is only ever opened on
+    // one. The cookbook opens the same form with no meal at all.
+    const handleRecipeSaved = (updatedMeal: Meal | null, newItems: Item[]) => {
+        if (!updatedMeal) return;
         setMeals(prevMeals => prevMeals.map(meal => (meal.id === updatedMeal.id ? updatedMeal : meal)));
 
         // Add new items to the list

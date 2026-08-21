@@ -10,11 +10,28 @@ import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipe
 interface AddEditRecipeModalProps {
   isVisible: boolean;
   onClose: () => void;
+  /**
+   * The meal this recipe is being written for, when there is one. Null for a
+   * recipe going straight to the cookbook: nothing is planned for a day and
+   * nothing lands on a shopping list, so there is no meal to speak of.
+   */
   mealForRecipe: Meal | null;
-  onRecipeSave: (updatedMeal: Meal, newItems: Item[]) => void;
+  /**
+   * A recipe to open straight into the editor. The cookbook already holds the
+   * whole recipe by the time Edit is tapped, so it hands it over rather than
+   * sending the form back to fetch what it already has.
+   */
+  recipeToEdit?: Recipe | null;
+  /**
+   * `updatedMeal` and `newItems` are null and empty for a cookbook recipe —
+   * there is no meal to point at the recipe and no ingredients to shop for.
+   * `savedRecipe` is what the server stored, and its id is NOT necessarily the
+   * one that went in: saving someone else's recipe forks it.
+   */
+  onRecipeSave: (updatedMeal: Meal | null, newItems: Item[], savedRecipe: Recipe) => void;
 }
 
-export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, onRecipeSave }: AddEditRecipeModalProps) {
+export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, recipeToEdit = null, onRecipeSave }: AddEditRecipeModalProps) {
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [importUrl, setImportUrl] = useState('');
   // Seeded from the meal's own title: someone who typed "Chicken Katsu" into
@@ -32,6 +49,10 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 
   // ✅ 1. State for the animated loading message
   const [importingMessage, setImportingMessage] = useState('Fetching your recipe...');
+
+  // Opened on a recipe that already exists, rather than at the four ways of
+  // starting one — so there is no earlier step to go back to.
+  const isEditingExisting = !!(recipeToEdit || mealForRecipe?.recipeId);
 
   const createBlankRecipe = (): Recipe => ({
     id: uuid.v4() as string,
@@ -100,7 +121,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   }, [isImporting, importSource]);
 
   useEffect(() => {
-    if (!isVisible || !mealForRecipe) {
+    if (!isVisible) {
       setEditingRecipe(null);
       return;
     }
@@ -108,9 +129,13 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     const setupRecipe = async () => {
       setIsLoading(true);
       setImportUrl('');
-      setGenerateTitle(mealForRecipe.name || '');
-      
-      if (mealForRecipe.recipeId) {
+      setGenerateTitle(mealForRecipe?.name || '');
+
+      // Handed a recipe outright — the cookbook's Edit already has it.
+      if (recipeToEdit) {
+        setCreationMode('manual');
+        setEditingRecipe(recipeToEdit);
+      } else if (mealForRecipe?.recipeId) {
         setCreationMode('manual');
         try {
           const existingRecipe = await getRecipe(mealForRecipe.recipeId);
@@ -121,6 +146,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
           onClose();
         }
       } else {
+        // No meal and no recipe: a blank one, headed for the cookbook.
         setCreationMode('initial');
         setEditingRecipe(createBlankRecipe());
       }
@@ -128,7 +154,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     };
 
     setupRecipe();
-  }, [isVisible, mealForRecipe]);
+  }, [isVisible, mealForRecipe, recipeToEdit]);
 
   const handleImportRecipe = async () => {
     if (!importUrl) return;
@@ -339,8 +365,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
   const handleSaveRecipe = async () => {
-    // (This function remains the same as before)
-    if (!editingRecipe || !mealForRecipe) return;
+    if (!editingRecipe) return;
     if(editingRecipe.photoURL && !editingRecipe.photoURL.startsWith('http')) {
       try {
         editingRecipe.photoURL = await uploadRecipePhoto(editingRecipe.photoURL, editingRecipe.id);
@@ -349,9 +374,14 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     try {
       const recipeToSave = { ...editingRecipe, ingredients: (editingRecipe.ingredients || []).filter(i => (i.name ?? '').trim() !== ''), instructions: (editingRecipe.instructions || []).filter(i => (i ?? '').trim() !== '') };
       const savedRecipe = await saveRecipe(recipeToSave);
-      const updatedMeal = { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name };
-      const newItemsForRecipe = savedRecipe.ingredients.map(ing => ({ id: uuid.v4() as string, text: ing.name.trim(), quantity: ing.quantity.trim(), checked: false, listOrder: 'NEEDS-RANK', isSection: false, mealId: mealForRecipe.id }));
-      onRecipeSave(updatedMeal, newItemsForRecipe);
+      // A cookbook recipe has no meal to point back at and nothing to shop for.
+      const updatedMeal = mealForRecipe
+        ? { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name }
+        : null;
+      const newItemsForRecipe = mealForRecipe
+        ? savedRecipe.ingredients.map(ing => ({ id: uuid.v4() as string, text: ing.name.trim(), quantity: ing.quantity.trim(), checked: false, listOrder: 'NEEDS-RANK', isSection: false, mealId: mealForRecipe.id }))
+        : [];
+      onRecipeSave(updatedMeal, newItemsForRecipe, savedRecipe);
       onClose();
     } catch (error) { console.error("Failed to save recipe", error); Alert.alert("Error", "Could not save recipe."); }
   };
@@ -556,12 +586,12 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             <View style={styles.modalContentContainer}>
               <View style={styles.modalHeader}>
                 {/* Header content remains the same */}
-                {creationMode !== 'initial' && !mealForRecipe?.recipeId ? (
+                {creationMode !== 'initial' && !isEditingExisting ? (
                   <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
                     <Ionicons name="chevron-back" size={28} color="#aaa" />
                   </TouchableOpacity>
                 ) : <View style={styles.backButton} /> }
-                <Text style={styles.modalTitle}>{mealForRecipe?.recipeId ? 'Edit' : 'Add'} Recipe</Text>
+                <Text style={styles.modalTitle}>{isEditingExisting ? 'Edit' : 'Add'} Recipe</Text>
                 <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                   <Ionicons name="close-circle" size={28} color="#aaa" />
                 </TouchableOpacity>

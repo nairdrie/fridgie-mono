@@ -7,7 +7,7 @@ import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { Item, Meal, Recipe } from '@/types/types';
-import { getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
+import { addUserCookbookRecipe, getUserCookbook, getUserProfile, removeUserCookbookRecipe, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
@@ -250,7 +250,11 @@ export default function UserProfile() {
 
     const [isMealPlanModalVisible, setIsMealPlanModalVisible] = useState(false);
     const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-    const [mealForRecipeEdit, setMealForRecipeEdit] = useState<Meal | null>(null);
+    // The recipe the editor is open on; the flag is the same editor opened on
+    // nothing, for one written from scratch. Either way what comes out goes on
+    // the cookbook shelf rather than into a week's meal plan.
+    const [recipeToEdit, setRecipeToEdit] = useState<Recipe | null>(null);
+    const [isAddingRecipe, setIsAddingRecipe] = useState(false);
 
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     
@@ -348,14 +352,44 @@ export default function UserProfile() {
     const handleDecline = (invitationId: string) => declineInvitation(invitationId);
 
     const handleEditRecipe = (recipe: Recipe) => {
-        const mealFromRecipe: Meal = {
-            id: recipe.id,
-            listId: 'cookbook-context',
-            name: recipe.name,
-            recipeId: recipe.id,
-        };
         setRecipeToViewId(null);
-        setMealForRecipeEdit(mealFromRecipe);
+        setIsAddingRecipe(false);
+        setRecipeToEdit(recipe);
+    };
+
+    const handleAddRecipe = () => {
+        setRecipeToEdit(null);
+        setIsAddingRecipe(true);
+    };
+
+    const closeRecipeEditor = () => {
+        setRecipeToEdit(null);
+        setIsAddingRecipe(false);
+    };
+
+    /**
+     * Puts what was just saved on the shelf.
+     *
+     * Saving somebody else's recipe forks it server-side and comes back with a
+     * different id, which is the whole point of the copy the user agreed to —
+     * so the copy takes the original's place here. Their recipe is untouched
+     * and still theirs; this cookbook now holds the version being edited.
+     */
+    const handleRecipeSaved = async (_meal: Meal | null, _items: Item[], savedRecipe: Recipe) => {
+        const previousId = recipeToEdit?.id;
+        closeRecipeEditor();
+        try {
+            if (previousId && previousId !== savedRecipe.id) {
+                await removeUserCookbookRecipe(previousId);
+                await addUserCookbookRecipe(savedRecipe.id);
+            } else if (!previousId) {
+                await addUserCookbookRecipe(savedRecipe.id);
+            }
+        } catch (error) {
+            console.error('Failed to update the cookbook after saving a recipe', error);
+            Alert.alert('Saved, but not filed', "The recipe was saved but couldn't be added to your cookbook. Pull to refresh and try again.");
+        }
+        fetchProfileData();
     };
 
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -406,11 +440,6 @@ export default function UserProfile() {
         if (!result.canceled) setNewPhotoUri(result.assets[0].uri);
     };
     
-    const handleRecipeSaved = (updatedMeal: Meal, newItems: Item[]) => {
-        setMealForRecipeEdit(null);
-        fetchProfileData();
-    };
-
     const openPhotoModal = () => {
         setNewPhotoUri(authUser?.photoURL || null);
         setEditPhotoModalVisible(true);
@@ -482,6 +511,18 @@ export default function UserProfile() {
                                     placeholderTextColor={'#999'}
                                 />
                             </View>
+                            {/* Next to the search box because that is where you
+                                already are when the recipe you wanted isn't
+                                there. Straight to the shelf — no week, no day,
+                                nothing added to a shopping list. */}
+                            <TouchableOpacity
+                                style={styles.addRecipeButton}
+                                onPress={handleAddRecipe}
+                                accessibilityRole="button"
+                                accessibilityLabel="Add a recipe to your cookbook"
+                            >
+                                <Ionicons name="add" size={26} color="#fff" />
+                            </TouchableOpacity>
                         </View>
                     )}
                     renderItem={({ item }) => (
@@ -563,9 +604,10 @@ export default function UserProfile() {
                 />
                 
                 <AddEditRecipeModal
-                    isVisible={!!mealForRecipeEdit}
-                    onClose={() => setMealForRecipeEdit(null)}
-                    mealForRecipe={mealForRecipeEdit}
+                    isVisible={!!recipeToEdit || isAddingRecipe}
+                    onClose={closeRecipeEditor}
+                    mealForRecipe={null}
+                    recipeToEdit={recipeToEdit}
                     onRecipeSave={handleRecipeSaved}
                 />
             </SafeAreaView>
@@ -658,8 +700,14 @@ const styles = StyleSheet.create({
     stickyHeaderContainer: {
         backgroundColor: '#f8f9fa',
         paddingTop: 16,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
     },
     searchContainer: {
+        // The search box gives up whatever width the + needs; without this it
+        // holds its content width and pushes the button off the row.
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#fff',
@@ -668,6 +716,16 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         borderWidth: 1,
         borderColor: '#e9ecef'
+    },
+    // Square-ish and the same height as the search box beside it, so the row
+    // reads as one control rather than a field with a sticker on the end.
+    addRecipeButton: {
+        width: 46,
+        height: 46,
+        borderRadius: 10,
+        backgroundColor: primary,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     searchIcon: { marginRight: 8 },
     searchInput: { flex: 1, height: 44, fontSize: 16 },

@@ -21,21 +21,34 @@ route.delete('/', requireAccount, async (c) => {
 
   // Define references for the transaction
   const cookbookRef = fs.collection('users').doc(uid).collection('cookbook').doc(recipeId)
-  const rootRecipeRef = fs.collection('recipes').doc(recipeId)
+  // A cookbook entry can be a fork of something, and the count it was added to
+  // belongs to the original — take it off the same recipe POST put it on.
+  const recipeRef = fs.collection('recipes').doc(recipeId)
 
   try {
     // Use a transaction to ensure atomicity
     await fs.runTransaction(async (transaction) => {
+      // Every read before any write, as Firestore requires.
+      const recipeSnap = await transaction.get(recipeRef)
+      const rootRecipeRef = recipeSnap.data()?.forkedFromId
+        ? fs.collection('recipes').doc(recipeSnap.data()!.forkedFromId)
+        : recipeRef
+      const rootExists = rootRecipeRef.isEqual(recipeRef)
+        ? recipeSnap.exists
+        : (await transaction.get(rootRecipeRef)).exists
+
       // 1. Delete the recipe from the user's cookbook subcollection
       transaction.delete(cookbookRef)
 
-      // 2. Decrement the popularity counter on the root recipe
-      // Using increment(-1) is the correct way to decrement a value
-      transaction.update(rootRecipeRef, {
-        'popularity.cookbooks': FieldValue.increment(-1)
-      })
+      // 2. Decrement the popularity counter on the root recipe. A recipe that
+      // has since been deleted must not block taking it off the shelf.
+      if (rootExists) {
+        transaction.update(rootRecipeRef, {
+          'popularity.cookbooks': FieldValue.increment(-1)
+        })
+      }
     })
-    
+
     // Return 204 No Content for a successful deletion
     return c.body(null, 204)
   } catch (error: any) {
