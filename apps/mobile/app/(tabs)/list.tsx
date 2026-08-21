@@ -21,7 +21,6 @@ import {
     Alert,
     Keyboard,
     KeyboardAvoidingView,
-    Modal,
     Platform,
     Pressable,
     StyleSheet,
@@ -36,6 +35,19 @@ import { addUserCookbookRecipe, categorizeList, CLIENT_ID, getUserCookbook, list
 import { cancelMealRatingReminder, scheduleMealRatingReminder } from '../../utils/mealReminders';
 import { parseWeekStart } from '../../utils/date';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
+
+/**
+ * Department order, always. A grocery list is walked aisle by aisle, so filing
+ * is what the list does rather than a mode to be picked — there is no sort
+ * picker any more, and nothing left to store a per-list choice for. Still
+ * written on every save so the stored document says what the order actually is,
+ * including for lists left on the old `custom` setting.
+ *
+ * Ordering rows by hand is untouched by this: dragging one moves it and it
+ * stays moved, because filing only ever places the rows that still need a
+ * department and leaves every other row where it is.
+ */
+const LIST_SORT: List['sort'] = 'category';
 
 // RTDB stores a JS array as a keyed object and only hands it back as an array
 // while the keys stay 0..n with no gaps. Reading a stored list as "array or
@@ -52,19 +64,10 @@ export default function HomeScreen() {
     
     const [meals, setMeals] = useState<Meal[]>([]);
     const [items, setItems] = useState<Item[]>([]);
-    // Department order is the default: a grocery list is walked aisle by aisle,
-    // and a list that arrives without a stored `sort` has never been given one
-    // rather than having been deliberately set to custom.
-    const [sort, setSort] = useState<List['sort']>('category');
 
     const [editingId, setEditingId] = useState<string>('');
-    // Any filing in flight, automatic or asked for. Gates the auto-file effect
-    // so two passes can't race.
+    // Any filing in flight. Gates the auto-file effect so two passes can't race.
     const [isCategorizing, setIsCategorizing] = useState(false);
-    // Only a whole-list re-sort the user asked for. Filing happens constantly
-    // now, and turning the Sort button into a spinner every time an item lands
-    // would make the list look busy doing something nobody requested.
-    const [isSorting, setIsSorting] = useState(false);
     const [isKeyboardVisible, setKeyboardVisible] = useState(false);
     const inputRefs = useRef<Record<string, TextInput | null>>({});
 
@@ -92,10 +95,12 @@ export default function HomeScreen() {
     const [isFocused, setIsFocused] = useState(false);
 
     const listRef = useRef<GroceryListHandle | null>(null);
-    
-    // --- Start of new/moved code ---
-    const [isSortModalVisible, setIsSortModalVisible] = useState(false);
-    // --- End of new/moved code ---
+
+    // Bumped every time the user drags a row somewhere. Filing is a model call
+    // and takes its time; an answer worked out before the drag would put the row
+    // straight back, so one that comes home to a different number than it left
+    // with is thrown away and asked for again.
+    const reorderSeqRef = useRef(0);
 
     useFocusEffect(
         useCallback(() => {
@@ -162,7 +167,7 @@ export default function HomeScreen() {
     }));
 
 
-    // True while the latest items/meals/sort state came from the server (WS or
+    // True while the latest items/meals state came from the server (WS or
     // categorize) rather than a local edit — those changes must NOT be saved
     // back, or every broadcast would trigger a write and clients would
     // ping-pong saves at each other.
@@ -206,7 +211,6 @@ export default function HomeScreen() {
         setItems(withOrder);
         // `meals` can come back keyed too, for the same reason.
         setMeals(asArray(list.meals));
-        setSort(list.sort || 'category');
     };
 
     // Handles ALL incoming data (Initial Fetch + Real-time Updates)
@@ -309,7 +313,7 @@ export default function HomeScreen() {
         const groupId = selectedGroup.id;
         const listId = selectedList.id;
         const timeout = setTimeout(() => {
-            updateList(groupId, listId, { items, meals, sort }, revRef.current)
+            updateList(groupId, listId, { items, meals, sort: LIST_SORT }, revRef.current)
                 .then(res => { if (typeof res?.rev === 'number') revRef.current = res.rev; })
                 .catch(err => {
                     if (err instanceof StaleRevError) {
@@ -328,7 +332,7 @@ export default function HomeScreen() {
                 });
         }, 500);
         return () => clearTimeout(timeout);
-    }, [items, meals, sort, selectedList?.id, selectedGroup?.id]);
+    }, [items, meals, selectedList?.id, selectedGroup?.id]);
 
     const focusAtEnd = (id: string) => {
         const ref = inputRefs.current[id];
@@ -473,7 +477,7 @@ export default function HomeScreen() {
                 const res = await updateList(selectedGroup.id, selectedList.id, {
                     items: finalNewItems,
                     meals: updatedMeals,
-                    sort: sort,
+                    sort: LIST_SORT,
                 }, revRef.current);
                 if (typeof res?.rev === 'number') revRef.current = res.rev;
             }
@@ -592,17 +596,16 @@ export default function HomeScreen() {
     };
 
     /**
-     * Files items into supermarket aisles.
+     * Files the named items into supermarket aisles.
      *
-     * With `itemIds` only those rows move and the rest of the list is left
-     * alone — that is the automatic path, and it runs on every add. Without
-     * them the whole list is re-sorted, which is what the Sort by Category
-     * button asks for.
+     * Only those rows move; the rest of the list is left exactly as it is, which
+     * is what lets a row the user has dragged somewhere stay dragged. There is
+     * no whole-list re-sort any more — department order is not a mode to switch
+     * into, it is just what the list does.
      */
-    const handleAutoCategorize = async (itemIds?: string[]) => {
+    const handleAutoCategorize = async (itemIds: string[]) => {
         if (!selectedGroup || !selectedList?.id) return;
         setIsCategorizing(true);
-        if (!itemIds) setIsSorting(true);
         markDirty();
 
         // Always the committed state. Every caller used to have the option of
@@ -614,30 +617,31 @@ export default function HomeScreen() {
         // matches on item id: against a different week nothing matches, so every
         // row of THAT list would be treated as locally deleted.
         const askedForListId = selectedList.id;
+        // ...and the order it will be about. See reorderSeqRef.
+        const askedForOrder = reorderSeqRef.current;
 
         try {
             const { items: newItems, rev } = await categorizeList(selectedGroup.id, selectedList.id, currentItems, itemIds);
             if (selectedListIdRef.current !== askedForListId) return;
+            // The user moved a row by hand while this was in flight. The answer
+            // carries a rank for every row, worked out from where they all were
+            // before that move, so applying it would undo the move. Drop it —
+            // `items` has changed, so the effect below asks again with the order
+            // the user has just set.
+            if (reorderSeqRef.current !== askedForOrder) return;
             applyFiledItems(sanitizeListOrders(newItems));
             // This write moved the list on; adopt its revision so the save that
             // follows isn't rejected as stale and rebased over the merge above.
             if (typeof rev === 'number') revRef.current = rev;
             sortFailedIdsRef.current = new Set();
-            setSort('category'); // Set sort mode to category
-            // Re-sorting the whole list rearranges everything, so there is no row
-            // left to go back to. Filing one new row is not a reason to drop the
-            // user out of the one they are typing in.
-            if (!itemIds) setEditingId('');
         } catch (err) {
             console.error('Auto-categorization failed', err);
             if (selectedListIdRef.current !== askedForListId) return;
             // Give up on these particular items until something else changes,
             // so the auto-sort effect doesn't retry them on every render.
-            const failed = itemIds ?? currentItems.filter(hasText).map(i => i.id);
-            for (const id of failed) sortFailedIdsRef.current.add(id);
+            for (const id of itemIds) sortFailedIdsRef.current.add(id);
         } finally {
             setIsCategorizing(false);
-            setIsSorting(false);
         }
     };
 
@@ -656,7 +660,6 @@ export default function HomeScreen() {
     // and the item is filed into its aisle. Adding a row, typing an ingredient
     // into a meal, saving a recipe and generating meals all just change `items`.
     useEffect(() => {
-        if (sort !== 'category') return;
         if (unsortedIds.length === 0) return;
         if (isCategorizing) return;
         if (!hasLoadedRef.current || !selectedGroup || !selectedList?.id) return;
@@ -666,7 +669,7 @@ export default function HomeScreen() {
         const timer = setTimeout(() => { handleAutoCategorize(unsortedIds).catch(console.error); }, 700);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [unsortedKey, sort, isCategorizing, items, selectedGroup?.id, selectedList?.id]);
+    }, [unsortedKey, isCategorizing, items, selectedGroup?.id, selectedList?.id]);
 
     // Rows with nothing in them are scaffolding: one you added and never typed
     // into, an ingredient abandoned in the meal plan, an unnamed heading, the
@@ -726,18 +729,6 @@ export default function HomeScreen() {
     };
     
     const handleAddItem = (isSection = false) => {
-    if (sort === 'alphabetical') {
-        // This case should no longer be reachable, but as a safeguard,
-        // we'll switch to custom before adding.
-        setSort('custom');
-    }
-
-    // Writing your own category heading is organising the list by hand, the
-    // same as dragging a row is. Auto department sort rebuilds the headings
-    // from scratch, so it would delete this one the moment the next item
-    // landed; opt out of it instead, exactly as reordering does.
-    if (isSection) setSort('custom');
-
     if (!selectedList) return;
 
     // An empty row already waiting for text IS the row being asked for. Without
@@ -833,49 +824,6 @@ export default function HomeScreen() {
         } catch (e) { console.error("Failed to save collapsed meal state.", e); }
     };
     
-    // --- Start of new/moved code ---
-    const reRankAlphabetically = (currentItems: Item[]) => {
-        const itemsWithoutSections = currentItems.filter(item => !item.isSection);
-        const sortedAlphabetically = [...itemsWithoutSections].sort((a, b) => (a.text ?? '').localeCompare(b.text ?? ''));
-        
-        let rank = LexoRank.middle();
-        const rankMap = new Map<string, string>();
-        sortedAlphabetically.forEach(item => {
-            rank = rank.genNext();
-            rankMap.set(item.id, rank.toString());
-        });
-
-        return currentItems
-            .filter(item => !item.isSection) // ensure sections are removed
-            .map(item => ({
-                ...item,
-                listOrder: rankMap.get(item.id) || item.listOrder
-            }));
-    };
-
-    const handleSelectSort = (selectedMode: List['sort']) => {
-        if (selectedMode === 'category') {
-            handleAutoCategorize();
-        } else if (selectedMode === 'alphabetical') {
-            const newRankedItems = reRankAlphabetically(items);
-            setItems(newRankedItems);
-            setSort('custom'); // Immediately set the mode to custom, locking in the new order.
-        } else {
-            // This case handles selecting "Custom" which does nothing but close the modal.
-            setSort('custom');
-        }
-        setIsSortModalVisible(false);
-    };
-
-    const getSortIconText = () => {
-        switch (sort) {
-            case 'alphabetical': return "Alpha";
-            case 'category': return "Category";
-            default: return "Sort";
-        }
-    };
-    // --- End of new/moved code ---
-
     const mealsWithCookbookStatus = React.useMemo(() => {
         return meals.map(meal => ({
             ...meal,
@@ -903,14 +851,13 @@ export default function HomeScreen() {
                     <GroceryListView
                         items={items}
                         setItems={setItems}
-                        sort={sort}
-                        setSort={setSort}
                         editingId={editingId}
                         setEditingId={setEditingId}
                         inputRefs={inputRefs}
                         isKeyboardVisible={isKeyboardVisible}
                         markDirty={markDirty}
-                        ref={listRef} 
+                        onManualReorder={() => { reorderSeqRef.current += 1; }}
+                        ref={listRef}
                     />
                 ) : (
                     <MealPlanView
@@ -941,29 +888,6 @@ export default function HomeScreen() {
             )}
 
             <View style={styles.bottomActionContainer}>
-                 {/* --- Start of new/moved code: Sort Button --- */}
-                 {selectedView === ListView.GroceryList && (
-                    <TouchableOpacity style={styles.sortButton} onPress={() => setIsSortModalVisible(true)} disabled={isCategorizing}>
-                        {isSorting ? (
-                            <>
-                                <ActivityIndicator size="small" color={primary} />
-                                <Text style={styles.sortButtonText}>Sorting…</Text>
-                            </>
-                        ) : (
-                            <>
-                                <Ionicons name={'swap-vertical-outline'} size={20} color={primary} />
-                                <Text style={styles.sortButtonText}>{getSortIconText()}</Text>
-                            </>
-                        )}
-                    </TouchableOpacity>
-                 )}
-                 { selectedView != ListView.GroceryList && (
-                    <TouchableOpacity>
-                        <Text style={styles.sortButtonText}>&nbsp;</Text>
-                    </TouchableOpacity>
-                 )}
-                 {/* --- End of new/moved code --- */}
-
                 <View style={styles.fabContainer}>
                     {isFabMenuOpen && (
                         <>
@@ -1034,39 +958,6 @@ export default function HomeScreen() {
                 onClose={() => setCookbookModalVisible(false)}
                 listId={selectedList?.id ?? ''}
             />
-            
-            {/* --- Start of new/moved code: Sort Modal --- */}
-            <Modal
-                transparent={true}
-                visible={isSortModalVisible}
-                onRequestClose={() => setIsSortModalVisible(false)}
-                animationType="fade"
-            >
-                <Pressable style={styles.modalOverlay} onPress={() => setIsSortModalVisible(false)}>
-                    <View style={styles.sortModalContent}>
-                        <Text style={styles.sortModalTitle}>Sort List By</Text>
-                        
-                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('custom')}>
-                            <Ionicons name="swap-vertical-outline" size={24} color={primary} style={styles.sortIcon}/>
-                            <Text style={styles.sortOptionText}>Custom</Text>
-                            {sort === 'custom' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('alphabetical')}>
-                            <Ionicons name="text-outline" size={24} color={primary} style={styles.sortIcon}/>
-                            <Text style={styles.sortOptionText}>Alphabetical</Text>
-                            {sort === 'alphabetical' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity style={styles.sortOption} onPress={() => handleSelectSort('category')}>
-                            <Ionicons name="sparkles-outline" size={24} color={primary} style={styles.sortIcon}/>
-                            <Text style={styles.sortOptionText}>By Category</Text>
-                            {sort === 'category' && <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />}
-                        </TouchableOpacity>
-                    </View>
-                </Pressable>
-            </Modal>
-             {/* --- End of new/moved code --- */}
         </View>
         </>
     );
@@ -1078,38 +969,18 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
         backgroundColor: 'rgba(0,0,0,0.2)',
     },
-    // --- Start of new/moved code ---
     bottomActionContainer: {
         position: 'absolute',
         bottom: 30,
         paddingHorizontal: 20,
         width: '100%',
         flexDirection: 'row',
-        justifyContent:'space-between',
+        // The FAB is the only thing left down here now that sorting is not a
+        // choice to make; space-between would park it on the left.
+        justifyContent: 'flex-end',
         alignItems: 'flex-end',
         gap: 16
     },
-    sortButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#fff',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        height: 50,
-        borderRadius: 25,
-        elevation: 6,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-    },
-    sortButtonText: {
-        marginLeft: 6,
-        color: primary,
-        fontWeight: '600',
-        fontSize: 16,
-    },
-    // --- End of new/moved code ---
     fabContainer: {
         alignItems: 'flex-end',
         width: 80,
@@ -1160,43 +1031,4 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#333'
     },
-    // --- Start of new/moved code ---
-    modalOverlay: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'rgba(0,0,0,0.4)',
-    },
-    sortModalContent: {
-        backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 20,
-        width: '80%',
-        elevation: 10,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 10,
-    },
-    sortModalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        marginBottom: 20,
-        textAlign: 'center',
-        color: '#333',
-    },
-    sortOption: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 15,
-    },
-    sortIcon: {
-        marginRight: 15,
-    },
-    sortOptionText: {
-        fontSize: 16,
-        flex: 1,
-        color: '#333',
-    },
-     // --- End of new/moved code ---
 });
