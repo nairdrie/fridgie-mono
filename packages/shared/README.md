@@ -36,6 +36,7 @@ because Metro doesn't watch or resolve files outside the app directory.
 | `itemText.ts` | yes | canonicalizing grocery item text into a stable key |
 | `staples.ts` | yes | what the household always has, and what counts as saying so |
 | `cookTimers.ts` | yes | durations mentioned in a recipe step |
+| `listSections.ts` | yes | which aisle headings still have something under them |
 
 `quantity.ts` and `rank.ts` exist because both apps previously had their own
 copies that drifted: the two rank modules repaired invalid ranks differently
@@ -58,6 +59,14 @@ is stored under them.
 `cookTimers.ts` has only a client caller today, like `mergeList.ts` — it lives
 here because it is pure logic with real edge cases worth pinning in tests
 (`"cut into 2 inch pieces"` must never become a timer).
+
+`listSections.ts` is here on the same terms. A section holds its items by
+POSITION — a row belongs to the nearest heading above it in rank order — so
+removing rows can leave a heading standing over nothing, which is what deleting
+a meal used to do to every aisle only that meal was using. Telling an aisle a
+delete emptied apart from one the user has just written and not filled in yet
+takes the list as it was BEFORE the delete, so it is decided at the edit rather
+than at render time, and the rule is worth a test rather than a comment.
 
 `servings.ts` follows the same rule as the rest: the recipe is
 never rewritten, only the rows it puts on a list are, so a shared recipe means

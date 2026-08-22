@@ -39,6 +39,7 @@ import { getListSyncEngine, type ListSyncEngine } from '../../utils/listSync';
 import { stampEdits } from '../../utils/stamp';
 import { cancelMealRatingReminder, scheduleMealRatingReminder } from '../../utils/mealReminders';
 import { parseWeekStart } from '../../utils/date';
+import { dropEmptiedSections } from '@fridgie/shared/listSections';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
 
 // LIST_SORT moved to utils/listSync — the engine is what writes it now, and it
@@ -739,7 +740,13 @@ export default function HomeScreen() {
 
     const handleDeleteMeal = (mealId: string) => {
         setMeals(prev => prev.filter(meal => meal.id !== mealId));
-        setItems(prev => prev.filter(item => item.mealId !== mealId));
+        // A meal's ingredients are filed into aisles like any other row, so an
+        // aisle that held nothing else is left as a bare heading once they go.
+        // The grocery view can't drop those on its own — a heading with nothing
+        // under it is also what one the user has just written looks like — so
+        // the aisles this delete emptied are taken out here, where the list as
+        // it was a moment ago is still in hand to tell the two apart.
+        setItems(prev => dropEmptiedSections(prev, prev.filter(item => item.mealId !== mealId)));
         markDirty();
         if (selectedList) {
             cancelMealRatingReminder(selectedList.id, mealId).catch(console.error);
