@@ -97,7 +97,9 @@ export default function RootLayout() {
                     name="groups"
                     options={{ 
                       title: 'Groups',
-                      headerShown: false
+                      headerShown: false,
+                      // Same shape as profile/[uid] below, same reason.
+                      fullScreenGestureEnabled: true
                     }}
                   />
                   <Stack.Screen
@@ -131,7 +133,21 @@ export default function RootLayout() {
                       name="profile/[uid]"
                       options={{
                         title: 'Profile',
-                        headerShown: false
+                        headerShown: false,
+                        // These screens hide the navigator's header for one of
+                        // their own, so the back chevron is the only thing that
+                        // says you can leave — and iOS's pop gesture, the way it
+                        // comes, only fires from the ~20pt left edge. Someone
+                        // holding the phone one-handed swipes across the middle
+                        // of a full-bleed screen and nothing happens. Recognise
+                        // the drag anywhere instead. Safe here because neither
+                        // screen has anything horizontally swipeable in it to
+                        // take the gesture from — a carousel or a swipe-to-delete
+                        // row would fight it, which is why this is per-screen
+                        // rather than a default on the whole stack. iOS-only;
+                        // Android's system back gesture already works from
+                        // either edge.
+                        fullScreenGestureEnabled: true
                       }}
                   />
                 </Stack>
