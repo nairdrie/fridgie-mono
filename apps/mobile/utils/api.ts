@@ -686,11 +686,16 @@ export async function importRecipeFromPhoto(imageDataUrl: string): Promise<Recip
  * two importers, so it lands in the same review-and-edit screen — what comes
  * back is a first draft to check, not an answer.
  */
-export async function generateRecipeFromTitle(title: string): Promise<Recipe> {
+/**
+ * `servings` is the household this is being written for, when there is one.
+ * A generated recipe has no author to be faithful to, so it is written at the
+ * right size rather than written for four and multiplied later.
+ */
+export async function generateRecipeFromTitle(title: string, servings?: number | null): Promise<Recipe> {
   const res = await authorizedFetch(`${BASE_URL}/recipe/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(servings ? { title, servings } : { title }),
   }, [], AI_TIMEOUT_MS);
   return res.json();
 }

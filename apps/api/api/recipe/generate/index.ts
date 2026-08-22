@@ -3,12 +3,12 @@ import { auth } from '@/middleware/auth';
 import { requireAccount } from '@/middleware/requireAccount';
 import { fs } from '@/utils/firebase';
 import { normalizeIngredients } from '@/utils/quantity';
-import { normalizeRecipeServings } from '@/utils/servings';
+import { normalizeRecipeServings, parseServings } from '@/utils/servings';
 import { completeJson, models } from '@/utils/claude';
 import { generatedRecipeSchema, recipeGenerationSystemPrompt } from '@/utils/recipePrompts';
 
 // POST /api/recipe/generate
-// Body: { title: "Chicken Katsu Curry" }
+// Body: { title: "Chicken Katsu Curry", servings?: 2 }
 //
 // Writes a recipe from nothing but its name and returns the same Recipe shape
 // as the two importers, so the client hands the result to the identical
@@ -24,6 +24,9 @@ const route = new Hono();
  * or someone using the box as a free-text channel into the model.
  */
 const MAX_TITLE_CHARS = 200;
+
+/** Mirrors the cap on `householdSize` in api/group/[id].ts, which is where the hint comes from. */
+const MAX_HOUSEHOLD_SIZE = 20;
 
 interface MealPreferences {
   dietaryNeeds?: string[];
@@ -59,7 +62,7 @@ route.use('*', auth, requireAccount);
 route.post('/', async (c) => {
   const uid = c.get('uid') as string;
 
-  let body: { title?: string };
+  let body: { title?: string; servings?: number };
   try {
     body = await c.req.json();
   } catch {
@@ -74,6 +77,17 @@ route.post('/', async (c) => {
     return c.json({ error: 'That title is too long to write a recipe from.' }, 400);
   }
 
+  // The household this is being written for, when the client knows it.
+  //
+  // Unlike the importers there is no source document here to be faithful to, so
+  // the quantities can simply BE the ones this kitchen needs — better than
+  // writing for four and multiplying by 0.5 on the way to the list, which is
+  // how you get "0.5 egg". Ignored rather than rejected when it is nonsense:
+  // a bad hint is not worth failing a recipe over, and the prompt's own
+  // "write for 4" covers it. Bounded by the same cap the group setting has.
+  const target = parseServings(body?.servings);
+  const servingsHint = target && target <= MAX_HOUSEHOLD_SIZE ? target : null;
+
   // Best-effort: a preferences read that fails costs a less personal recipe,
   // which is not worth failing the request over. Unlike /meal/suggest, this
   // route works perfectly well for someone who never set any.
@@ -84,6 +98,9 @@ route.post('/', async (c) => {
 
   const userTurn = [
     `Write a complete recipe for: ${title}`,
+    ...(servingsHint
+      ? [`Write the quantities for ${servingsHint} ${servingsHint === 1 ? 'person' : 'people'}, and set "servings" to ${servingsHint}.`]
+      : []),
     ...(constraints.length ? ['', ...constraints] : []),
   ].join('\n');
 

@@ -1,12 +1,28 @@
 // components/ViewRecipeModal.tsx
+//
+// SERVINGS, AND WHY THEY ARE ADJUSTABLE HERE
+//
+// A recipe feeds however many people its author cooked for, which is almost
+// never how many people the reader cooks for. The shopping list already knew
+// that — ingredients are multiplied by the household size on their way onto it
+// — but the recipe itself still read as written, so the one screen where you
+// decide whether to cook the thing showed amounts for somebody else's table.
+//
+// So the ingredient header carries a stepper. It multiplies what is ON SCREEN
+// and nothing else: the stored recipe keeps the author's numbers, exactly as
+// packages/shared/servings.ts insists. Moving it also records the new count as
+// the household's usual, so the next recipe — imported, generated or written —
+// opens at the number you actually cook for instead of asking again.
 import { useAuth } from '@/context/AuthContext';
 import { Recipe } from '@/types/types';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Haptics from 'expo-haptics';
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { scaleIngredients } from '@/utils/servings';
-import { addUserCookbookRecipe, getRecipe, removeUserCookbookRecipe } from '../utils/api';
+import { displayQuantity, nextUnitInCycle } from '@/utils/quantity';
+import { scaleIngredients, servingsForScale, servingsRange, servingsScale } from '@/utils/servings';
+import { addUserCookbookRecipe, getRecipe, removeUserCookbookRecipe, saveRecipe, updateGroup } from '../utils/api';
 import AddToMealPlanModal from './AddToMealPlanModal'; // Import the new component
 import CookMode from './CookMode';
 
@@ -22,38 +38,85 @@ interface ViewRecipeModalProps {
      * shopping list — `Meal.scale`, passed only when the recipe is being opened
      * from a planned meal.
      *
-     * Absent everywhere else on purpose: in the cookbook, in Explore, and on a
-     * profile there is no shop to agree with, and a recipe should read as its
-     * author wrote it.
+     * Everywhere else it is 1 and the stepper opens at the household's usual
+     * count instead: in the cookbook, in Explore and on a profile there is no
+     * shop to agree with, so there is nothing to contradict.
      */
     scale?: number;
+    /**
+     * Opened from the week's meal plan, where this recipe is already planned.
+     * Only drops the Add to Plan action — the same three buttons that don't fit
+     * side by side are also one button too many when one of them is a no-op.
+     */
+    inMealPlan?: boolean;
 }
 
 // TODO: ensure forking is working. (if I add to meal plan or cookbook, we dont need to. unless i want to edit)
-// TODO: author, likes, comments 
+// TODO: author, likes, comments
 // TODO: report recipe (for image or inappropriate content)
 
-export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, isInCookbook, onCookbookUpdate, scale = 1 }: ViewRecipeModalProps) {
+export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, isInCookbook, onCookbookUpdate, scale = 1, inMealPlan = false }: ViewRecipeModalProps) {
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [isFetching, setIsFetching] = useState(false);
     const [isCurrentlyInCookbook, setIsCurrentlyInCookbook] = useState(isInCookbook);
     const [isToggling, setIsToggling] = useState(false);
     const [isConfirmingRemove, setIsConfirmingRemove] = useState(false);
 
-    const { user } = useAuth();
+    const { user, selectedGroup, refreshGroups } = useAuth();
 
-    // What the cook actually needs in front of them: the amounts the shopping
-    // was done against. Recomputing from the current household size instead
-    // would let this screen quietly disagree with what is in the cupboard.
+    /**
+     * Null until the reader moves the stepper — which is what keeps this screen
+     * from writing a number nobody chose. Everything below reads `servings`,
+     * the chosen count or the one it opened at.
+     */
+    const [chosenServings, setChosenServings] = useState<number | null>(null);
+    const [savedAsUsual, setSavedAsUsual] = useState(false);
+    /** Per-row unit the reader has tapped to; index into the ingredient list. */
+    const [unitChoices, setUnitChoices] = useState<Record<number, string>>({});
+    /**
+     * Saying what the recipe's own amounts feed, for one that never said.
+     *
+     * Nothing can be scaled without that number — not this screen and not the
+     * shopping list — and most recipes in an existing cookbook predate the field
+     * entirely, so without a way to fill it in from here the whole feature is
+     * invisible on exactly the recipes someone already has.
+     */
+    const [draftYield, setDraftYield] = useState<number | null>(null);
+    const [isSavingYield, setIsSavingYield] = useState(false);
+
+    const written = recipe?.servings ?? null;
+    /** What the shop was actually done for, when this came from a planned meal. */
+    const shopped = useMemo(() => (scale === 1 ? null : servingsForScale(written, scale)), [written, scale]);
+    const usual = selectedGroup?.householdSize ?? null;
+    const opening = written ? (shopped ?? usual ?? written) : null;
+    const servings = chosenServings ?? opening;
+    const range = useMemo(() => servingsRange(written), [written]);
+
+    /**
+     * Untouched inside a meal plan this stays the EXACT factor the shopping was
+     * done at, not one recomputed from the rounded label above it: the cook
+     * needs the amounts that are in the cupboard, and a recipe for five halved
+     * is not a recipe for three.
+     */
+    const factor = useMemo(() => {
+        if (!written || !servings) return scale;
+        if (chosenServings === null && shopped !== null) return scale;
+        return servingsScale(written, servings);
+    }, [written, servings, chosenServings, shopped, scale]);
+
     const ingredients = useMemo(
-        () => scaleIngredients(recipe?.ingredients ?? [], scale),
-        [recipe?.ingredients, scale],
+        () => scaleIngredients(recipe?.ingredients ?? [], factor),
+        [recipe?.ingredients, factor],
     );
+
+    /** "Serves 4" · "written for 4 · shopped for 2 · saved as your usual". */
     const scaleNote = useMemo(() => {
-        if (scale === 1) return recipe?.servings ? `Serves ${recipe.servings}` : null;
-        const written = recipe?.servings ? ` · written for ${recipe.servings}` : '';
-        return `Scaled ${scale > 1 ? 'up' : 'down'}${written}`;
-    }, [scale, recipe?.servings]);
+        const parts: string[] = [];
+        if (written) parts.push(servings === written ? `Serves ${written}` : `Written for ${written}`);
+        if (shopped && servings !== shopped) parts.push(`shopped for ${shopped}`);
+        if (savedAsUsual) parts.push('saved as your usual');
+        return parts.join(' · ');
+    }, [written, servings, shopped, savedAsUsual]);
 
     // [NEW] State for the meal plan modal
     const [isMealPlanModalVisible, setIsMealPlanModalVisible] = useState(false);
@@ -75,6 +138,13 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
         const fetchRecipe = async () => {
             setIsFetching(true);
             setRecipe(null);
+            // A different recipe means a different set of amounts: neither the
+            // servings the last one was read at nor the units it was read in
+            // belong to this one.
+            setChosenServings(null);
+            setSavedAsUsual(false);
+            setUnitChoices({});
+            setDraftYield(null);
             try {
                 const fullRecipe = await getRecipe(recipeId);
                 setRecipe(fullRecipe);
@@ -89,6 +159,91 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
 
         fetchRecipe();
     }, [recipeId, isVisible, isInCookbook]);
+
+    /**
+     * Remembering the count, so the next recipe doesn't ask again.
+     *
+     * It writes the group's household size — the same setting the groups screen
+     * edits — rather than a second private copy of the number. Two sources of
+     * truth here would mean a recipe screen reading "cooking for 2" over a
+     * shopping list quietly buying for four.
+     *
+     * Owner-gated because the API is (see api/group/[id].ts), debounced because
+     * the control is a stepper, and silent on failure: the amounts on screen are
+     * already right, and an alert about a preference nobody asked to save is
+     * worse than quietly not saving it.
+     */
+    useEffect(() => {
+        if (chosenServings === null || !selectedGroup) return;
+        if (selectedGroup.owner !== user?.uid) return;
+        if (chosenServings === usual) return;
+
+        const timer = setTimeout(async () => {
+            try {
+                await updateGroup(selectedGroup.id, { householdSize: chosenServings });
+                setSavedAsUsual(true);
+                refreshGroups();
+            } catch (error) {
+                console.warn('Could not save the household size from the recipe view:', error);
+            }
+        }, 900);
+        return () => clearTimeout(timer);
+        // Fields of the group rather than the group itself: its identity churns
+        // as presence arrives, and re-running this on every heartbeat would keep
+        // restarting the debounce and never save anything.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [chosenServings, selectedGroup?.id, selectedGroup?.owner, usual, user?.uid]);
+
+    const stepServings = (delta: number) => {
+        if (!servings) return;
+        const next = Math.min(range.max, Math.max(range.min, servings + delta));
+        if (next === servings) return;
+        Haptics.selectionAsync().catch(() => {});
+        setChosenServings(next);
+    };
+
+    /** Tap an amount to read it in another unit. See `conversionCycle`. */
+    const cycleUnit = (index: number, cycle: string[], current: string | null) => {
+        const next = nextUnitInCycle(cycle, current);
+        if (!next) return;
+        Haptics.selectionAsync().catch(() => {});
+        setUnitChoices((prev) => ({ ...prev, [index]: next }));
+    };
+
+    const stepDraftYield = (delta: number) => {
+        setDraftYield((prev) => Math.min(range.max, Math.max(range.min, (prev ?? 4) + delta)));
+    };
+
+    /**
+     * Writes the yield onto the recipe itself — the one thing on this screen
+     * that does change the stored document, because it is a fact about the
+     * author's amounts rather than a preference of the reader's.
+     *
+     * Offered only on recipes the caller already owns. Saving someone else's
+     * forks it (see POST /api/recipe), and quietly making a copy of a stranger's
+     * recipe because you told it how many it feeds is not a trade anyone asked
+     * for. The response is deliberately not adopted: it strips the derived
+     * author fields, and patching locally keeps the byline on screen.
+     */
+    const confirmYield = async () => {
+        if (!recipe || !draftYield) return;
+        setIsSavingYield(true);
+        try {
+            await saveRecipe({ ...recipe, servings: draftYield });
+            setRecipe((prev) => (prev ? { ...prev, servings: draftYield } : prev));
+            // Deliberately does NOT become the chosen count. Two reasons: the
+            // number just stated is the RECIPE's, and treating it as the
+            // reader's would save it as the household's usual a second later;
+            // and the stepper settling on that usual is the feature doing
+            // exactly what it says — a recipe for six, shown for two.
+            setDraftYield(null);
+        } catch (error) {
+            console.error('Failed to save recipe servings:', error);
+            Alert.alert('Error', 'Could not save that.');
+        } finally {
+            setIsSavingYield(false);
+        }
+    };
 
     /**
      * Somebody else wrote this one. Editing it is allowed, but what actually
@@ -157,6 +312,11 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
         onClose();
     };
 
+    const canScale = !!written && !!servings;
+    /** Matches the server's fork rule exactly: no author, or you are them. */
+    const isAuthor = !!recipe && (!recipe.authorUid || recipe.authorUid === user?.uid);
+    const canDeclareYield = !written && isAuthor;
+
     return (
         <>
             <Modal
@@ -224,24 +384,151 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
 
                                                 <View style={styles.sectionHeader}>
                                                     <Text style={styles.sectionTitle}>Ingredients</Text>
-                                                    <Text style={styles.sectionCount}>{recipe.ingredients.length}</Text>
+                                                    {/* The stepper takes the count's place: how many people
+                                                        these amounts feed is the useful number here, and how
+                                                        many lines the list runs to is not. A recipe with no
+                                                        stated yield has nothing to scale against, so it keeps
+                                                        the count. */}
+                                                    {canScale ? (
+                                                        <View style={styles.servingsStepper}>
+                                                            <TouchableOpacity
+                                                                style={styles.servingsButton}
+                                                                onPress={() => stepServings(-1)}
+                                                                disabled={servings! <= range.min}
+                                                                hitSlop={8}
+                                                                accessibilityRole="button"
+                                                                accessibilityLabel="Fewer servings"
+                                                            >
+                                                                <Ionicons name="remove" size={16} color={servings! <= range.min ? inkFaint : primary} />
+                                                            </TouchableOpacity>
+                                                            <Text style={styles.servingsValue} accessibilityLabel={`Adjusted for ${servings} servings`}>
+                                                                {servings} {servings === 1 ? 'serving' : 'servings'}
+                                                            </Text>
+                                                            <TouchableOpacity
+                                                                style={styles.servingsButton}
+                                                                onPress={() => stepServings(1)}
+                                                                disabled={servings! >= range.max}
+                                                                hitSlop={8}
+                                                                accessibilityRole="button"
+                                                                accessibilityLabel="More servings"
+                                                            >
+                                                                <Ionicons name="add" size={16} color={servings! >= range.max ? inkFaint : primary} />
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    ) : draftYield !== null ? (
+                                                        // Declaring the yield, not scaling by it: the ± moves
+                                                        // a number that is about to be written onto the
+                                                        // recipe, and the amounts below stay put until it is.
+                                                        <View style={styles.servingsStepper}>
+                                                            <TouchableOpacity
+                                                                style={styles.servingsButton}
+                                                                onPress={() => stepDraftYield(-1)}
+                                                                disabled={draftYield <= range.min || isSavingYield}
+                                                                hitSlop={8}
+                                                                accessibilityRole="button"
+                                                                accessibilityLabel="Fewer servings"
+                                                            >
+                                                                <Ionicons name="remove" size={16} color={draftYield <= range.min ? inkFaint : primary} />
+                                                            </TouchableOpacity>
+                                                            <Text style={styles.servingsValue}>
+                                                                {draftYield} {draftYield === 1 ? 'serving' : 'servings'}
+                                                            </Text>
+                                                            <TouchableOpacity
+                                                                style={styles.servingsButton}
+                                                                onPress={() => stepDraftYield(1)}
+                                                                disabled={draftYield >= range.max || isSavingYield}
+                                                                hitSlop={8}
+                                                                accessibilityRole="button"
+                                                                accessibilityLabel="More servings"
+                                                            >
+                                                                <Ionicons name="add" size={16} color={draftYield >= range.max ? inkFaint : primary} />
+                                                            </TouchableOpacity>
+                                                            <TouchableOpacity
+                                                                style={[styles.servingsButton, styles.servingsConfirm]}
+                                                                onPress={confirmYield}
+                                                                disabled={isSavingYield}
+                                                                hitSlop={8}
+                                                                accessibilityRole="button"
+                                                                accessibilityLabel="Save how many this recipe serves"
+                                                            >
+                                                                {isSavingYield
+                                                                    ? <ActivityIndicator size="small" color="#fff" />
+                                                                    : <Ionicons name="checkmark" size={16} color="#fff" />}
+                                                            </TouchableOpacity>
+                                                        </View>
+                                                    ) : canDeclareYield ? (
+                                                        // Nothing to scale from until someone says what these
+                                                        // amounts feed. Every recipe written before the field
+                                                        // existed is in this state, which is most of a
+                                                        // cookbook, so it is asked for here rather than left
+                                                        // to be found in the editor.
+                                                        <TouchableOpacity
+                                                            style={styles.setServingsChip}
+                                                            onPress={() => setDraftYield(usual ?? 4)}
+                                                            accessibilityRole="button"
+                                                            accessibilityLabel="Set how many this recipe serves"
+                                                        >
+                                                            <Ionicons name="people-outline" size={14} color={primary} />
+                                                            <Text style={styles.setServingsChipText}>Set servings</Text>
+                                                        </TouchableOpacity>
+                                                    ) : (
+                                                        <Text style={styles.sectionCount}>{recipe.ingredients.length}</Text>
+                                                    )}
                                                 </View>
-                                                {!!scaleNote && (
+                                                {draftYield !== null ? (
+                                                    <View style={styles.scaleNoteRow}>
+                                                        <Ionicons name="help-circle-outline" size={14} color={inkMuted} />
+                                                        <Text style={styles.scaleNoteText}>
+                                                            How many people do these amounts feed? Save it and the
+                                                            list can shop it for your household.
+                                                        </Text>
+                                                    </View>
+                                                ) : !!scaleNote && (
                                                     <View style={styles.scaleNoteRow}>
                                                         <Ionicons name="people-outline" size={14} color={inkMuted} />
                                                         <Text style={styles.scaleNoteText}>{scaleNote}</Text>
                                                     </View>
                                                 )}
                                                 <View style={styles.ingredientCard}>
-                                                    {ingredients.map((ing, index) => (
-                                                        <View key={index} style={[styles.ingredientRow, index > 0 && styles.ingredientDivider]}>
-                                                            <View style={styles.ingredientDot} />
-                                                            <Text style={styles.ingredientText}>
-                                                                {!!ing.quantity && <Text style={styles.ingredientQuantity}>{ing.quantity} </Text>}
-                                                                {ing.name}
-                                                            </Text>
-                                                        </View>
-                                                    ))}
+                                                    {ingredients.map((ing, index) => {
+                                                        // Amounts read as a cook would write them — "1½ cups",
+                                                        // not the "1.5 cup" that is stored — and a tap on a
+                                                        // convertible one swaps the unit for this reading only.
+                                                        const view = displayQuantity(ing.quantity, unitChoices[index]);
+                                                        return (
+                                                            <Pressable
+                                                                key={index}
+                                                                style={({ pressed }) => [
+                                                                    styles.ingredientRow,
+                                                                    index > 0 && styles.ingredientDivider,
+                                                                    pressed && view.convertible && styles.ingredientRowPressed,
+                                                                ]}
+                                                                onPress={view.convertible ? () => cycleUnit(index, view.cycle, view.unit) : undefined}
+                                                                disabled={!view.convertible}
+                                                                accessibilityRole={view.convertible ? 'button' : undefined}
+                                                                accessibilityLabel={
+                                                                    view.convertible
+                                                                        ? `${view.text} ${ing.name}. Tap to change units.`
+                                                                        : undefined
+                                                                }
+                                                            >
+                                                                <View style={styles.ingredientDot} />
+                                                                <Text style={styles.ingredientText}>
+                                                                    {!!view.text && (
+                                                                        <Text style={[styles.ingredientQuantity, view.converted && styles.ingredientQuantityConverted]}>
+                                                                            {view.text}{' '}
+                                                                        </Text>
+                                                                    )}
+                                                                    {ing.name}
+                                                                </Text>
+                                                                {/* Only on the rows a tap does something to —
+                                                                    it is the affordance as much as the hint. */}
+                                                                {view.convertible && (
+                                                                    <Ionicons name="swap-horizontal" size={14} color={view.converted ? primary : inkFaint} style={styles.ingredientSwap} />
+                                                                )}
+                                                            </Pressable>
+                                                        );
+                                                    })}
                                                 </View>
 
                                                 <View style={styles.sectionHeader}>
@@ -276,6 +563,10 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                     showsVerticalScrollIndicator={false}
                                 />
 
+                                {/* Three full-width labelled buttons did not fit on a phone — the
+                                    last one clipped its own text. The two that are shortcuts are
+                                    now icon tiles at a fixed width, which leaves the one that
+                                    changes something the room to be a real button at any width. */}
                                 <View style={styles.footer}>
                                     {/* Only where there is something to follow.
                                         A recipe with no steps — an import that
@@ -285,24 +576,28 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                         "0 of 0". */}
                                     {recipe.instructions.length > 0 && (
                                         <TouchableOpacity
-                                            style={styles.secondaryButton}
+                                            style={styles.actionTile}
                                             onPress={() => setIsCooking(true)}
                                             accessibilityRole="button"
                                             accessibilityLabel="Start cooking"
                                         >
                                             <Ionicons name="flame-outline" size={20} color={primary} />
-                                            <Text style={styles.secondaryButtonText}>Cook</Text>
+                                            <Text style={styles.actionTileText}>Cook</Text>
                                         </TouchableOpacity>
                                     )}
 
-                                    {/* [NEW] Add to Meal Plan Button */}
-                                    <TouchableOpacity
-                                        style={styles.secondaryButton}
-                                        onPress={() => setIsMealPlanModalVisible(true)}
-                                    >
-                                        <Ionicons name="calendar-outline" size={20} color={primary} />
-                                        <Text style={styles.secondaryButtonText}>Add to Plan</Text>
-                                    </TouchableOpacity>
+                                    {/* Nothing to add: this recipe is already on the plan. */}
+                                    {!inMealPlan && (
+                                        <TouchableOpacity
+                                            style={styles.actionTile}
+                                            onPress={() => setIsMealPlanModalVisible(true)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Add to meal plan"
+                                        >
+                                            <Ionicons name="calendar-outline" size={20} color={primary} />
+                                            <Text style={styles.actionTileText}>Plan</Text>
+                                        </TouchableOpacity>
+                                    )}
 
                                     {/* Existing Add to Cookbook Button */}
                                     <TouchableOpacity
@@ -319,7 +614,10 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                     size={20}
                                                     color="#fff"
                                                 />
-                                                <Text style={styles.primaryButtonText}>
+                                                {/* The longest label ("Add to Cookbook") still needs
+                                                    every point of a small phone's footer, so it is
+                                                    allowed to shrink a little before it truncates. */}
+                                                <Text style={styles.primaryButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                                                     {isConfirmingRemove ? "Confirm?" : (isCurrentlyInCookbook ? "In Cookbook" : "Add to Cookbook")}
                                                 </Text>
                                             </>
@@ -331,7 +629,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                     </View>
                 </View>
             </Modal>
-            
+
             {/* [NEW] Render the reusable modal */}
             <AddToMealPlanModal
                 isVisible={isMealPlanModalVisible}
@@ -351,7 +649,10 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                 presentationStyle="pageSheet"
             >
                 {recipe && (
-                    <CookMode recipe={recipe} scale={scale} onClose={() => setIsCooking(false)} />
+                    // The factor the reader is looking at, not the one the shop
+                    // was done at: they have just adjusted the amounts, and cook
+                    // mode is where they are about to act on them.
+                    <CookMode recipe={recipe} scale={factor} onClose={() => setIsCooking(false)} />
                 )}
             </Modal>
         </>
@@ -384,14 +685,25 @@ const styles = StyleSheet.create({
     sectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted },
     sectionCount: { fontSize: 13, color: inkFaint },
     scaleNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -8, marginBottom: 10 },
-    scaleNoteText: { fontSize: 13, color: inkMuted },
+    scaleNoteText: { flex: 1, fontSize: 13, color: inkMuted },
+
+    // Sits where the ingredient count used to, so the header keeps its shape.
+    servingsStepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: accentSoft, borderRadius: 999, paddingHorizontal: 4, paddingVertical: 3, gap: 2 },
+    servingsButton: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+    servingsValue: { minWidth: 78, textAlign: 'center', fontSize: 13, fontWeight: '700', color: primary },
+    servingsConfirm: { backgroundColor: primary, marginLeft: 2 },
+    setServingsChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: accentSoft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+    setServingsChipText: { fontSize: 13, fontWeight: '700', color: primary },
 
     ingredientCard: { backgroundColor: surface, borderRadius: 16, paddingHorizontal: 16 },
     ingredientRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 11 },
+    ingredientRowPressed: { opacity: 0.6 },
     ingredientDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     ingredientDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: primary, marginTop: 8, marginRight: 12 },
     ingredientText: { flex: 1, fontSize: 16, lineHeight: 22, color: ink },
     ingredientQuantity: { fontWeight: '700' },
+    ingredientQuantityConverted: { color: primary },
+    ingredientSwap: { marginLeft: 10, marginTop: 4 },
 
     stepRow: { flexDirection: 'row', alignItems: 'flex-start' },
     stepMarker: { width: 28, alignItems: 'center', alignSelf: 'stretch' },
@@ -401,13 +713,16 @@ const styles = StyleSheet.create({
     // flex: 1 keeps the wrapped lines inside this column, clear of the number.
     stepText: { flex: 1, fontSize: 16, lineHeight: 25, color: ink, marginLeft: 14, marginTop: 3, paddingBottom: 22 },
     listFooterSpacer: { height: 12 },
-    // [UPDATED] Footer styles for two buttons
-    footer: { padding: 20, borderTopWidth: 1, borderTopColor: '#f0f0f0', backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
-    // [UPDATED] Primary button now has flex: 1
-    primaryButton: { flex: 1, backgroundColor: primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
-    primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
+
+    footer: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#f0f0f0', backgroundColor: '#fff', flexDirection: 'row', alignItems: 'stretch', gap: 8 },
+    // Fixed width and a label under the icon: a shortcut that never has to
+    // compete with the button beside it for room. Two of these plus the
+    // cookbook button leave 200pt for its label on a 375pt phone, which is
+    // where the old three-across row ran out of screen and clipped its text.
+    actionTile: { width: 62, height: 52, borderRadius: 12, borderWidth: 1, borderColor: primary, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', gap: 2 },
+    actionTileText: { color: primary, fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
+    // flex: 1 — whatever is left after the tiles, on any screen.
+    primaryButton: { flex: 1, height: 52, backgroundColor: primary, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 10 },
+    primaryButtonText: { color: '#fff', fontSize: 15, fontWeight: 'bold', marginLeft: 8, flexShrink: 1 },
     removeButton: { backgroundColor: '#c94444' },
-    // [NEW] Secondary button styles
-    secondaryButton: { flex: 1, backgroundColor: '#fff', paddingVertical: 14, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', borderWidth: 1, borderColor: primary },
-    secondaryButtonText: { color: primary, fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
 });

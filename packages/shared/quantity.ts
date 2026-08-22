@@ -324,6 +324,113 @@ export function unitCycle(unit: string): string[] {
   return UNIT_DEFS.filter((d) => d.dimension === def.dimension).map((d) => d.unit);
 }
 
+/**
+ * The units a QUANTITY should tap through, in order, starting with the one it
+ * is written in.
+ *
+ * `unitCycle` above is the editor's cycle: every unit of the dimension, because
+ * someone typing into a text field may want any of them. That is the wrong list
+ * to tap through on a recipe. Volume alone has six units, so reading "1.5 cup"
+ * in millilitres meant tapping past 0.35 l, 72 tsp and 24 tbsp to get there,
+ * and most of those stops are numbers no cook would ever write down.
+ *
+ * So this picks at most three: what the recipe says, the sensible metric
+ * reading of that amount, and the sensible imperial one — each chosen by
+ * magnitude, so 800 g offers pounds and 20 g offers ounces. Two taps and you
+ * are back where you started.
+ *
+ * Returns [] when there is nothing to convert: counts ("2 cloves"), unknown
+ * units, and amounts whose metric and imperial readings are both the unit it
+ * already uses.
+ */
+export function conversionCycle(value: number, unit?: string | null): string[] {
+  if (!unit) return [];
+  const def = UNIT_DEFS.find((d) => d.unit === unit);
+  if (!def) return [];
+
+  // g for mass, ml for volume — every threshold below is expressed in it.
+  const base = value * def.toBase;
+
+  const picks =
+    def.dimension === 'mass'
+      ? [unit, base >= 1000 ? 'kg' : 'g', base >= 453.592 ? 'lb' : 'oz']
+      : [
+          unit,
+          base >= 1000 ? 'l' : 'ml',
+          // Half a cup down to a tablespoon, a tablespoon down to a teaspoon:
+          // the unit a recipe would have used for that much.
+          base >= ML_PER_CUP / 2 ? 'cup' : base >= 14.7868 ? 'tbsp' : 'tsp',
+        ];
+
+  const cycle: string[] = [];
+  for (const u of picks) if (!cycle.includes(u)) cycle.push(u);
+  return cycle.length > 1 ? cycle : [];
+}
+
+/** Where a tap on `current` lands. A unit outside the cycle restarts it. */
+export function nextUnitInCycle(cycle: string[], current?: string | null): string | null {
+  if (cycle.length < 2) return current ?? null;
+  const i = current ? cycle.indexOf(current) : -1;
+  // i === -1 lands on cycle[0], the unit the recipe was written in.
+  return cycle[(i + 1) % cycle.length]!;
+}
+
+/** What one ingredient's amount looks like on screen right now. */
+export interface QuantityView {
+  /** Ready to render, pluralized and in fractions where cooks use them. */
+  text: string;
+  /** The unit `text` is expressed in; null for a bare count or an unparseable string. */
+  unit: string | null;
+  /** The units a tap cycles through, starting with the written one. */
+  cycle: string[];
+  /** Whether tapping does anything at all. */
+  convertible: boolean;
+  /** True once the reader has cycled away from what the recipe says. */
+  converted: boolean;
+}
+
+/**
+ * One ingredient amount, ready to display and to tap.
+ *
+ * `preferredUnit` is the reader's choice for this row, and is honoured whenever
+ * the conversion is possible — not merely when it is one of the stops in
+ * `cycle`. The cycle is computed from the CURRENT amount, so changing the
+ * servings can change which stops it offers, and a reader who asked for grams
+ * should not be silently put back into ounces because the amount got smaller.
+ *
+ * Strings that carry no number ("to taste", "a splash") come back verbatim and
+ * inert, which is what makes this safe to call on every row.
+ */
+export function displayQuantity(raw?: string | null, preferredUnit?: string | null): QuantityView {
+  const parsed = parseQuantity(raw);
+  if (!parsed) {
+    return { text: (raw ?? '').trim(), unit: null, cycle: [], convertible: false, converted: false };
+  }
+
+  const cycle = conversionCycle(parsed.min, parsed.unit);
+
+  let unit = parsed.unit;
+  let min = parsed.min;
+  let max = parsed.max;
+  if (preferredUnit && parsed.unit && preferredUnit !== parsed.unit) {
+    const lo = convert(parsed.min, parsed.unit, preferredUnit);
+    const hi = convert(parsed.max, parsed.unit, preferredUnit);
+    if (lo !== null && hi !== null) {
+      unit = preferredUnit;
+      min = lo;
+      max = hi;
+    }
+  }
+
+  return {
+    text: formatQuantityDisplay(min, unit, max),
+    unit,
+    cycle,
+    convertible: cycle.length > 1,
+    converted: unit !== parsed.unit,
+  };
+}
+
 /** Most common unit in a group; ties break toward the coarser unit, then a–z. */
 function pickTargetUnit(units: string[]): string | null {
   if (units.length === 0) return null;

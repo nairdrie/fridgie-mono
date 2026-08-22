@@ -7,13 +7,16 @@
 
 export {
   aggregateQuantities,
+  conversionCycle,
   convert,
+  displayQuantity,
   formatQuantity,
   formatFriendlyValue,
   formatQuantityDisplay,
   formatValue,
   normalizeIngredients,
   normalizeQuantity,
+  nextUnitInCycle,
   normalizeUnit,
   parseQuantity,
   parseQuantityAndText,
@@ -24,4 +27,4 @@ export {
   unitCycle,
 } from '@fridgie/shared/quantity';
 
-export type { Dimension, ParsedQuantity } from '@fridgie/shared/quantity';
+export type { Dimension, ParsedQuantity, QuantityView } from '@fridgie/shared/quantity';

@@ -104,16 +104,20 @@ export function normalizeRecipeServings<T extends Record<string, any>>(
 }
 
 /**
+ * The widest a recipe is ever stretched. A factor outside this came from a
+ * misparsed yield ("serves 1" on a tray bake) far more often than from a real
+ * household, and the failure it prevents — a list quietly asking for 3 kg of
+ * pasta — is worse than the one it causes.
+ */
+export const MIN_SERVINGS_SCALE = 0.25;
+export const MAX_SERVINGS_SCALE = 8;
+
+/**
  * How much of the recipe to buy for this household.
  *
  * Returns exactly 1 whenever either number is missing, which is what makes
  * this safe to switch on everywhere: a recipe with no yield, or a group that
  * has never set a size, behaves precisely as it does today.
- *
- * Clamped to [0.25, 8]. A factor outside that came from a misparsed yield
- * ("serves 1" on a tray bake) far more often than from a real household, and
- * the failure it prevents — a list quietly asking for 3 kg of pasta — is worse
- * than the one it causes.
  */
 export function servingsScale(
   recipeServings?: number | null,
@@ -124,7 +128,41 @@ export function servingsScale(
 
   const factor = householdSize / recipeServings;
   if (!Number.isFinite(factor)) return 1;
-  return Math.min(8, Math.max(0.25, factor));
+  return Math.min(MAX_SERVINGS_SCALE, Math.max(MIN_SERVINGS_SCALE, factor));
+}
+
+/**
+ * The serving counts a control may offer for this recipe.
+ *
+ * Bounded by the clamp above rather than by the control's own taste, so the
+ * number on screen is always a number the amounts underneath it actually
+ * honour: a stepper that reads "24 servings" while quietly capping the
+ * ingredients at 8× is worse than one that stops at 16.
+ */
+export function servingsRange(
+  recipeServings?: number | null,
+  cap = 20,
+): { min: number; max: number } {
+  if (!recipeServings || recipeServings <= 0) return { min: 1, max: cap };
+  return {
+    min: Math.max(1, Math.ceil(recipeServings * MIN_SERVINGS_SCALE)),
+    max: Math.min(cap, Math.floor(recipeServings * MAX_SERVINGS_SCALE)),
+  };
+}
+
+/**
+ * The number of people a stored scale factor bought for — the inverse of
+ * `servingsScale`, used to LABEL amounts that were already scaled.
+ *
+ * Rounded, because `Meal.scale` is a ratio and half a person is not a thing to
+ * put on a screen. The label rounds; the amounts underneath it stay exact.
+ */
+export function servingsForScale(
+  recipeServings?: number | null,
+  scale?: number | null,
+): number | null {
+  if (!recipeServings || !scale || !Number.isFinite(scale)) return null;
+  return Math.max(1, Math.round(recipeServings * scale));
 }
 
 /** Packaged units — you cannot buy 1.5 tins, so these round up to a whole. */

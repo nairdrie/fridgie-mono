@@ -67,12 +67,19 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   // starting one — so there is no earlier step to go back to.
   const isEditingExisting = !!(recipeToEdit || mealForRecipe?.recipeId);
 
+  /**
+   * A recipe written by hand is written for whoever is writing it, so the
+   * Serves box opens on the household's usual count rather than empty. It stays
+   * editable — this is a claim about the amounts the author is about to type,
+   * and they are free to type amounts for a crowd.
+   */
   const createBlankRecipe = (): Recipe => ({
     id: uuid.v4() as string,
     name: mealForRecipe?.name || '',
     description: '',
     ingredients: [{ name: '', quantity: '' }],
     instructions: [''],
+    ...(selectedGroup?.householdSize ? { servings: selectedGroup.householdSize } : {}),
   });
   
   useEffect(() => {
@@ -452,7 +459,10 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     setImportSource('generate');
     setIsImporting(true);
     try {
-      const generated = await generateRecipeFromTitle(title);
+      // Written for this household from the start. There is no source document
+      // to be faithful to here, so the quantities can simply be the right ones
+      // rather than four portions scaled down on their way to the list.
+      const generated = await generateRecipeFromTitle(title, selectedGroup?.householdSize);
       setEditingRecipe(prev => ({ ...generated, id: prev!.id }));
       setCreationMode('manual');
     } catch (error: any) {

@@ -1103,6 +1103,9 @@ export default function HomeScreen() {
                 onClose={() => setRecipeToViewId(null)}
                 recipeId={recipeToViewId}
                 scale={recipeToViewScale}
+                // Opened from a meal that is already on the plan, so the
+                // recipe screen drops its Add to Plan shortcut.
+                inMealPlan
                 onEdit={handleEditRecipe}
                 isInCookbook={recipeToViewId ? cookbookRecipeIds.has(recipeToViewId) : false}
                 onCookbookUpdate={() => {

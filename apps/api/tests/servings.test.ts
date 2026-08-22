@@ -5,6 +5,8 @@ import {
   parseServings,
   scaleIngredients,
   scaleQuantity,
+  servingsForScale,
+  servingsRange,
   servingsScale,
 } from '../utils/servings'
 
@@ -152,5 +154,37 @@ describe('describeScale', () => {
     expect(describeScale(4, 2)).toBe('Scaled for 2')
     expect(describeScale(undefined, 2)).toBeNull()
     expect(describeScale(4, undefined)).toBe('Serves 4')
+  })
+})
+
+describe('servingsRange', () => {
+  test('offers only what the scale clamp can actually honour', () => {
+    // A stepper reading "24 servings" over ingredients capped at 8x is a lie.
+    expect(servingsRange(4)).toEqual({ min: 1, max: 20 })
+    expect(servingsRange(2)).toEqual({ min: 1, max: 16 })
+    expect(servingsRange(12)).toEqual({ min: 3, max: 20 })
+    expect(servingsRange(1)).toEqual({ min: 1, max: 8 })
+  })
+
+  test('falls back to the plain cap when there is no yield to scale from', () => {
+    expect(servingsRange(undefined)).toEqual({ min: 1, max: 20 })
+    expect(servingsRange(0)).toEqual({ min: 1, max: 20 })
+  })
+})
+
+describe('servingsForScale', () => {
+  test('labels an already-scaled recipe with the people it fed', () => {
+    expect(servingsForScale(4, 0.5)).toBe(2)
+    expect(servingsForScale(4, 1.5)).toBe(6)
+    // Rounds, because half a person is not a thing to put on a screen — the
+    // amounts underneath the label stay exact.
+    expect(servingsForScale(5, 0.5)).toBe(3)
+    expect(servingsForScale(4, 0.1)).toBe(1)
+  })
+
+  test('nothing to say without both numbers', () => {
+    expect(servingsForScale(undefined, 0.5)).toBeNull()
+    expect(servingsForScale(4, undefined)).toBeNull()
+    expect(servingsForScale(4, 0)).toBeNull()
   })
 })

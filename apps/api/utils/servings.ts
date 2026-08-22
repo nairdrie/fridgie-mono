@@ -5,9 +5,13 @@
 
 export {
   describeScale,
+  MAX_SERVINGS_SCALE,
+  MIN_SERVINGS_SCALE,
   normalizeRecipeServings,
   parseServings,
   scaleIngredients,
   scaleQuantity,
+  servingsForScale,
+  servingsRange,
   servingsScale,
 } from '@fridgie/shared/servings'

@@ -26,6 +26,7 @@
 
 import { Ingredient, Recipe } from '@/types/types';
 import { findStepTimers, formatCountdown, formatDuration } from '@/utils/cookTimers';
+import { displayQuantity, nextUnitInCycle } from '@/utils/quantity';
 import { scaleIngredients } from '@/utils/servings';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -60,6 +61,12 @@ export default function CookMode({ recipe, scale = 1, onClose }: CookModeProps) 
 
   const [doneSteps, setDoneSteps] = useState<Set<number>>(() => new Set());
   const [showIngredients, setShowIngredients] = useState(false);
+  /**
+   * Per-row unit the cook has tapped to. Same gesture as the recipe screen next
+   * door, and it matters more here: this is the list being read with a scale in
+   * one hand, and "8 oz" is not a number a metric scale can help with.
+   */
+  const [unitChoices, setUnitChoices] = useState<Record<number, string>>({});
   const [timers, setTimers] = useState<RunningTimer[]>([]);
   const [finished, setFinished] = useState<Set<string>>(() => new Set());
 
@@ -95,6 +102,14 @@ export default function CookMode({ recipe, scale = 1, onClose }: CookModeProps) 
       setFinished((prev) => new Set(prev).add(timer.key));
     }
   }, [now, timers]);
+
+  /** Tap an amount to read it in another unit — see `conversionCycle`. */
+  const cycleUnit = useCallback((index: number, cycle: string[], current: string | null) => {
+    const next = nextUnitInCycle(cycle, current);
+    if (!next) return;
+    Haptics.selectionAsync().catch(() => {});
+    setUnitChoices((prev) => ({ ...prev, [index]: next }));
+  }, []);
 
   const startTimer = useCallback(async (stepIndex: number, seconds: number, label: string) => {
     const key = timerKey(stepIndex, seconds);
@@ -213,14 +228,31 @@ export default function CookMode({ recipe, scale = 1, onClose }: CookModeProps) 
         </Pressable>
         {showIngredients && (
           <View style={styles.ingredientsCard}>
-            {ingredients.map((ing, index) => (
-              <View key={`ing-${index}`} style={[styles.ingredientRow, index > 0 && styles.ingredientDivider]}>
-                <Text style={styles.ingredientText}>
-                  {!!ing.quantity && <Text style={styles.ingredientQuantity}>{ing.quantity} </Text>}
-                  {ing.name}
-                </Text>
-              </View>
-            ))}
+            {ingredients.map((ing, index) => {
+              const view = displayQuantity(ing.quantity, unitChoices[index]);
+              return (
+                <Pressable
+                  key={`ing-${index}`}
+                  style={({ pressed }) => [
+                    styles.ingredientRow,
+                    index > 0 && styles.ingredientDivider,
+                    pressed && view.convertible && styles.ingredientRowPressed,
+                  ]}
+                  onPress={view.convertible ? () => cycleUnit(index, view.cycle, view.unit) : undefined}
+                  disabled={!view.convertible}
+                  accessibilityRole={view.convertible ? 'button' : undefined}
+                  accessibilityLabel={view.convertible ? `${view.text} ${ing.name}. Tap to change units.` : undefined}
+                >
+                  <Text style={styles.ingredientText}>
+                    {!!view.text && <Text style={styles.ingredientQuantity}>{view.text} </Text>}
+                    {ing.name}
+                  </Text>
+                  {view.convertible && (
+                    <Ionicons name="swap-horizontal" size={14} color={view.converted ? primary : inkFaint} style={styles.ingredientSwap} />
+                  )}
+                </Pressable>
+              );
+            })}
           </View>
         )}
 
@@ -309,9 +341,12 @@ const styles = StyleSheet.create({
   ingredientsCount: { fontSize: 13, color: inkFaint },
   scaledFlag: { fontSize: 11, color: primary, backgroundColor: accentSoft, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8, overflow: 'hidden' },
   ingredientsCard: { backgroundColor: surface, borderRadius: 12, paddingHorizontal: 14, marginBottom: 8 },
-  ingredientRow: { paddingVertical: 10 },
+  ingredientRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 10 },
+  ingredientRowPressed: { opacity: 0.6 },
+  // Nudged down to sit on the text's optical centre, not its ascender.
+  ingredientSwap: { marginTop: 3 },
   ingredientDivider: { borderTopWidth: 1, borderTopColor: hairline },
-  ingredientText: { fontSize: 15, color: ink },
+  ingredientText: { flex: 1, fontSize: 15, color: ink },
   ingredientQuantity: { fontWeight: '700', color: primary },
 
   // Generous vertical padding on purpose: this is a tap target for someone

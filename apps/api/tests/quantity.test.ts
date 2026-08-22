@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import {
   aggregateQuantities,
+  conversionCycle,
+  displayQuantity,
   formatQuantityDisplay,
+  nextUnitInCycle,
   normalizeIngredients,
   normalizeQuantity,
   parseQuantity,
@@ -236,5 +239,80 @@ describe('normalizeIngredients', () => {
       { name: 'flour', quantity: '1.5 cup' },
       { name: 'salt', quantity: '' },
     ])
+  })
+})
+
+describe('conversionCycle', () => {
+  test('offers the written unit, then a metric and an imperial reading of it', () => {
+    // At most three stops: two taps and you are back where you started.
+    expect(conversionCycle(1.5, 'cup')).toEqual(['cup', 'ml'])
+    expect(conversionCycle(8, 'oz')).toEqual(['oz', 'g'])
+    expect(conversionCycle(200, 'g')).toEqual(['g', 'oz'])
+  })
+
+  test('picks the unit by magnitude, not by table order', () => {
+    expect(conversionCycle(1500, 'g')).toEqual(['g', 'kg', 'lb'])
+    expect(conversionCycle(20, 'g')).toEqual(['g', 'oz'])
+    expect(conversionCycle(2, 'l')).toEqual(['l', 'cup'])
+    // A teaspoon of something is not worth reading in litres or cups.
+    expect(conversionCycle(1, 'tsp')).toEqual(['tsp', 'ml'])
+    expect(conversionCycle(2, 'tbsp')).toEqual(['tbsp', 'ml'])
+    expect(conversionCycle(100, 'ml')).toEqual(['ml', 'tbsp'])
+  })
+
+  test('says no when there is nothing to convert', () => {
+    expect(conversionCycle(2, 'clove')).toEqual([])
+    expect(conversionCycle(3, null)).toEqual([])
+    expect(conversionCycle(1, 'sheet')).toEqual([])
+  })
+})
+
+describe('nextUnitInCycle', () => {
+  test('advances, wraps, and restarts from a unit that left the cycle', () => {
+    expect(nextUnitInCycle(['cup', 'ml'], 'cup')).toBe('ml')
+    expect(nextUnitInCycle(['cup', 'ml'], 'ml')).toBe('cup')
+    // A servings change can move the cycle out from under the reader's choice.
+    expect(nextUnitInCycle(['cup', 'ml'], 'tbsp')).toBe('cup')
+    expect(nextUnitInCycle([], 'cup')).toBe('cup')
+  })
+})
+
+describe('displayQuantity', () => {
+  test('renders the stored form the way a cook writes it', () => {
+    expect(displayQuantity('1.5 cup').text).toBe('1½ cups')
+    expect(displayQuantity('2 clove').text).toBe('2 cloves')
+    expect(displayQuantity('0.5 tsp').text).toBe('½ tsp')
+    expect(displayQuantity('4-6 oz').text).toBe('4–6 oz')
+  })
+
+  test('honours the reader chosen unit, both ends of a range included', () => {
+    const view = displayQuantity('8 oz', 'g')
+    expect(view.text).toBe('227 g')
+    expect(view.unit).toBe('g')
+    expect(view.converted).toBe(true)
+
+    expect(displayQuantity('4-6 oz', 'g').text).toBe('113–170 g')
+  })
+
+  test('honours a unit the current cycle no longer offers', () => {
+    // Halving the servings moves 200 g into ounces, but a reader who asked for
+    // pounds asked for pounds.
+    const view = displayQuantity('100 g', 'lb')
+    expect(view.unit).toBe('lb')
+    expect(view.cycle).toEqual(['g', 'oz'])
+  })
+
+  test('leaves alone what it cannot read', () => {
+    const view = displayQuantity('to taste')
+    expect(view).toEqual({ text: 'to taste', unit: null, cycle: [], convertible: false, converted: false })
+    expect(displayQuantity('').text).toBe('')
+    expect(displayQuantity(undefined).convertible).toBe(false)
+  })
+
+  test('a count is displayable but never convertible', () => {
+    const view = displayQuantity('2 clove', 'g')
+    expect(view.text).toBe('2 cloves')
+    expect(view.convertible).toBe(false)
+    expect(view.converted).toBe(false)
   })
 })
