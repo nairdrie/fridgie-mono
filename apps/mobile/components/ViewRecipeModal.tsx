@@ -14,6 +14,7 @@
 // the household's usual, so the next recipe — imported, generated or written —
 // opens at the number you actually cook for instead of asking again.
 import { useAuth } from '@/context/AuthContext';
+import { useCookbook } from '@/context/CookbookContext';
 import { Recipe } from '@/types/types';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -22,7 +23,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { displayQuantity, nextUnitInCycle } from '@/utils/quantity';
 import { scaleIngredients, servingsForScale, servingsRange, servingsScale } from '@/utils/servings';
-import { addUserCookbookRecipe, getRecipe, removeUserCookbookRecipe, saveRecipe, updateGroup } from '../utils/api';
+import { getRecipe, saveRecipe, updateGroup } from '../utils/api';
 import AddToMealPlanModal from './AddToMealPlanModal'; // Import the new component
 import CookMode from './CookMode';
 
@@ -31,8 +32,15 @@ interface ViewRecipeModalProps {
     onClose: () => void;
     recipeId: string | null;
     onEdit: (recipe: Recipe) => void;
-    isInCookbook: boolean;
-    onCookbookUpdate: () => void;
+    /**
+     * The screen's own list may need refetching now that the shelf has changed
+     * — your profile's cookbook grid, say. Whether the recipe IS on the shelf
+     * is deliberately NOT a prop: this modal is opened from Explore and from
+     * other people's profiles, where the surrounding list is somebody else's
+     * and answering from it said "In Cookbook" about a recipe the viewer had
+     * never added. It asks `useCookbook` instead, which knows one shelf: yours.
+     */
+    onCookbookUpdate?: () => void;
     /**
      * The factor this recipe's ingredients were scaled by when they went on a
      * shopping list — `Meal.scale`, passed only when the recipe is being opened
@@ -55,14 +63,16 @@ interface ViewRecipeModalProps {
 // TODO: author, likes, comments
 // TODO: report recipe (for image or inappropriate content)
 
-export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, isInCookbook, onCookbookUpdate, scale = 1, inMealPlan = false }: ViewRecipeModalProps) {
+export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, onCookbookUpdate, scale = 1, inMealPlan = false }: ViewRecipeModalProps) {
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [isFetching, setIsFetching] = useState(false);
-    const [isCurrentlyInCookbook, setIsCurrentlyInCookbook] = useState(isInCookbook);
     const [isToggling, setIsToggling] = useState(false);
     const [isConfirmingRemove, setIsConfirmingRemove] = useState(false);
 
     const { user, selectedGroup, refreshGroups } = useAuth();
+    const { isInCookbook, addRecipe, removeRecipe } = useCookbook();
+    /** On YOUR shelf — never "in the cookbook this was opened from". */
+    const isCurrentlyInCookbook = isInCookbook(recipeId);
 
     /**
      * Null until the reader moves the stepper — which is what keeps this screen
@@ -123,9 +133,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
     const [isCooking, setIsCooking] = useState(false);
 
     useEffect(() => {
-        if (isVisible) {
-            setIsCurrentlyInCookbook(isInCookbook);
-        } else {
+        if (!isVisible) {
             setIsConfirmingRemove(false);
             setIsCooking(false);
         }
@@ -158,7 +166,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
         };
 
         fetchRecipe();
-    }, [recipeId, isVisible, isInCookbook]);
+    }, [recipeId, isVisible]);
 
     /**
      * Remembering the count, so the next recipe doesn't ask again.
@@ -270,23 +278,25 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
         );
     };
 
+    /**
+     * Adds to or removes from the VIEWER's cookbook — which is the only shelf
+     * this button has ever written to, even back when it read its label off
+     * somebody else's. The optimistic update and its rollback live in the
+     * context, so every other screen showing this recipe turns over with it.
+     */
     const handleToggleCookbook = async () => {
         if (!recipe) return;
         setIsToggling(true);
 
-        const originalStatus = isCurrentlyInCookbook;
-        setIsCurrentlyInCookbook(!originalStatus); // Optimistic update
-
         try {
-            if (originalStatus) {
-                await removeUserCookbookRecipe(recipe.id);
+            if (isCurrentlyInCookbook) {
+                await removeRecipe(recipe.id);
             } else {
-                await addUserCookbookRecipe(recipe.id);
+                await addRecipe(recipe.id);
             }
-            onCookbookUpdate();
+            onCookbookUpdate?.();
         } catch (error) {
             console.error("Failed to toggle cookbook status:", error);
-            setIsCurrentlyInCookbook(originalStatus); // Rollback
             Alert.alert("Error", "Could not update your cookbook.");
         } finally {
             setIsToggling(false);
@@ -323,7 +333,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                 animationType="slide"
                 transparent={true}
                 visible={isVisible}
-                onRequestClose={handleClose}
+                onRequestClose={isCooking ? () => setIsCooking(false) : handleClose}
             >
                 <Pressable style={styles.modalBackdrop} onPress={handleClose} />
                 <View style={styles.modalContainer}>
@@ -628,32 +638,38 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                         )}
                     </View>
                 </View>
-            </Modal>
 
-            {/* [NEW] Render the reusable modal */}
-            <AddToMealPlanModal
-                isVisible={isMealPlanModalVisible}
-                onClose={() => setIsMealPlanModalVisible(false)}
-                recipe={recipe}
-            />
-
-            {/* Its own full-screen Modal, not a view inside the sheet above.
-                The sheet is 85% tall with a dimmed backdrop, which is right for
-                reading a recipe and wrong for following one at arm's length —
-                and `useKeepAwake` should only hold the screen on while the cook
-                view is genuinely mounted. */}
-            <Modal
-                animationType="slide"
-                visible={isCooking && !!recipe}
-                onRequestClose={() => setIsCooking(false)}
-                presentationStyle="pageSheet"
-            >
-                {recipe && (
-                    // The factor the reader is looking at, not the one the shop
-                    // was done at: they have just adjusted the amounts, and cook
-                    // mode is where they are about to act on them.
-                    <CookMode recipe={recipe} scale={factor} onClose={() => setIsCooking(false)} />
+                {/* COOK MODE LIVES INSIDE THIS MODAL, NOT BESIDE IT.
+                    It used to be a second <Modal> alongside this one, and on
+                    iOS that meant it never appeared: both were presented from
+                    the SCREEN's view controller, and a view controller that is
+                    already presenting one modal silently refuses the next. The
+                    Cook button did nothing at all.
+                    Rendering it here instead needs no second presentation. The
+                    sheet's Modal is already transparent and full-screen — the
+                    85% card is just a child of it — so an absolutely filled
+                    view over the top is the full-bleed surface cook mode wants,
+                    with the recipe still mounted underneath to come back to.
+                    Still conditional, so `useKeepAwake` only holds the screen on
+                    while somebody is actually cooking. */}
+                {isCooking && recipe && (
+                    <View style={styles.cookModeOverlay}>
+                        {/* The factor the reader is looking at, not the one the
+                            shop was done at: they have just adjusted the
+                            amounts, and cook mode is where they are about to act
+                            on them. */}
+                        <CookMode recipe={recipe} scale={factor} onClose={() => setIsCooking(false)} />
+                    </View>
                 )}
+
+                {/* Also inside, for the same reason: presented from this sheet's
+                    own view controller rather than from the screen's, which is
+                    busy presenting this sheet. */}
+                <AddToMealPlanModal
+                    isVisible={isMealPlanModalVisible}
+                    onClose={() => setIsMealPlanModalVisible(false)}
+                    recipe={recipe}
+                />
             </Modal>
         </>
     );
@@ -661,6 +677,9 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
 
 const styles = StyleSheet.create({
     modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+    // Over the sheet AND the dimmed backdrop behind it. Opaque, so nothing of
+    // the recipe underneath shows through at arm's length.
+    cookModeOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#fff' },
     modalContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '85%' },
     modalContent: { flex: 1, backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
     header: { alignItems: 'flex-end', padding: 10, position: 'absolute', top: 0, right: 0, zIndex: 10 },

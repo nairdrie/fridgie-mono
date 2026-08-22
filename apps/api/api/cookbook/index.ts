@@ -47,6 +47,13 @@ const getMealDate = (weekStart: string, dayOfWeek?: Meal['dayOfWeek']): Date => 
  *
  * Popularity still accrues to the root: a fork is one more person cooking the
  * original, not a rival recipe starting from zero.
+ *
+ * IDEMPOTENT. The count is a count of PEOPLE, so it moves only when this user's
+ * membership actually changes — adding a recipe already on the shelf is a
+ * no-op, not a second cook. It has to be: a caller can be wrong about whether
+ * it is already there (a screen showing somebody else's cookbook was, a retried
+ * request is, a double tap is), and a counter that moves on every call reads
+ * back the popularity of whoever tapped hardest.
  */
 route.post('/', requireAccount, async (c) => {
   const uid = c.get('uid')
@@ -73,16 +80,20 @@ route.post('/', requireAccount, async (c) => {
       // A root that has since been deleted is no reason to refuse the shelf
       // space — read it first (Firestore wants every read before any write).
       const rootExists = (await transaction.get(rootRecipeRef)).exists
+      const existing = await transaction.get(cookbookRef)
 
-      // 1. Add to the user's personal cookbook
+      // 1. Add to the user's personal cookbook. `addedAt` is what the cookbook
+      // is ordered by, so a re-add keeps the one it already has rather than
+      // jumping the recipe to the top of a shelf it never left.
       transaction.set(cookbookRef, {
         name: recipeData?.name,
         photoURL: recipeData?.photoURL || null,
-        addedAt: FieldValue.serverTimestamp(),
+        addedAt: existing.data()?.addedAt ?? FieldValue.serverTimestamp(),
       })
 
-      // 2. Credit the original with one more cook
-      if (rootExists) {
+      // 2. Credit the original with one more cook — but only if this user was
+      // not already one of them. See the note on idempotency above.
+      if (rootExists && !existing.exists) {
         transaction.update(rootRecipeRef, {
           'popularity.cookbooks': FieldValue.increment(1)
         })

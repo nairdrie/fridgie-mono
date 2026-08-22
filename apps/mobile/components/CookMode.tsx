@@ -35,6 +35,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import * as Notifications from 'expo-notifications';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface CookModeProps {
   recipe: Recipe;
@@ -58,6 +59,10 @@ export default function CookMode({ recipe, scale = 1, onClose }: CookModeProps) 
   // The single most important line in the file. Everything else is a
   // convenience; a screen that locks mid-step makes the whole mode pointless.
   useKeepAwake();
+
+  // This fills the screen, status bar included, so the header has to keep
+  // itself out from under the notch — nothing above it is doing that.
+  const insets = useSafeAreaInsets();
 
   const [doneSteps, setDoneSteps] = useState<Set<number>>(() => new Set());
   const [showIngredients, setShowIngredients] = useState(false);
@@ -196,7 +201,7 @@ export default function CookMode({ recipe, scale = 1, onClose }: CookModeProps) 
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable onPress={onClose} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Leave cook mode" hitSlop={8}>
           <Ionicons name="chevron-down" size={26} color={inkMuted} />
         </Pressable>
@@ -317,7 +322,7 @@ export default function CookMode({ recipe, scale = 1, onClose }: CookModeProps) 
           );
         })}
 
-        <View style={styles.footerSpacer} />
+        <View style={[styles.footerSpacer, { height: 60 + insets.bottom }]} />
       </ScrollView>
     </View>
   );
