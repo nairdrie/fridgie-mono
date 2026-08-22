@@ -1,11 +1,13 @@
 import AddEditRecipeModal from '@/components/AddEditRecipeModal';
 import AddToMealPlanModal from '@/components/AddToMealPlanModal';
+import CookbookFilterBar, { CookbookGroupHeader } from '@/components/CookbookFilterBar';
 import NotificationBell from '@/components/NotificationBell';
 import NotificationsModal from '@/components/NotificationsModal';
 import RecipeCard from '@/components/RecipeCard';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
+import { useCookbookFilter } from '@/hooks/useCookbookFilter';
 import { Item, Meal, Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getUserCookbook, getUserProfile, removeUserCookbookRecipe, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
@@ -19,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { updateEmail, updateProfile, User } from 'firebase/auth';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -259,7 +261,6 @@ export default function UserProfile() {
     const [isAtEnd, setIsAtEnd] = useState(false);
     const carouselData = [...defaultAvatars, 'upload'];
     
-    const [searchTerm, setSearchTerm] = useState('');
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
     const [isCookbookLoading, setIsCookbookLoading] = useState(true);
@@ -352,12 +353,7 @@ export default function UserProfile() {
         loadData();
     }, [loadData]);
 
-    const filteredRecipes = useMemo(() => {
-        if (!searchTerm) return cookbook;
-        return cookbook.filter(recipe =>
-            recipe.name.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-    }, [cookbook, searchTerm]);
+    const filter = useCookbookFilter(cookbook);
 
     const handleAccept = (invitationId: string) => {
         acceptInvitation(invitationId, () => {
@@ -494,9 +490,9 @@ export default function UserProfile() {
                     keyboardShouldPersistTaps="handled"
                     sections={[{
                         title: 'My Cookbook',
-                        data: filteredRecipes,
+                        data: filter.rows,
                     }]}
-                    keyExtractor={(item) => item.id}
+                    keyExtractor={(row) => row.key}
                     stickySectionHeadersEnabled={true}
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{ paddingHorizontal: 16 }}
@@ -516,42 +512,58 @@ export default function UserProfile() {
                     }
                     renderSectionHeader={() => (
                         <View style={styles.stickyHeaderContainer}>
-                            <View style={styles.searchContainer}>
-                                <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
-                                <TextInput
-                                    style={styles.searchInput}
-                                    placeholder="Search your cookbook..."
-                                    value={searchTerm}
-                                    onChangeText={setSearchTerm}
-                                    placeholderTextColor={'#999'}
-                                />
+                            <View style={styles.searchRow}>
+                                <View style={styles.searchContainer}>
+                                    <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
+                                    <TextInput
+                                        style={styles.searchInput}
+                                        placeholder="Search your cookbook..."
+                                        value={filter.searchTerm}
+                                        onChangeText={filter.setSearchTerm}
+                                        placeholderTextColor={'#999'}
+                                    />
+                                </View>
+                                {/* Next to the search box because that is where you
+                                    already are when the recipe you wanted isn't
+                                    there. Straight to the shelf — no week, no day,
+                                    nothing added to a shopping list. */}
+                                <TouchableOpacity
+                                    style={styles.addRecipeButton}
+                                    onPress={handleAddRecipe}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Add a recipe to your cookbook"
+                                >
+                                    <Ionicons name="add" size={26} color="#fff" />
+                                </TouchableOpacity>
                             </View>
-                            {/* Next to the search box because that is where you
-                                already are when the recipe you wanted isn't
-                                there. Straight to the shelf — no week, no day,
-                                nothing added to a shopping list. */}
-                            <TouchableOpacity
-                                style={styles.addRecipeButton}
-                                onPress={handleAddRecipe}
-                                accessibilityRole="button"
-                                accessibilityLabel="Add a recipe to your cookbook"
-                            >
-                                <Ionicons name="add" size={26} color="#fff" />
-                            </TouchableOpacity>
+                            {/* Sticky along with the search box: the shelf you
+                                picked has to stay visible while you scroll it,
+                                or a short category reads as an empty cookbook. */}
+                            <CookbookFilterBar
+                                chips={filter.chips}
+                                selected={filter.category}
+                                onSelect={filter.setCategory}
+                                sort={filter.sort}
+                                onSortChange={filter.setSort}
+                            />
                         </View>
                     )}
                     renderItem={({ item }) => (
-                        <RecipeCard
-                            recipe={item}
-                            onAddToMealPlan={handleAddToMealPlan}
-                            onView={handleViewRecipe}
-                        />
+                        item.type === 'header' ? (
+                            <CookbookGroupHeader category={item.category} count={item.count} />
+                        ) : (
+                            <RecipeCard
+                                recipe={item.recipe}
+                                onAddToMealPlan={handleAddToMealPlan}
+                                onView={handleViewRecipe}
+                            />
+                        )
                     )}
                     ListEmptyComponent={
                         <View style={styles.feedPlaceholder}>
                            <Ionicons name="receipt-outline" size={48} color="#ccc" />
                            <Text style={styles.feedPlaceholderText}>
-                            {searchTerm ? `No recipes found for "${searchTerm}"` : "Your cookbook is empty."}
+                            {filter.isFiltered ? 'No recipes match that.' : 'Your cookbook is empty.'}
                            </Text>
                        </View>
                     }
@@ -715,9 +727,12 @@ const styles = StyleSheet.create({
     stickyHeaderContainer: {
         backgroundColor: '#f8f9fa',
         paddingTop: 16,
+    },
+    searchRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
         gap: 10,
+        marginBottom: 12,
     },
     searchContainer: {
         // The search box gives up whatever width the + needs; without this it
@@ -728,7 +743,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderRadius: 10,
         paddingHorizontal: 12,
-        marginBottom: 16,
         borderWidth: 1,
         borderColor: '#e9ecef'
     },

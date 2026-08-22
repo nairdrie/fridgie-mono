@@ -6,11 +6,12 @@
 
 import { useAuth } from '@/context/AuthContext';
 import { useLists } from '@/context/ListContext';
+import { useCookbookFilter } from '@/hooks/useCookbookFilter';
 import { Recipe } from '@/types/types';
 import { addRecipeToList, getUserCookbook } from '@/utils/api';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     FlatList,
@@ -24,6 +25,7 @@ import {
     View
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import CookbookFilterBar from './CookbookFilterBar';
 
 interface AddFromCookbookModalProps {
     isVisible: boolean;
@@ -38,10 +40,16 @@ export default function AddFromCookbookModal({ isVisible, onClose, listId }: Add
     const [recipes, setRecipes] = useState<Recipe[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
-    const [query, setQuery] = useState('');
     const [submissionState, setSubmissionState] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
     const [submissionMessage, setSubmissionMessage] = useState('');
     const checkmarkAnimation = useSharedValue(0);
+
+    // Same search and the same category chips as the cookbook itself, so a
+    // recipe is found here by whatever found it there. No sort control: this is
+    // a picker, and newest-first is what you want when you have just saved the
+    // thing you came to add.
+    const filter = useCookbookFilter(recipes);
+    const { reset: resetFilter } = filter;
 
     // Fetch on open so a recipe saved since last time shows up.
     useEffect(() => {
@@ -70,10 +78,10 @@ export default function AddFromCookbookModal({ isVisible, onClose, listId }: Add
             setTimeout(() => {
                 setSubmissionState('idle');
                 setSubmissionMessage('');
-                setQuery('');
+                resetFilter();
             }, 300);
         }
-    }, [isVisible]);
+    }, [isVisible, resetFilter]);
 
     useEffect(() => {
         checkmarkAnimation.value = submissionState === 'success' ? withTiming(1, { duration: 400 }) : 0;
@@ -83,15 +91,6 @@ export default function AddFromCookbookModal({ isVisible, onClose, listId }: Add
         opacity: checkmarkAnimation.value,
         transform: [{ scale: 0.8 + checkmarkAnimation.value * 0.2 }],
     }));
-
-    const visibleRecipes = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        if (!q) return recipes;
-        return recipes.filter(r =>
-            r.name?.toLowerCase().includes(q) ||
-            r.tags?.some(t => t.toLowerCase().includes(q))
-        );
-    }, [recipes, query]);
 
     const handleSelectRecipe = async (recipe: Recipe) => {
         if (!selectedGroup || !listId) return;
@@ -150,17 +149,28 @@ export default function AddFromCookbookModal({ isVisible, onClose, listId }: Add
                                     style={styles.searchInput}
                                     placeholder="Search your cookbook"
                                     placeholderTextColor="#8a8a8a"
-                                    value={query}
-                                    onChangeText={setQuery}
+                                    value={filter.searchTerm}
+                                    onChangeText={filter.setSearchTerm}
                                     autoCorrect={false}
                                     returnKeyType="search"
                                 />
-                                {query.length > 0 && (
-                                    <TouchableOpacity onPress={() => setQuery('')}>
+                                {filter.searchTerm.length > 0 && (
+                                    <TouchableOpacity onPress={() => filter.setSearchTerm('')}>
                                         <Ionicons name="close-circle" size={18} color="#c0c0c0" />
                                     </TouchableOpacity>
                                 )}
                             </View>
+                        )}
+
+                        {recipes.length > 0 && (
+                            <CookbookFilterBar
+                                chips={filter.chips}
+                                selected={filter.category}
+                                onSelect={filter.setCategory}
+                                sort={filter.sort}
+                                onSortChange={filter.setSort}
+                                showSort={false}
+                            />
                         )}
 
                         {isLoading ? (
@@ -169,7 +179,7 @@ export default function AddFromCookbookModal({ isVisible, onClose, listId }: Add
                             <Text style={styles.emptyText}>{loadError}</Text>
                         ) : (
                             <FlatList
-                                data={visibleRecipes}
+                                data={filter.recipes}
                                 keyExtractor={(item) => item.id}
                                 keyboardShouldPersistTaps="handled"
                                 renderItem={({ item }) => (
@@ -192,8 +202,8 @@ export default function AddFromCookbookModal({ isVisible, onClose, listId }: Add
                                 )}
                                 ListEmptyComponent={
                                     <Text style={styles.emptyText}>
-                                        {query
-                                            ? `No recipes match "${query}".`
+                                        {filter.isFiltered
+                                            ? 'No recipes match that.'
                                             : 'Your cookbook is empty. Save a recipe to add it here.'}
                                     </Text>
                                 }
