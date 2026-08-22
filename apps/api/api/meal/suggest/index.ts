@@ -95,11 +95,20 @@ const CUISINE_POOL = [
  * corpus looks like (37 of 143 recipes are tagged vegetarian; 117 are comfort
  * food). Naming the slot for each recipe fixes the mix instead of hoping for
  * it — and keeps the plant-forward option present rather than absent.
+ *
+ * A slot is either a plain list, where every option is equally likely, or a
+ * map of option to relative weight. Weights only ever compare WITHIN their own
+ * slot, so the omnivore slots can be tuned without disturbing the others: an
+ * even split served a whole roast chicken or a turkey half the time the
+ * poultry slot came up, where this audience nearly always wants the thighs or
+ * the breast.
  */
-const PROTEIN_SLOTS: Record<string, string[][]> = {
+type ProteinSlot = readonly string[] | Readonly<Record<string, number>>;
+
+const PROTEIN_SLOTS: Record<string, ProteinSlot[]> = {
   omnivore: [
-    ['chicken thighs', 'chicken breast', 'a whole roast chicken', 'turkey'],
-    ['ground beef', 'a beef steak or roast', 'pork chops', 'pork shoulder', 'sausage'],
+    { 'chicken thighs': 3, 'chicken breast': 3, 'a whole roast chicken': 1, 'turkey': 1 },
+    { 'ground beef': 3, 'a beef steak or roast': 2, 'pork chops': 2, 'pork shoulder': 2, 'sausage': 2 },
     ['white fish', 'salmon', 'shrimp', 'beans or lentils', 'eggs', 'tofu or paneer'],
   ],
   pescatarian: [
@@ -120,6 +129,34 @@ const PROTEIN_SLOTS: Record<string, string[][]> = {
 };
 
 const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)]!;
+
+/** A slot's options as [option, weight]; a plain list is every weight at 1. */
+const weighted = (slot: ProteinSlot): [string, number][] =>
+  Array.isArray(slot)
+    ? (slot as readonly string[]).map((name) => [name, 1])
+    : Object.entries(slot as Record<string, number>);
+
+function pickProtein(slot: ProteinSlot): string {
+  const options = weighted(slot);
+  const total = options.reduce((sum, [, w]) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (const [name, weight] of options) {
+    roll -= weight;
+    if (roll < 0) return name;
+  }
+  // Only reachable on floating-point crumbs at the very top of the range.
+  return options[options.length - 1]![0];
+}
+
+/** Fisher-Yates, on a copy — the slot tables are module-level and shared. */
+function shuffle<T>(arr: readonly T[]): T[] {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 
 /** vegan beats vegetarian beats pescatarian — the strictest wins. */
 function dietOf(needs: string[] = []): keyof typeof PROTEIN_SLOTS {
@@ -204,7 +241,8 @@ const suggestionsSchema = {
 // Everything that varies — seeds, slots, corpus sample, vetoes — goes in the
 // user turn, where a change costs one turn instead of the whole prefix.
 const systemPrompt = `
-You are a recipe assistant suggesting exactly 3 dinners someone will actually cook.
+You are a recipe assistant suggesting exactly 3 recipes someone will actually
+cook. Dinners, unless the request asks for something else.
 
 The three must be genuinely distinct from one another — different primary
 protein, different cooking method, different flavour profile. Three variations
@@ -295,9 +333,9 @@ route.post('/', async (c) => {
 
   // Seeds exist to stop every request landing in the same neighbourhood of
   // dish-space. They are a substitute for direction, so when the person has
-  // actually given direction — hints or a typed request — the cuisine and
-  // effort seeds stand down rather than argue with it. The method seed stays
-  // either way; it varies technique without contradicting a stated craving.
+  // actually given direction — hints or a typed request — every seed drops
+  // from instruction to tie-breaker rather than arguing with it. See the
+  // steered branch below for why stating that explicitly is what matters.
   const steered = hints.length > 0 || query.length > 0;
   const seeds = {
     cuisine: pick(CUISINE_POOL),
@@ -305,25 +343,55 @@ route.post('/', async (c) => {
     effort: pick(EFFORT_LEVELS),
   };
 
+  // Shuffled, because the slots are a spread and not a running order: a fixed
+  // one made every set read poultry, then red meat, then fish or beans, all
+  // the way down, and the first suggestion is the one people actually look at.
   const slots = PROTEIN_SLOTS[dietOf(dietaryNeeds)]!;
-  const composition = slots.map((slot, i) => `  ${i + 1}. built around ${pick(slot)}`).join('\n');
+  const composition = shuffle(slots.map(pickProtein))
+    .map((protein, i) => `  ${i + 1}. built around ${protein}`)
+    .join('\n');
 
   const [corpus, cookbook] = await Promise.all([
     sampleCorpusNames(CORPUS_SAMPLE).catch(() => [] as string[]),
     cookbookNames(uid, COOKBOOK_SAMPLE).catch(() => [] as string[]),
   ]);
 
-  const parts: string[] = ['Suggest 3 dinners.', ''];
+  // Dinners are the default and stay the default. But the word cannot be
+  // asserted in the same turn that tells the model the request outranks the
+  // course — two lines that argue, and the opener wins on position alone.
+  const parts: string[] = [steered ? 'Suggest 3 recipes.' : 'Suggest 3 dinners.', ''];
 
-  parts.push('Compose the set like this:', composition, '');
-  parts.push(`Somewhere in the set, use ${seeds.method}.`);
-  if (!steered) {
+  if (steered) {
+    // The seeds have to be demoted OUT LOUD, not merely stated before the
+    // request. An imperative composition plus a quoted aside loses on a PARTIAL
+    // conflict: "an appetizer built around sausage" is plausible enough that
+    // both get honoured and the answer comes back a main course. A total
+    // conflict — "a birthday cake built around sausage" — throws the
+    // composition out on its own, which is why the same prompt handles cake
+    // well and the appetizer badly. Naming the composition as outranked is what
+    // makes the near-miss resolve the same way the impossible one already does.
     parts.push(
+      'Left to itself, and purely for variety, this set would have been composed so:',
+      composition,
+      `  ...with ${seeds.method} used somewhere in the set.`,
+      '',
+      'Treat all of that as a tie-breaker, never a requirement. What they ask for',
+      'below outranks every part of it, the course included — an appetizer, a side,',
+      'a dessert or a bake is what they get if that is what they asked for. Where a',
+      'slot does not suit the request, drop the slot; do not bend the request to fit.',
+      '',
+    );
+  } else {
+    parts.push(
+      'Compose the set like this:',
+      composition,
+      '',
+      `Somewhere in the set, use ${seeds.method}.`,
       `Let one of the three lean ${seeds.cuisine}.`,
       `Pitch the effort at: ${seeds.effort}.`,
+      '',
     );
   }
-  parts.push('');
 
   if (dietaryNeeds.length) parts.push(`Dietary needs (hard constraints): ${dietaryNeeds.join(', ')}.`);
   if (disliked) parts.push(`Must NOT contain: ${disliked}.`);
