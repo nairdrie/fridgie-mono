@@ -56,6 +56,13 @@ function asArray<T>(value: T[] | undefined): T[] {
     return Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value) : [];
 }
 
+/** Long enough for the keyboard to have finished resizing the list under it. */
+const KEYBOARD_SETTLE_MS = 320;
+/** With the keyboard already up, just long enough for a new row to lay out. */
+const ROW_LAYOUT_MS = 60;
+/** Frames to keep looking for a row's input before giving up on focusing it. */
+const MAX_FOCUS_FRAMES = 30;
+
 export default function HomeScreen() {
     const router = useRouter();
     const { selectedList, isLoading, selectedGroup, selectedView, allLists } = useLists();
@@ -408,31 +415,85 @@ export default function HomeScreen() {
         engineRef.current?.recordLocal({ items, meals });
     }, [items, meals]);
 
-    const focusAtEnd = (id: string) => {
-        const ref = inputRefs.current[id];
-        if (!ref) return;
-        ref.focus?.();
+    // Read by the focus effect below, which runs off `editingId` alone and so
+    // cannot close over either of these.
+    const itemsRef = useRef<Item[]>(items);
+    itemsRef.current = items;
+    const isKeyboardVisibleRef = useRef(isKeyboardVisible);
+    isKeyboardVisibleRef.current = isKeyboardVisible;
 
-        const len = (items.find(i => i.id === id)?.text || '').length;
-        setTimeout(() => {
-            // @ts-ignore
-            ref.setNativeProps?.({ selection: { start: len, end: len } });
-        }, 0);
-    };
-
+    /**
+     * Opens the keyboard on the row the caret has just moved to.
+     *
+     * Keyed on `editingId` ALONE. It used to run on every change to `items` as
+     * well — which is every keystroke — and each run re-focused the input and
+     * reset the selection to the end of the text, so moving the caret back into
+     * the middle of a word was undone by the next character typed.
+     *
+     * `items` was there as a retry, because a row created a moment ago has no
+     * TextInput to focus yet: the list renders in batches, and the input can be
+     * several frames behind the state that asked for it. One animation frame and
+     * then giving up is why tapping the space below the list produced a row that
+     * looked selected with no keyboard under it. The retry is explicit now, and
+     * bounded.
+     */
     useEffect(() => {
         if (!editingId) return;
-        requestAnimationFrame(() => focusAtEnd(editingId));
 
-        // Ask the view to bring the row into sight, rather than computing an
-        // index here. `items` is not what the grocery list renders: identical
-        // texts are merged into one row, so an index into `items` overshoots the
-        // rendered array by one per duplicate — and scrollToIndex past the end
-        // throws, which takes the whole screen down. Only the view knows how its
-        // own rows map back to item ids.
-        //
-        // The delay lets the keyboard finish coming up first.
-        const timer = setTimeout(() => listRef.current?.scrollToItemId?.(editingId), 100);
+        let cancelled = false;
+        let frames = 0;
+        let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const tryFocus = () => {
+            if (cancelled) return;
+            const input = inputRefs.current[editingId];
+            if (!input) {
+                if (frames++ < MAX_FOCUS_FRAMES) requestAnimationFrame(tryFocus);
+                return;
+            }
+            input.focus?.();
+
+            const len = (itemsRef.current.find(i => i.id === editingId)?.text || '').length;
+            selectionTimer = setTimeout(() => {
+                // @ts-ignore
+                input.setNativeProps?.({ selection: { start: len, end: len } });
+            }, 0);
+        };
+        requestAnimationFrame(tryFocus);
+
+        return () => {
+            cancelled = true;
+            if (selectionTimer) clearTimeout(selectionTimer);
+        };
+    }, [editingId]);
+
+    /**
+     * Keeps the row being typed into on screen.
+     *
+     * Still watches `items`, because the row can be moved out from under the
+     * cursor by something other than the user: filing lands and carries it off
+     * into an aisle, or somebody else in the group edits the list. Losing sight
+     * of the row you are typing into is worse than a scroll.
+     *
+     * What changed is that the view now decides. It scrolls only when the row is
+     * genuinely off screen, and then only far enough to bring it to the nearest
+     * edge. It used to re-centre unconditionally — and because this runs on
+     * every keystroke, that is why the list slid up and then back down again
+     * around every word typed into it.
+     *
+     * Asking the view rather than working out an index here is deliberate:
+     * `items` is not what the grocery list renders. Identical texts merge into
+     * one row, so an index into `items` overshoots the rendered array by one per
+     * duplicate, and scrollToIndex past the end throws, taking the screen with
+     * it. Only the view knows how its own rows map back to item ids.
+     */
+    useEffect(() => {
+        if (!editingId) return;
+        // Wait the keyboard out when it is on its way up: the list is a few
+        // hundred points shorter once it arrives, and "is this row visible" has
+        // a different answer either side of that.
+        const settle = isKeyboardVisibleRef.current ? ROW_LAYOUT_MS : KEYBOARD_SETTLE_MS;
+        const timer = setTimeout(() => listRef.current?.scrollToItemId?.(editingId), settle);
         return () => clearTimeout(timer);
     }, [editingId, items]);
 
@@ -883,7 +944,10 @@ export default function HomeScreen() {
     // this, every tap stacked up another unlabelled checkbox.
     const blank = items.find(i => !i.isSection && !i.mealId && (i.text ?? '').trim() === '');
     if (!isSection && blank) {
-        setEditingId(blank.id);
+        // Already the row being typed into: setEditingId would be a no-op and
+        // the focus effect would never run, so ask for the keyboard directly.
+        if (editingId === blank.id) inputRefs.current[blank.id]?.focus?.();
+        else setEditingId(blank.id);
         return;
     }
 
@@ -995,7 +1059,6 @@ export default function HomeScreen() {
                 {/* TODO: the keyboardavoiding here is not as good as on login page now. also add/edit recipe one is good. (CHECK IOS) */}
                 {/* TODO: on IOS, any action outside the keyboard should minimize it (unless its a click to another input). basically we want the keyboard to be smart enough to close when were not using it (on scroll)*/}
                 {/* TODO: on android, any action outside the keyboard should not minimize it, we use the back swipe to do this. */}
-                <SyncStatus engine={engine} />
                 {selectedView == ListView.GroceryList && (
                     <CarryOverBanner
                         groupId={selectedGroup?.id}
@@ -1041,6 +1104,12 @@ export default function HomeScreen() {
                     />
                 )}
             </KeyboardAvoidingView>
+
+            {/* Outside the KeyboardAvoidingView, and last, so it floats over the
+                list instead of sitting in the layout above it. It used to be a
+                bar in the flow, and every time it appeared or left, the whole
+                scroll pane jumped down and then back up under the user's thumb. */}
+            <SyncStatus engine={engine} />
 
             {isFabMenuOpen && (
                 <Pressable style={StyleSheet.absoluteFill} onPress={() => setIsFabMenuOpen(false)} />
