@@ -17,19 +17,13 @@ import {
   placeItems,
   type PlaceableItem,
 } from './sections';
+import { FALLBACK_SECTION, overrideSection, SECTIONS } from './aisles';
 
+// The aisle list and the items filed into them by hand live in ./aisles, which
+// keeps them free of Firebase and of the model client. Re-exported so this
+// stays the one place a caller has to know about.
+export { FALLBACK_SECTION, SECTIONS };
 export { isBlankItem, isRealItem, normalizeItemText };
-
-/** Supermarket aisles, in the order they tend to appear. */
-export const SECTIONS = [
-  'Produce', 'Meat & Poultry', 'Seafood', 'Deli', 'Bakery', 'Dairy & Eggs',
-  'Frozen Foods', 'Pantry', 'Canned Goods', 'Baking', 'Beverages',
-  'Snacks & Candy', 'Health & Beauty', 'Household Essentials', 'Pet Supplies',
-  'International', 'Floral', 'Alcohol',
-] as const;
-
-/** Where anything the model dropped or renamed ends up. Not a real aisle. */
-export const FALLBACK_SECTION = 'Other';
 
 // An invented section name would fall through to the "Other" bucket below; as
 // an enum the schema simply won't allow one.
@@ -55,6 +49,9 @@ const categorizationSchema = {
 
 const categorizeSystemPrompt = `
 You sort grocery items into supermarket sections.
+Sort by the aisle a supermarket shelves the item in, not by what it is made of
+or what it gets eaten with: fresh dips and spreads are refrigerated by the deli,
+flatbreads are with the bread, and Snacks & Candy is packaged snacking food only.
 Copy each item's text through to the output exactly as given — do not rename,
 correct, pluralise, or tidy it. Every item must appear in exactly one section.
 Only include sections that end up with at least one item.
@@ -113,10 +110,10 @@ export function resetCategoryCache(): void {
 /**
  * The section for every distinct text in `texts`.
  *
- * The cache answers first — the literal wording, then its canonical form, then
- * a near-miss spelling — and only what is left over is sent to the model, in a
- * single call. Anything the model declines to place is absent from the result;
- * callers decide what that means.
+ * The hand-filed items in ./aisles answer first, then the cache — the literal
+ * wording, then its canonical form, then a near-miss spelling — and only what is
+ * left over is sent to the model, in a single call. Anything the model declines
+ * to place is absent from the result; callers decide what that means.
  *
  * Throws only if the model call itself fails.
  */
@@ -130,6 +127,23 @@ export async function resolveCategories(texts: string[]): Promise<Map<string, st
   const backfill: Record<string, string> = {};
 
   for (const text of distinct) {
+    // Ahead of the cache, deliberately. Every item on that list is one the model
+    // has been seen to get wrong, so an entry sitting in the cache for it is far
+    // more likely to be that wrong answer than a correction of it.
+    const override = overrideSection(text);
+    if (override) {
+      resolved.set(text, override);
+      // Rewrite a cached answer that disagrees, rather than leaving it there for
+      // some near-miss spelling to fuzzy-match onto later. An item the cache has
+      // never seen is left alone: the override answers it for free anyway.
+      for (const key of cacheKeysFor(text)) {
+        if (index.byKey.has(key) && index.byKey.get(key) !== override) {
+          backfill[key] = override;
+        }
+      }
+      continue;
+    }
+
     const match = findCategory(text, index);
     if (!match) {
       unknown.push(text);
