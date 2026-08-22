@@ -39,6 +39,39 @@ type AggregatedItem = Item & {
 /** Stable identity, so the split memo doesn't re-run on every render. */
 const EMPTY_STAPLES: ReadonlySet<string> = new Set();
 
+/**
+ * What decides that two rows are the same thing and should show as one.
+ *
+ * A row with nothing typed into it yet is only ever itself — otherwise every
+ * blank row on the list would collapse into a single checkbox.
+ *
+ * `?? ''` rather than `.trim()` on the raw field: a row that reached us without
+ * text is a rendering bug at worst, but reading through undefined here throws
+ * mid-render and takes the whole screen with it.
+ */
+const aggregationKey = (item: Item): string =>
+    (item.text ?? '').trim().toLowerCase() || `__blank-${item.id}__`;
+
+/** The group a row belonged to when the caret arrived in it. See `editPinRef`. */
+interface EditPin {
+    editingId: string;
+    ids: ReadonlySet<string>;
+}
+
+const buildEditPin = (editingId: string, items: Item[]): EditPin | null => {
+    if (!editingId) return null;
+    const focused = items.find(i => i.id === editingId && !i.isSection);
+    // A heading, a meal name, or a row that has not landed in `items` yet.
+    // Nothing to hold together, but the pin still has to be marked as belonging
+    // to this edit so it isn't rebuilt on every render for as long as it lasts.
+    if (!focused) return { editingId, ids: EMPTY_STAPLES };
+    const key = aggregationKey(focused);
+    return {
+        editingId,
+        ids: new Set(items.filter(i => !i.isSection && aggregationKey(i) === key).map(i => i.id)),
+    };
+};
+
 /** True when `editingId` points at this row, by either of the ids it can hold. */
 const isRowBeingEdited = (row: AggregatedItem | Item, editingId: string): boolean => {
     if (!editingId) return false;
@@ -98,19 +131,47 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // Same reasoning as the checked section: filed away, opened on request.
     const [showStaples, setShowStaples] = useState(false);
 
+    /**
+     * The group the row under the cursor belonged to when its edit began.
+     *
+     * Rows combine by text, so without this, typing the "e" of "eggs" onto a
+     * list that already has "egg" merges the two the instant the texts match —
+     * under the cursor, before the word is finished. What that looks like from
+     * the outside is the row you are typing into being deleted as you type it.
+     *
+     * Holding a row to the group it started in moves combining to the point the
+     * edit ends — return, or tapping away — which is the first moment the text
+     * is actually what the user meant it to be.
+     *
+     * Pinned as a whole GROUP rather than just the focused row, because renaming
+     * an aggregated row rewrites every one of its sources: pinning one of them
+     * would split a meal's ingredient out of its row mid-keystroke instead of
+     * preventing a merge.
+     *
+     * Worked out during render rather than in an effect so there is never a
+     * frame where the new text is on screen but the pin covering it is not.
+     */
+    const editPinRef = useRef<EditPin | null>(null);
+    if (editPinRef.current?.editingId !== editingId) {
+        editPinRef.current = buildEditPin(editingId, items);
+    }
+
     const aggregatedItems = useMemo((): (AggregatedItem | Item)[] => {
         const itemMap = new Map<string, Item[]>();
         const sections: Item[] = [];
+        const pin = editPinRef.current;
 
         for (const item of items) {
             if (item.isSection) {
                 sections.push(item);
                 continue;
             }
-            // `?? ''` rather than `.trim()` on the raw field: a row that reached
-            // us without text is a rendering bug at worst, but reading through
-            // undefined here throws mid-render and takes the whole screen with it.
-            const key = (item.text ?? '').trim().toLowerCase() || `__blank-${item.id}__`;
+            // Rows in the pinned group are keyed by the edit rather than by their
+            // text, which is what keeps them together and keeps everything else
+            // out until the edit is over.
+            const key = pin?.ids.has(item.id)
+                ? `__editing-${pin.editingId}__`
+                : aggregationKey(item);
             if (!itemMap.has(key)) {
                 itemMap.set(key, []);
             }
@@ -156,7 +217,11 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         const combined = [...result, ...sections];
         combined.sort((a, b) => (a.listOrder ?? '').localeCompare(b.listOrder ?? ''));
         return combined;
-    }, [items]);
+        // `editingId` is what moves the pin read above, so it belongs here even
+        // though the memo never names it — which is also why the rule below
+        // cannot see that it is used.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [items, editingId]);
 
     /**
      * The list as it is actually shown: everything still to be bought, and
@@ -269,6 +334,34 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // often as it is set — every use goes through scrollToItemId below.
     const flatListRef = useRef<any>(null);
 
+    /**
+     * Which rows are on screen, as indices into `openRows`.
+     *
+     * Kept so that bringing a row into view can decide to do nothing, which is
+     * the common case and the one that was missing: the list used to re-centre
+     * on the edited row every time it was asked, and being asked on every
+     * keystroke meant the list slid about underneath whatever was being typed.
+     */
+    const viewableRangeRef = useRef<{ first: number; last: number } | null>(null);
+    // Stable identities on both: VirtualizedList refuses to have either of them
+    // change after mount.
+    const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
+        let first = Infinity;
+        let last = -Infinity;
+        for (const token of viewableItems) {
+            if (typeof token.index !== 'number') continue;
+            if (token.index < first) first = token.index;
+            if (token.index > last) last = token.index;
+        }
+        viewableRangeRef.current = last >= first ? { first, last } : null;
+    }).current;
+    // Nearly all of the row, so "visible" doesn't include one clipped to a
+    // sliver at the edge of the screen.
+    const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 90 }).current;
+
+    /** The scroll being asked for, so a failed measure can be retried once. */
+    const pendingScrollRef = useRef<{ index: number; viewPosition: number; retried: boolean } | null>(null);
+
     useImperativeHandle(ref, () => ({
         scrollToItemId: (itemId: string) => {
             // Rows are aggregates, not items: one row can stand for several
@@ -279,7 +372,19 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             const index = openRows.findIndex(row =>
                 'sourceIds' in row ? (row as AggregatedItem).sourceIds.includes(itemId) : row.id === itemId);
             if (index < 0 || index >= openRows.length) return;
-            flatListRef.current?.scrollToIndex?.({ index, animated: true, viewPosition: 0.5 });
+
+            const visible = viewableRangeRef.current;
+            // Already on screen: leave the list exactly where the user put it.
+            // Scrolling to a row you are looking at is movement for nothing, and
+            // it is movement the user reads as the app stuttering.
+            if (visible && index >= visible.first && index <= visible.last) return;
+
+            // Otherwise move as little as it takes: to the top edge for a row
+            // above the fold, to the bottom edge for one below it. Centring was
+            // a much larger movement than the situation ever called for.
+            const viewPosition = !visible ? 0.5 : index < visible.first ? 0 : 1;
+            pendingScrollRef.current = { index, viewPosition, retried: false };
+            flatListRef.current?.scrollToIndex?.({ index, animated: true, viewPosition });
         },
     }), [openRows]);
 
@@ -324,7 +429,11 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         if (!currentItem) {
             const blank = findBlankRow();
             if (blank) {
-                setEditingId(blank.id);
+                // Already the row being typed into: setEditingId would be a
+                // no-op, the screen's focus effect would never run, and the tap
+                // would do nothing at all. Ask for the keyboard directly.
+                if (editingId === blank.id) inputRefs.current[blank.id]?.focus?.();
+                else setEditingId(blank.id);
                 return;
             }
             const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: false };
@@ -412,7 +521,12 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             );
             markDirty();
         }
-        setEditingId('');
+        // Only end the edit if the caret is still HERE. Blur fires after focus
+        // has already moved — tapping the space below the list focuses the new
+        // row first and blurs this one second — so clearing unconditionally
+        // wipes out the row that was just asked for, which is why a tap down
+        // there produced a row that looked selected with nothing typing into it.
+        setEditingId(prev => (aggItem.sourceIds.includes(prev) ? '' : prev));
     };
 
     /**
@@ -608,7 +722,9 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                         style={[styles.editInput, styles.sectionText]}
                         onChangeText={text => updateSectionText(item.id, text)}
                         onFocus={() => setEditingId(item.id)}
-                        onBlur={() => setEditingId('')}
+                        // Same reasoning as handleItemBlur: blur lands after the
+                        // next row has taken focus, so this must not speak for it.
+                        onBlur={() => setEditingId(prev => (prev === item.id ? '' : prev))}
                         onSubmitEditing={() => submitRow(item)}
                         onKeyPress={({ nativeEvent }) => {
                             if (nativeEvent.key === 'Backspace' && item.text === '') {
@@ -721,11 +837,41 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     // The cost is a few pixels of travel before a held row starts
                     // following the finger.
                     activationDistance={12}
+                    onViewableItemsChanged={onViewableItemsChanged}
+                    viewabilityConfig={viewabilityConfig}
                     // A row added a moment ago has not been measured yet, and
                     // without this scrollToIndex treats that as unrecoverable
                     // and throws. Scrolling a new row into view is a nicety;
                     // losing the screen over it is not a trade worth making.
-                    onScrollToIndexFailed={() => {}}
+                    //
+                    // Swallowing it outright was too far the other way, though:
+                    // the one time this fires is the one time the scroll was
+                    // most wanted — a row that was added a frame ago, which is
+                    // exactly what a tap on the space below the list produces.
+                    // So get close enough on estimated heights that the row
+                    // renders, then ask again. Once: a nicety is not worth a
+                    // loop of scroll attempts.
+                    onScrollToIndexFailed={info => {
+                        const pending = pendingScrollRef.current;
+                        if (!pending || pending.retried || pending.index !== info.index) return;
+                        pending.retried = true;
+                        if (info.averageItemLength > 0) {
+                            flatListRef.current?.scrollToOffset?.({
+                                offset: info.averageItemLength * info.index,
+                                animated: true,
+                            });
+                        }
+                        setTimeout(() => {
+                            // Something else has asked for a scroll since; that
+                            // one is the current answer, not this.
+                            if (pendingScrollRef.current !== pending) return;
+                            flatListRef.current?.scrollToIndex?.({
+                                index: info.index,
+                                animated: true,
+                                viewPosition: pending.viewPosition,
+                            });
+                        }, 150);
+                    }}
                     // `style` reaches the FlatList, which DraggableFlatList
                     // renders inside a view of its own — and that view is styled
                     // ONLY by containerStyle. Left unstyled it takes its height
