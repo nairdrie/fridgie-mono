@@ -198,8 +198,11 @@ typecheck: ## Typecheck both apps
 	@printf "$(BOLD)Typecheck clean.$(OFF)\n"
 
 .PHONY: test
-test: ## Run the API test suite
+test: ## Run the test suites (API + mobile)
+	@printf "$(CYAN)==>$(OFF) api\n"
 	@cd $(API_DIR) && $(BUN) test
+	@printf "$(CYAN)==>$(OFF) mobile\n"
+	@cd $(MOBILE_DIR) && $(BUN) test
 
 .PHONY: lint
 lint: ## Lint the mobile app

@@ -20,7 +20,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import uuid from 'react-native-uuid';
 
+import { useAuth } from '@/context/AuthContext';
 import { Item, Meal, MealPreferences, Recipe, SuggestionTurn } from '@/types/types';
+import { scaleIngredients, servingsScale } from '@/utils/servings';
 import { primary } from '@/utils/styles';
 import { ApiError, getMealPreferences, getMealSuggestions, saveRecipe } from '../utils/api';
 
@@ -70,6 +72,7 @@ const LOADING_MESSAGES = [
 ];
 
 export default function MealSuggestionsModal({ isVisible, onClose, onAddSelectedMeals, listId }: SuggestionModalProps) {
+    const { selectedGroup } = useAuth();
     const [prefs, setPrefs] = useState<MealPreferences | null>(null);
     const [isLoadingPrefs, setIsLoadingPrefs] = useState(true);
 
@@ -329,19 +332,25 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
             const newItems: Item[] = [];
 
             for (const recipe of saved) {
+                // Scaled on the way to the list, never in the saved recipe —
+                // the recipe was written for `recipe.servings` and still says
+                // so. See packages/shared/servings.ts.
+                const scale = servingsScale(recipe.servings, selectedGroup?.householdSize);
+
                 const newMeal: Meal = {
                     id: uuid.v4() as string,
                     listId,
                     name: recipe.name,
                     recipeId: recipe.id,
                 };
+                if (scale !== 1) newMeal.scale = scale;
                 newMeals.push(newMeal);
 
-                for (const ingredient of recipe.ingredients) {
+                for (const ingredient of scaleIngredients(recipe.ingredients, scale)) {
                     newItems.push({
                         id: uuid.v4() as string,
                         text: ingredient.name.trim(),
-                        quantity: ingredient.quantity.trim(),
+                        quantity: (ingredient.quantity ?? '').trim(),
                         checked: false,
                         listOrder: 'NEEDS-RANK', // Parent assigns the real rank.
                         isSection: false,

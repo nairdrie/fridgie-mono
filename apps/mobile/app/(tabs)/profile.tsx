@@ -9,6 +9,8 @@ import { useNotifications } from '@/context/NotificationContext';
 import { Item, Meal, Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getUserCookbook, getUserProfile, removeUserCookbookRecipe, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
+import { clearCache } from '@/utils/listCache';
+import { flushAllDirty, resetSyncEngines } from '@/utils/listSync';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
 import { toReadablePhone } from '@/utils/utils';
@@ -160,6 +162,22 @@ const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisibl
                         <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.primaryButton, { marginTop: 30, width: '100%' }]} onPress={() => {
+                        // Push anything still owed to the server BEFORE signing
+                        // out, then wipe the on-device mirror. Both halves
+                        // matter: skipping the flush throws away edits made
+                        // offline, and skipping the clear leaves one account's
+                        // groceries on the phone for whoever signs in next.
+                        //
+                        // Not awaited — sign-out should not hang on a network
+                        // the user may well not have. The flush gets its chance;
+                        // if it fails, the clear takes the edits with it, which
+                        // is the correct trade for an explicit sign-out.
+                        void flushAllDirty()
+                            .catch(() => {})
+                            .finally(() => {
+                                resetSyncEngines();
+                                void clearCache();
+                            });
                         auth.signOut();
                         router.navigate('/list');
                         onClose();

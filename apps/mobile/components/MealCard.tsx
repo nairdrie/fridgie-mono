@@ -2,7 +2,7 @@ import { Item, Meal } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
 import { parseQuantityAndText } from "@/utils/quantity";
 import { nextListRank, rankAfter, safeParseRank } from "@/utils/rank";
-import { primary } from "@/utils/styles";
+import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -321,7 +321,7 @@ function MealCard({
 
     return (
         <View style={styles.mealCard}>
-            <View style={styles.mainContent}>
+            <View>
                 <View style={styles.mealCardUpper}>
                     <View style={styles.dayPickerContainer}>
                         <TouchableOpacity onPress={toggleDaySelector} style={styles.dayPickerCollapsed}>
@@ -359,7 +359,7 @@ function MealCard({
                         <Ionicons name="ellipsis-horizontal" size={20} color="#8a8a8a" />
                     </TouchableOpacity>
                 </View>
-                <View style={styles.mealHeader}>
+                <View>
                     <View style={styles.mealHeaderUpper}>
                         <TouchableOpacity onPress={() => onToggleCollapse(meal.id)} style={styles.collapseButton}>
                             <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
@@ -524,14 +524,13 @@ const styles = StyleSheet.create({
     menuSheet: { backgroundColor: '#f8f9fa', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 8 },
     menuGrabberContainer: { alignItems: 'center', paddingTop: 12 },
     menuGrabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#d0d0d0' },
-    menuTitle: { fontSize: 16, fontWeight: '600', color: '#6c757d', textAlign: 'center', marginTop: 12, marginBottom: 8, paddingHorizontal: 24 },
+    menuTitle: { fontSize: 16, fontWeight: '600', color: inkMuted, textAlign: 'center', marginTop: 12, marginBottom: 8, paddingHorizontal: 24 },
     menuRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 24 },
-    menuRowText: { fontSize: 17, fontWeight: '500', color: '#212529' },
+    menuRowText: { fontSize: 17, fontWeight: '500', color: ink },
     menuRowDanger: { color: '#db6767ff' },
-    mealCard: { backgroundColor: '#f9f9f9', padding: 12, borderRadius: 8, marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
-    mealHeader: {
-
-    },
+    // Flat fill instead of a drop shadow: these stack several deep in a plan,
+    // and the shadows used to pile up into visible bands between them.
+    mealCard: { backgroundColor: surface, padding: 14, borderRadius: 14, marginBottom: 10 },
     mealHeaderUpper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     mealHeaderLower: {
         flexDirection: 'row',
@@ -540,13 +539,11 @@ const styles = StyleSheet.create({
     collapseButton: { padding: 5 },
     collapseIcon: { fontSize: 16 },
     mealNameContainer: { flex: 1, marginHorizontal: 10 },
-    mealName: { fontWeight: '600', fontSize: 18 },
-    placeholderText: { color: 'grey', fontWeight: 'normal' },
+    mealName: { fontWeight: '600', fontSize: 18, color: ink, letterSpacing: -0.2 },
+    placeholderText: { color: inkFaint, fontWeight: 'normal' },
     deleteButton: { padding: 5 },
     settingsIcon: { fontSize: 20 },
-    ingredientListContainer: { paddingTop: 10, borderTopWidth: 1, borderTopColor: '#eee', marginTop: 10 },
-    mainContent: {
-    },
+    ingredientListContainer: { paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline, marginTop: 10 },
     daySelectorContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
@@ -559,7 +556,7 @@ const styles = StyleSheet.create({
         borderRadius: 14,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#e9e9e9',
+        backgroundColor: hairline,
         marginHorizontal: 2
     },
     dayButtonActive: {
@@ -567,7 +564,7 @@ const styles = StyleSheet.create({
     },
     dayText: {
         fontWeight: '600',
-        color: '#888',
+        color: inkMuted,
     },
     dayTextActive: {
         color: '#fff',
@@ -577,8 +574,9 @@ const styles = StyleSheet.create({
         paddingVertical: 20,
     },
     confirmationTitle: {
-        fontSize: 18,
+        fontSize: 17,
         fontWeight: '600',
+        color: ink,
         marginBottom: 16,
         textAlign: 'center',
     },
@@ -594,11 +592,11 @@ const styles = StyleSheet.create({
         borderWidth: 1,
     },
     cancelButton: {
-        borderColor: '#6c757d',
-        backgroundColor: '#f8f9fa',
+        borderColor: hairline,
+        backgroundColor: '#fff',
     },
     cancelButtonText: {
-        color: '#6c757d',
+        color: inkMuted,
         fontWeight: '600',
     },
     confirmButton: {
@@ -611,14 +609,14 @@ const styles = StyleSheet.create({
     },
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
     dragHandle: { width: 30, alignItems: 'center', justifyContent: 'center' },
-    dragIcon: { fontSize: 18, color: '#aaa' },
-    checkbox: { width: 24, height: 24, marginHorizontal: 10, borderWidth: 1, borderColor: '#ccc', borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
-    editInput: { fontSize: 16, flex: 1, paddingVertical: 2 },
-    checked: { textDecorationLine: 'line-through', color: '#999' },
+    dragIcon: { fontSize: 18, color: inkFaint },
+    checkbox: { width: 24, height: 24, marginHorizontal: 10, borderWidth: 1.5, borderColor: '#cfd4cb', borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
+    editInput: { fontSize: 16, flex: 1, paddingVertical: 2, color: ink },
+    checked: { textDecorationLine: 'line-through', color: inkFaint },
     quantityChecked: { backgroundColor: '#eeeeee' },
-    quantityTextChecked: { textDecorationLine: 'line-through', color: '#999' },
+    quantityTextChecked: { textDecorationLine: 'line-through', color: inkFaint },
     clearButton: { paddingHorizontal: 8 },
-    clearText: { fontSize: 16, color: '#999' },
+    clearText: { fontSize: 16, color: inkFaint },
     addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
     addIngredientText: { color: primary, fontSize: 16 },
     mealCardUpper: {
@@ -652,8 +650,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 4,
         paddingHorizontal: 8,
-        backgroundColor: '#eefff2ff',
-        borderRadius: 12,
+        backgroundColor: accentSoft,
+        borderRadius: 999,
         marginRight: 8,
     },
     recipeIndicatorText: {
@@ -663,10 +661,10 @@ const styles = StyleSheet.create({
         fontSize: 12,
     },
     quantityLabel: {
-        backgroundColor: '#ebebebff',
+        backgroundColor: '#e9ece6',
         paddingHorizontal: 8,
         paddingVertical: 2,
-        borderRadius: 4,
+        borderRadius: 6,
         marginHorizontal: 3
     },
 });

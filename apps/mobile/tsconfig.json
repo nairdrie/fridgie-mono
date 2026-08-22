@@ -18,4 +18,10 @@
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
   ],
+  // Tests run under `bun test` (see package.json), which strips types rather
+  // than checking them. They are excluded here because typechecking them would
+  // need `@types/bun`, whose global declarations of fetch/Request/Response
+  // collide with the ones React Native already provides — the app's own
+  // typecheck is worth more than the test file's.
+  "exclude": ["**/*.spec.ts"],
 }

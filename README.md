@@ -121,12 +121,13 @@ Consumed as TypeScript **source** — no build step, nothing published. See
 | `types.ts` | No — re-exported via `export type *`, fully erased |
 | `quantity.ts` | Yes |
 | `rank.ts` | Yes |
+| `mergeList.ts` | Yes |
 
 `types.ts` must stay **type-only** (no `enum`, no `const`, no functions), which
 is why `ListView` lives in each app rather than here.
 
-Because `quantity.ts` and `rank.ts` are real runtime modules, the mobile app
-lists `packages/shared` in `metro.config.js` `watchFolders` — Metro does not
+Because `quantity.ts`, `rank.ts` and `mergeList.ts` are real runtime modules,
+the mobile app lists `packages/shared` in `metro.config.js` `watchFolders` — Metro does not
 watch or resolve anything outside the app directory. Everything here must be
 environment-neutral: no Bun APIs, no Node built-ins, no `react-native`, no
 `firebase`.

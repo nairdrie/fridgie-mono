@@ -31,7 +31,11 @@ route.get('/', async (c) => {
       id,
       name: data.name,
       owner: data.owner,
-      members: data.members
+      members: data.members,
+      // Absent on every group that has never set one, and it must stay absent
+      // rather than defaulting — see `Group.householdSize`. RTDB simply omits
+      // the key, so this is undefined and c.json drops it.
+      householdSize: data.householdSize,
     }))
 
 
@@ -45,7 +49,7 @@ route.get('/', async (c) => {
       createdAt: Date.now(),
     }
     await adminRtdb.ref(`groups/${myListsId}`).set(newGroup)
-    userGroups.unshift({ id: myListsId, name: 'Private', owner: uid , members: { [uid]: true }})
+    userGroups.unshift({ id: myListsId, name: 'Private', owner: uid, members: { [uid]: true }, householdSize: undefined })
   }
 
   const allMemberUids = new Set<string>();

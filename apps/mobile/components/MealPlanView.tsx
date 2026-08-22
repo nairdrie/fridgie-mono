@@ -1,7 +1,7 @@
 // components/MealPlanView.tsx
 import { Item, Meal } from "@/types/types";
 import { formatQuantity, parseQuantity } from "@/utils/quantity";
-import { primary } from "@/utils/styles";
+import { hairline, ink, inkMuted, primary, surface } from "@/utils/styles";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
@@ -115,7 +115,11 @@ export default function MealPlanView({
          in the corner, and silently picked one of the three for you. */}
      { sortedMeals.length == 0 &&
       <View style={styles.emptyMealsContainer}>
+        <View style={styles.emptyIcon}>
+          <Ionicons name="restaurant-outline" size={28} color={primary} />
+        </View>
         <Text style={styles.emptyMealsText}>Let&apos;s get cooking!</Text>
+        <Text style={styles.emptySubtext}>Whatever you plan here brings its ingredients to the list.</Text>
         <View style={styles.emptyActions}>
           <TouchableOpacity style={styles.emptyAction} onPress={onAddMeal}>
             <Ionicons name="add-outline" size={22} color={primary} />
@@ -184,7 +188,7 @@ const styles = StyleSheet.create({
   emptyAction: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: '#fff', borderRadius: 25, paddingVertical: 12, paddingHorizontal: 18,
-    borderWidth: 1, borderColor: '#e9ecef',
+    borderWidth: 1, borderColor: hairline,
   },
   emptyActionText: { fontSize: 16, fontWeight: '600', color: primary },
   container: {
@@ -195,10 +199,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  emptyIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: surface, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  emptySubtext: { fontSize: 14, lineHeight: 20, color: inkMuted, textAlign: 'center', marginTop: 6, paddingHorizontal: 48 },
   emptyMealsText: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: 'grey'
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: -0.3,
+    color: ink
 
   },
   addMealButton: { paddingVertical: 5 },

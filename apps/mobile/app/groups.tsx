@@ -29,6 +29,9 @@ import {
     View
 } from 'react-native';
 
+/** Mirrors the server's cap in api/group/[id].ts — the stepper stops where the API does. */
+const MAX_HOUSEHOLD_SIZE = 20;
+
 /**
  * A self-contained component for rendering and managing a single group item.
  */
@@ -50,6 +53,11 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
 
     // Editing state
     const [editedName, setEditedName] = useState(group.name);
+    // null is a real value here, not "loading": it means nobody has said what
+    // this household is, and recipes are shopped at the amounts they were
+    // written for. See `Group.householdSize`.
+    const [householdSize, setHouseholdSize] = useState<number | null>(group.householdSize ?? null);
+    const [isSavingHousehold, setIsSavingHousehold] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -65,6 +73,7 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
             setInitialMembers(currentMembers);
             setNewlyInvited([]);
             setEditedName(group.name);
+            setHouseholdSize(group.householdSize ?? null);
             setSearchQuery('');
             setSearchResults([]);
             setIsConfirmingDelete(false);
@@ -157,6 +166,34 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
         );
     };
 
+    /**
+     * Household size saves on its own, immediately — it is not part of Save
+     * Changes.
+     *
+     * It has to be: the footer only offers Save when `canEdit`, and `canEdit`
+     * is false for the 'Private' group, which is the group almost everyone is
+     * actually in. Wiring this to that button would have shipped the setting
+     * switched off for the majority of users.
+     */
+    const commitHouseholdSize = async (next: number | null) => {
+        const previous = householdSize;
+        if (next === previous) return;
+        setHouseholdSize(next);
+        setIsSavingHousehold(true);
+        try {
+            await updateGroup(group.id, { householdSize: next });
+            onGroupUpdated();
+        } catch (error) {
+            // Put the control back where it was: a stepper that keeps a number
+            // the server rejected is lying about what the next shop will do.
+            setHouseholdSize(previous);
+            const message = error instanceof ApiError ? error.message : "Could not save that.";
+            Alert.alert("Error", message);
+        } finally {
+            setIsSavingHousehold(false);
+        }
+    };
+
     const handleSaveChanges = async () => {
         setIsSaving(true);
         try {
@@ -229,6 +266,45 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                 <View style={styles.expandedContent}>
                     <Text style={styles.inputLabel}>Group Name</Text>
                     <TextInput style={[styles.textInput, !canEdit && styles.readOnlyInput]} value={editedName} onChangeText={setEditedName} editable={canEdit} />
+
+                    <Text style={styles.inputLabel}>Cooking For</Text>
+                    <Text style={styles.inputHint}>
+                        Recipes are scaled to this when their ingredients go on the shopping
+                        list. Leave it unset to shop the amounts each recipe was written for.
+                    </Text>
+                    <View style={styles.stepperRow}>
+                        <TouchableOpacity
+                            style={[styles.stepperButton, (!isOwner || householdSize === null) && styles.stepperButtonDisabled]}
+                            disabled={!isOwner || householdSize === null || isSavingHousehold}
+                            // Stepping below one clears the setting rather than
+                            // bottoming out at a household of nobody.
+                            onPress={() => commitHouseholdSize(householdSize! > 1 ? householdSize! - 1 : null)}
+                        >
+                            <Ionicons name="remove" size={20} color={(!isOwner || householdSize === null) ? '#ccc' : primary} />
+                        </TouchableOpacity>
+                        <View style={styles.stepperValue}>
+                            {isSavingHousehold ? (
+                                <ActivityIndicator size="small" color={primary} />
+                            ) : (
+                                <Text style={householdSize === null ? styles.stepperValueUnset : styles.stepperValueText}>
+                                    {householdSize === null
+                                        ? 'Not set'
+                                        : `${householdSize} ${householdSize === 1 ? 'person' : 'people'}`}
+                                </Text>
+                            )}
+                        </View>
+                        <TouchableOpacity
+                            style={[styles.stepperButton, (!isOwner || householdSize === MAX_HOUSEHOLD_SIZE) && styles.stepperButtonDisabled]}
+                            disabled={!isOwner || householdSize === MAX_HOUSEHOLD_SIZE || isSavingHousehold}
+                            // From unset, the first tap lands on 2 rather than 1.
+                            // Someone who opens this at all is telling us they
+                            // are not the four the recipe assumed, and a
+                            // household of one is a second tap away either way.
+                            onPress={() => commitHouseholdSize(householdSize === null ? 2 : householdSize + 1)}
+                        >
+                            <Ionicons name="add" size={20} color={(!isOwner || householdSize === MAX_HOUSEHOLD_SIZE) ? '#ccc' : primary} />
+                        </TouchableOpacity>
+                    </View>
 
                     <Text style={styles.inputLabel}>Members</Text>
                     {members.map(member => (
@@ -603,6 +679,13 @@ const styles = StyleSheet.create({
     inputLabel: { fontSize: 14, fontWeight: '500', color: '#333', marginBottom: 8, marginTop: 10 },
     textInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 10 },
     readOnlyInput: { backgroundColor: '#f0f0f0', color: '#666' },
+    inputHint: { fontSize: 12, color: '#666', lineHeight: 17, marginBottom: 10, marginTop: -4 },
+    stepperRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginBottom: 10, overflow: 'hidden' },
+    stepperButton: { paddingHorizontal: 18, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+    stepperButtonDisabled: { opacity: 0.5 },
+    stepperValue: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
+    stepperValueText: { fontSize: 16, fontWeight: '600', color: '#333' },
+    stepperValueUnset: { fontSize: 16, color: '#999' },
     modalFooter: { flexDirection: 'row', paddingVertical: 16, marginTop: 16, borderTopWidth: 1, borderTopColor: '#eee', backgroundColor: '#fff', paddingHorizontal: 8 },
     modalButton: { flex: 1, marginHorizontal: 8, paddingVertical: 12, borderRadius: 25, alignItems: 'center' },
     secondaryButton: { backgroundColor: '#e9ecef' },

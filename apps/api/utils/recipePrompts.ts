@@ -18,6 +18,19 @@ Quantity format rules (apply to every ingredient's "quantity" field):
 - If the amount is not measurable, use "to taste" or an empty string.
 `;
 
+/**
+ * Must stay in step with packages/shared/servings.ts, which applies the same
+ * object-yield rule when reading a page's own `recipeYield` — the two must
+ * agree or the same page would import differently depending on whether it
+ * published JSON-LD.
+ */
+export const servingsRules = `
+Set "servings" to the number of PEOPLE the recipe feeds, as a whole number:
+- Use the source's own statement where it makes one ("Serves 4", "4 servings", "Yield: 6 portions"). A range takes its LOW end: "serves 4-6" is 4.
+- A yield that counts OBJECTS is not a serving count. "Makes 12 cookies", "1 loaf", "24 muffins", "2 dozen" — set "servings" to null for these unless the source separately says how many people it feeds.
+- Never estimate a serving count from the ingredient amounts. null is the correct answer whenever the source does not say.
+`;
+
 /** The closed vocabulary the app's tag filters understand. */
 export const TAGS = [
   'vegetarian', 'vegan', 'gluten-free', 'dairy-free', 'nut-free', 'pescatarian',
@@ -58,8 +71,12 @@ export const recipeSchema = {
     ingredients: { type: 'array', items: ingredientSchema },
     instructions: { type: 'array', items: { type: 'string' } },
     tags: { type: 'array', items: { type: 'string' } },
+    servings: {
+      anyOf: [{ type: 'integer' }, { type: 'null' }],
+      description: 'People the recipe feeds. null when the source does not say.',
+    },
   },
-  required: ['name', 'description', 'ingredients', 'instructions', 'tags'],
+  required: ['name', 'description', 'ingredients', 'instructions', 'tags', 'servings'],
   additionalProperties: false,
 } as const;
 
@@ -110,6 +127,7 @@ Transcribe what is actually written. Read carefully:
 ${recipeWritingRules}
 ${tagVocabulary}
 ${quantityFormatRules}
+${servingsRules}
 Set "photoURL" to null — a photo of a page is not a photo of the finished dish.
 If the image does not contain a culinary recipe, set "found" to false and "recipe" to null.
 `;
@@ -127,7 +145,9 @@ You are an experienced recipe developer writing a complete, reliable recipe from
 just the name of a dish.
 
 Write the recipe you would actually hand someone, not a sketch of one:
-- Serves 4 unless the title says otherwise.
+- Write for 4 people unless the title says otherwise, and set "servings" to the
+  number you actually wrote the quantities for. Never null on this path: you
+  chose the amounts, so you know who they feed.
 - Every ingredient needed to cook the dish, including oil, salt and pepper, in
   the order they are used. Quantities must be plausible and must balance —
   someone following this exactly should get a dish that works.
@@ -145,6 +165,7 @@ give it a proper name.
 ${recipeWritingRules}
 ${tagVocabulary}
 ${quantityFormatRules}
+${servingsRules}
 `;
 
 /**

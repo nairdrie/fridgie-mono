@@ -5,6 +5,8 @@ import { groupAuth } from '@/middleware/groupAuth'
 import { auth } from '@/middleware/auth'
 import { sanitizeItems } from '@/utils/rank'
 import { mutateList } from '@/utils/listStore'
+import { recordStapleRejections } from '@/utils/stapleStore'
+import { detectStapleRejections, stapleKey } from '@fridgie/shared/staples'
 import type { ListSort } from '@/utils/types'
 
 const route = new Hono()
@@ -54,7 +56,17 @@ route.post('/', async (c) => {
     payload.sort = 'custom'
   }
 
-  const result = await mutateList(groupId!, id, (current) => ({ ...current, ...payload }), {
+  // The document as it stood before this save, captured from inside the
+  // mutator because that is the only place it exists. A transaction body can
+  // run several times; each attempt overwrites this, so what survives is the
+  // state the COMMITTED attempt was built on — which is exactly what the diff
+  // below needs.
+  let before: any = null
+
+  const result = await mutateList(groupId!, id, (current) => {
+    before = current
+    return { ...current, ...payload }
+  }, {
     clientId: typeof clientId === 'string' ? clientId : undefined,
     expectedRev: typeof expectedRev === 'number' ? expectedRev : undefined,
   })
@@ -63,7 +75,48 @@ route.post('/', async (c) => {
   if (result.status === 'stale') {
     return c.json({ error: 'stale_rev', rev: result.rev, list: result.list }, 409)
   }
+
+  // Which recipe ingredients this household just refused to buy. Deliberately
+  // after the commit and deliberately not awaited: this is a background
+  // observation about the user's habits, and it must never delay — or fail —
+  // the save of their shopping list. See packages/shared/staples.ts for the
+  // rules, and note that a 409 never reaches here: a rejected write's diff
+  // describes a document that was never stored.
+  if (before && groupId) {
+    void recordRejectionsFrom(groupId, before, result.list)
+  }
+
   return c.json({ status: 'updated', rev: result.rev })
 })
+
+/**
+ * Best-effort, fire-and-forget. Every failure path here costs a slower-learning
+ * staple list and nothing else, so all of them are swallowed with a log.
+ */
+async function recordRejectionsFrom(groupId: string, before: any, after: any): Promise<void> {
+  try {
+    // RTDB stores an array with a hole in it as a keyed OBJECT, and hands it
+    // back that way. `detectStapleRejections` takes arrays and would quietly
+    // see nothing at all — so the stored side is normalized first, exactly as
+    // every other read path here does.
+    const previous = { ...before, items: sanitizeItems(before?.items).items }
+
+    const keys = detectStapleRejections(previous, after)
+    if (keys.length === 0) return
+
+    // The wording as the user last saw it, so the settings screen can say
+    // "olive oil" instead of the hyphenated key. Taken from the rows that were
+    // actually removed, which is where the key came from.
+    const names: Record<string, string> = {}
+    for (const row of previous.items as { text?: string }[]) {
+      const key = stapleKey(row?.text)
+      if (key && keys.includes(key) && !names[key]) names[key] = String(row.text).trim()
+    }
+
+    await recordStapleRejections(groupId, keys, names)
+  } catch (error) {
+    console.error('Could not record staple rejections:', error)
+  }
+}
 
 export default route

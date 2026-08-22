@@ -1,11 +1,13 @@
 import { Ingredient, Item, Meal, Recipe } from '@/types/types';
-import { primary } from '@/utils/styles';
+import { accentSoft, hairline, ink, inkFaint, inkMuted, primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import uuid from 'react-native-uuid';
 import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
+import { useAuth } from '@/context/AuthContext';
+import { parseServings, scaleIngredients, servingsScale } from '@/utils/servings';
 
 interface AddEditRecipeModalProps {
   isVisible: boolean;
@@ -32,6 +34,7 @@ interface AddEditRecipeModalProps {
 }
 
 export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, recipeToEdit = null, onRecipeSave }: AddEditRecipeModalProps) {
+  const { selectedGroup } = useAuth();
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [importUrl, setImportUrl] = useState('');
   // Seeded from the meal's own title: someone who typed "Chicken Katsu" into
@@ -378,9 +381,16 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       const updatedMeal = mealForRecipe
         ? { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name }
         : null;
+      // The one moment scaling is applied: a recipe's ingredients becoming rows
+      // on a shopping list. The recipe itself was saved above, unscaled and
+      // unchanged — see packages/shared/servings.ts for why that matters.
+      const scale = servingsScale(savedRecipe.servings, selectedGroup?.householdSize);
       const newItemsForRecipe = mealForRecipe
-        ? savedRecipe.ingredients.map(ing => ({ id: uuid.v4() as string, text: ing.name.trim(), quantity: ing.quantity.trim(), checked: false, listOrder: 'NEEDS-RANK', isSection: false, mealId: mealForRecipe.id }))
+        ? scaleIngredients(savedRecipe.ingredients, scale).map(ing => ({ id: uuid.v4() as string, text: ing.name.trim(), quantity: (ing.quantity ?? '').trim(), checked: false, listOrder: 'NEEDS-RANK', isSection: false, mealId: mealForRecipe.id }))
         : [];
+      // Recorded on the meal so the cooking view shows the amounts the shop was
+      // actually done against, even if the household size changes later.
+      if (updatedMeal && scale !== 1) updatedMeal.scale = scale;
       onRecipeSave(updatedMeal, newItemsForRecipe, savedRecipe);
       onClose();
     } catch (error) { console.error("Failed to save recipe", error); Alert.alert("Error", "Could not save recipe."); }
@@ -399,6 +409,19 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
   };
 
   const handleRecipeFieldChange = (field: keyof Recipe, value: string) => setEditingRecipe(p => p ? { ...p, [field]: value } : null);
+  /**
+   * Servings is a number on the contract, and the field it comes from is a
+   * keyboard. An unreadable or empty box clears it rather than storing 0 —
+   * absent means "don't scale", and a 0 would be a division by nothing.
+   */
+  const handleServingsChange = (value: string) => setEditingRecipe(p => {
+    if (!p) return null;
+    const next = { ...p };
+    const parsed = parseServings(value);
+    if (parsed) next.servings = parsed;
+    else delete next.servings;
+    return next;
+  });
   const handleIngredientChange = (index: number, field: keyof Ingredient, value: string) => setEditingRecipe(p => { if (!p) return null; const ni = [...p.ingredients]; ni[index] = { ...ni[index], [field]: value }; return { ...p, ingredients: ni }; });
   const addIngredientField = () => setEditingRecipe(p => p ? { ...p, ingredients: [...p.ingredients, { name: '', quantity: '' }] } : null);
   const removeIngredientField = (index: number) => setEditingRecipe(p => p ? { ...p, ingredients: p.ingredients.filter((_, i) => i !== index) } : null);
@@ -462,7 +485,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
           <TextInput
             style={styles.formInput}
             placeholder="e.g. chicken katsu curry"
-            placeholderTextColor="#999"
+            placeholderTextColor={inkFaint}
             value={generateTitle}
             onChangeText={setGenerateTitle}
             multiline
@@ -530,7 +553,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       }
       return (
         <View style={styles.formSectionContainer}>
-          <TextInput style={styles.formInput} placeholder="Paste a recipe link..." placeholderTextColor="#999" value={importUrl} onChangeText={setImportUrl} autoCapitalize="none" keyboardType="url" />
+          <TextInput style={styles.formInput} placeholder="Paste a recipe link..." placeholderTextColor={inkFaint} value={importUrl} onChangeText={setImportUrl} autoCapitalize="none" keyboardType="url" />
           <TouchableOpacity style={styles.primaryButton} onPress={handleImportRecipe}>
             <Text style={styles.primaryButtonText}>Import</Text>
           </TouchableOpacity>
@@ -546,20 +569,43 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
               ) : ( <TouchableOpacity style={[styles.recipeImage, styles.addImageButton]} onPress={handlePickImage}><Ionicons name="camera-outline" size={24} color={primary} /><Text style={styles.addImageButtonText}>Add Photo</Text></TouchableOpacity> )}
             </View>
             <View style={styles.formSectionContainer}>
-              <TextInput style={styles.recipeNameInput} placeholder="Recipe Name" placeholderTextColor="#999" value={editingRecipe.name} onChangeText={(val) => handleRecipeFieldChange('name', val)} multiline />
-              <TextInput style={[styles.formInput, styles.descriptionInput]} placeholder="A short, tasty description..." placeholderTextColor="#999" value={editingRecipe.description} onChangeText={(val) => handleRecipeFieldChange('description', val)} multiline />
+              <TextInput style={styles.recipeNameInput} placeholder="Recipe Name" placeholderTextColor={inkFaint} value={editingRecipe.name} onChangeText={(val) => handleRecipeFieldChange('name', val)} multiline />
+              <TextInput style={[styles.formInput, styles.descriptionInput]} placeholder="A short, tasty description..." placeholderTextColor={inkFaint} value={editingRecipe.description} onChangeText={(val) => handleRecipeFieldChange('description', val)} multiline />
             </View>
             <View style={styles.formSectionContainer}>
-              <Text style={styles.formSectionTitle}>Ingredients</Text>
+              {/* Servings lives in the ingredients header because that is what
+                  it means: the number these amounts were written for. Anywhere
+                  else and it reads as trivia about the dish. */}
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.formSectionTitle}>Ingredients</Text>
+                <View style={styles.servingsField}>
+                  <Text style={styles.servingsLabel}>Serves</Text>
+                  <TextInput
+                    style={styles.servingsInput}
+                    placeholder="—"
+                    placeholderTextColor={inkFaint}
+                    value={editingRecipe.servings ? String(editingRecipe.servings) : ''}
+                    onChangeText={handleServingsChange}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                  />
+                </View>
+              </View>
               {editingRecipe.ingredients.map((ing, index) => (
-              <View key={`ing-${index}`} style={styles.formRow}><TextInput style={[styles.formInput, styles.quantityInput]} placeholder="1 cup" placeholderTextColor="#999" value={ing.quantity} onChangeText={(val) => handleIngredientChange(index, 'quantity', val)} /><TextInput style={[styles.formInput, styles.nameInput]} placeholder="Flour" placeholderTextColor="#999" value={ing.name} onChangeText={(val) => handleIngredientChange(index, 'name', val)} /><TouchableOpacity onPress={() => removeIngredientField(index)} style={styles.deleteRowButton}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity></View>
+              <View key={`ing-${index}`} style={styles.formRow}><TextInput style={[styles.formInput, styles.quantityInput]} placeholder="1 cup" placeholderTextColor={inkFaint} value={ing.quantity} onChangeText={(val) => handleIngredientChange(index, 'quantity', val)} /><TextInput style={[styles.formInput, styles.nameInput]} placeholder="Flour" placeholderTextColor={inkFaint} value={ing.name} onChangeText={(val) => handleIngredientChange(index, 'name', val)} /><TouchableOpacity onPress={() => removeIngredientField(index)} style={styles.deleteRowButton}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity></View>
               ))}
               <TouchableOpacity style={styles.addFieldButton} onPress={addIngredientField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Ingredient</Text></TouchableOpacity>
             </View>
             <View style={styles.formSectionContainer}>
               <Text style={styles.formSectionTitle}>Instructions</Text>
               {editingRecipe.instructions.map((inst, index) => (
-              <View key={`inst-${index}`} style={styles.formRow}><Text style={styles.stepNumber}>{index + 1}.</Text><TextInput style={[styles.formInput, styles.nameInput]} placeholder="Mix the things..." placeholderTextColor="#999" value={inst} onChangeText={(val) => handleInstructionChange(index, val)} multiline /><TouchableOpacity onPress={() => removeInstructionField(index)} style={styles.deleteRowButton}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity></View>
+              <View key={`inst-${index}`} style={[styles.formRow, styles.stepFormRow]}>
+                {/* Same numbered column as the read view, so a step that grows to
+                    several lines keeps its number pinned to the first one. */}
+                <View style={styles.stepBadge}><Text style={styles.stepNumber}>{index + 1}</Text></View>
+                <TextInput style={[styles.formInput, styles.nameInput]} placeholder="Mix the things..." placeholderTextColor={inkFaint} value={inst} onChangeText={(val) => handleInstructionChange(index, val)} multiline />
+                <TouchableOpacity onPress={() => removeInstructionField(index)} style={[styles.deleteRowButton, styles.stepDeleteButton]}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity>
+              </View>
               ))}
               <TouchableOpacity style={styles.addFieldButton} onPress={addInstructionField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Step</Text></TouchableOpacity>
             </View>
@@ -667,15 +713,24 @@ const styles = StyleSheet.create({
   backButton: { width: 30, alignItems: 'flex-start' },
   closeButton: { width: 30, alignItems: 'flex-end' },
   formSectionContainer: { backgroundColor: '#FFFFFF', borderRadius: 12, margin: 16, padding: 16, marginTop: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  formSectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
-  formInput: { color: '#222222', borderWidth: 1, borderColor: '#EFEFEF', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 12 },
-  recipeNameInput: { fontSize: 24, fontWeight: 'bold', marginBottom: 8, borderBottomWidth: 1, borderColor: '#EFEFEF', paddingBottom: 8, color: '#222222' },
+  formSectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted, marginBottom: 14 },
+  // The heading keeps its own marginBottom, so the row aligns on the text
+  // baseline rather than on the box.
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  servingsField: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -6 },
+  servingsLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted },
+  servingsInput: { minWidth: 44, textAlign: 'center', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8, backgroundColor: accentSoft, color: ink, fontSize: 15, fontWeight: '700' },
+  formInput: { color: ink, borderWidth: 1, borderColor: hairline, borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 12 },
+  recipeNameInput: { fontSize: 24, fontWeight: '700', letterSpacing: -0.4, marginBottom: 8, borderBottomWidth: 1, borderColor: hairline, paddingBottom: 8, color: ink },
   descriptionInput: { minHeight: 80, textAlignVertical: 'top' },
   formRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   quantityInput: { flex: 0.3, marginRight: 8 },
   nameInput: { flex: 1 },
-  photoHint: { textAlign: 'center', color: '#888', fontSize: 14, marginTop: 8, paddingHorizontal: 12 },
-  stepNumber: { marginRight: 8, fontSize: 16, color: '#888' },
+  photoHint: { textAlign: 'center', color: inkMuted, fontSize: 14, marginTop: 8, paddingHorizontal: 12 },
+  stepFormRow: { alignItems: 'flex-start' },
+  stepBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center', marginRight: 10, marginTop: 6 },
+  stepNumber: { fontSize: 13, fontWeight: '700', color: primary },
+  stepDeleteButton: { marginTop: 8 },
   deleteRowButton: { padding: 4, marginLeft: 8 },
   addFieldButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 8 },
   addFieldButtonText: { color: primary, fontSize: 16, fontWeight: '600', marginLeft: 4 },

@@ -1,10 +1,12 @@
 // ListScreen.tsx
 
 import AddEditRecipeModal from '@/components/AddEditRecipeModal';
+import CarryOverBanner from '@/components/CarryOverBanner';
 import GroceryListView, { type GroceryListHandle } from '@/components/GroceryListView'; // Import the new component
 import MealPlanView from '@/components/MealPlanView';
 import AddFromCookbookModal from '@/components/AddFromCookbookModal';
 import MealSuggestionsModal from '@/components/MealSuggestionsModal';
+import SyncStatus from '@/components/SyncStatus';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
 import { useLists } from '@/context/ListContext';
@@ -31,23 +33,20 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
-import { addUserCookbookRecipe, categorizeList, CLIENT_ID, getUserCookbook, listenToList, removeUserCookbookRecipe, StaleRevError, updateList } from '../../utils/api';
+import { addUserCookbookRecipe, alwaysShowStaple, categorizeList, CLIENT_ID, getStaples, getUserCookbook, listenToList, removeUserCookbookRecipe } from '../../utils/api';
+import { isOnline } from '../../utils/connectivity';
+import { getListSyncEngine, type ListSyncEngine } from '../../utils/listSync';
+import { stampEdits } from '../../utils/stamp';
 import { cancelMealRatingReminder, scheduleMealRatingReminder } from '../../utils/mealReminders';
 import { parseWeekStart } from '../../utils/date';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
 
-/**
- * Department order, always. A grocery list is walked aisle by aisle, so filing
- * is what the list does rather than a mode to be picked — there is no sort
- * picker any more, and nothing left to store a per-list choice for. Still
- * written on every save so the stored document says what the order actually is,
- * including for lists left on the old `custom` setting.
- *
- * Ordering rows by hand is untouched by this: dragging one moves it and it
- * stays moved, because filing only ever places the rows that still need a
- * department and leaves every other row where it is.
- */
-const LIST_SORT: List['sort'] = 'category';
+// LIST_SORT moved to utils/listSync — the engine is what writes it now, and it
+// must still be written by a flush that happens long after this screen is gone.
+//
+// Ordering rows by hand is untouched by it: dragging one moves it and it stays
+// moved, because filing only ever places the rows that still need a department
+// and leaves every other row where it is.
 
 // RTDB stores a JS array as a keyed object and only hands it back as an array
 // while the keys stay 0..n with no gaps. Reading a stored list as "array or
@@ -62,8 +61,30 @@ export default function HomeScreen() {
     const { selectedList, isLoading, selectedGroup, selectedView, allLists } = useLists();
     const { user } = useAuth();
     
-    const [meals, setMeals] = useState<Meal[]>([]);
-    const [items, setItems] = useState<Item[]>([]);
+    const [meals, setMealsRaw] = useState<Meal[]>([]);
+    const [items, setItemsRaw] = useState<Item[]>([]);
+
+    /**
+     * Every local edit goes through here so the rows it touched carry an
+     * `updatedAt`, which is what lets a merge break a genuine collision — two
+     * people changing the same field of the same row between two saves.
+     *
+     * Stamping centrally rather than at the call sites is deliberate: `setItems`
+     * is threaded into GroceryListView and MealPlanView and used from a dozen
+     * places between them, and a stamp that has to be remembered is a stamp that
+     * gets forgotten in the one path that needed it. Diffing against the
+     * previous array costs a pass over a few dozen rows and cannot be skipped by
+     * accident.
+     *
+     * Remote snapshots use the raw setters below — a stamp there would make the
+     * other person's edit look like it was made on this device.
+     */
+    const setItems = useCallback<React.Dispatch<React.SetStateAction<Item[]>>>((update) => {
+        setItemsRaw(prev => stampEdits(prev, typeof update === 'function' ? update(prev) : update));
+    }, []);
+    const setMeals = useCallback<React.Dispatch<React.SetStateAction<Meal[]>>>((update) => {
+        setMealsRaw(prev => stampEdits(prev, typeof update === 'function' ? update(prev) : update));
+    }, []);
 
     const [editingId, setEditingId] = useState<string>('');
     // Any filing in flight. Gates the auto-file effect so two passes can't race.
@@ -82,7 +103,23 @@ export default function HomeScreen() {
 
     const [collapsedMeals, setCollapsedMeals] = useState<Record<string, boolean>>({});
 
+    /**
+     * Canonical keys of what this household keeps in. Fetched rather than
+     * derived: the counting happens server-side as a side effect of saving a
+     * list, because that is the only place the previous document exists.
+     *
+     * Refreshed on focus rather than after every save. Nothing visible changes
+     * at the moment a staple is promoted — the row that promoted it has just
+     * been deleted — so the effect is only ever seen on the NEXT list, and
+     * refetching on save would be a request per keystroke-batch for nothing.
+     */
+    const [staples, setStaples] = useState<ReadonlySet<string>>(() => new Set());
+
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
+    // Carried alongside the id rather than looked up at render: the recipe is
+    // opened from a meal, and the meal is what knows the factor its ingredients
+    // were bought at.
+    const [recipeToViewScale, setRecipeToViewScale] = useState(1);
     const [recipeToEdit, setRecipeToEdit] = useState<Meal | null>(null);
 
     const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
@@ -122,20 +159,31 @@ export default function HomeScreen() {
         setEditingId('');
     }, [selectedView]);
 
-    // Marks a short window in which the user is actively editing. This is no
-    // longer used to suppress our OWN echo (lastClientId does that precisely);
-    // it only defers applying ANOTHER client's snapshot mid-keystroke. Deferring
-    // is safe now: our next save carries `rev`, so if we did miss someone's
-    // write the server 409s us and we rebase instead of clobbering them.
-    const dirtyUntilRef = useRef<number>(0);
+    // When the user last touched the list. The only thing reading it is the
+    // status pill, which stays quiet for the saves the app makes on its own
+    // (rank repair, filing) and speaks up only for work the user did.
+    //
+    // This used to open a 1.2s window during which ANOTHER client's snapshot
+    // was dropped on the floor rather than applied mid-keystroke. That window
+    // is gone: snapshots are now merged field by field, so one landing while
+    // you type cannot take the keystroke with it — you changed `text`, they
+    // didn't, so yours wins outright with no appeal to a clock. Dropping
+    // snapshots was always a guess, and it guessed wrong for anyone who kept
+    // typing for longer than 1.2 seconds.
+    const lastEditAtRef = useRef<number>(0);
     const markDirty = () => {
-        const until = Date.now() + 1200;
-        dirtyUntilRef.current = until;
+        lastEditAtRef.current = Date.now();
     };
 
-    // Last rev we have seen for the selected list, sent with every save so the
-    // server can reject writes built on a stale snapshot.
-    const revRef = useRef<number | undefined>(undefined);
+    // Saving, retrying, merging and mirroring to disk all live in the engine.
+    // It is keyed by list and OUTLIVES this screen, so edits made on a week the
+    // user has since navigated away from still reach the server.
+    //
+    // Held as BOTH a ref and state: the ref is what the callbacks below reach
+    // for (always current, never a stale closure), the state is what the status
+    // bar re-renders on.
+    const engineRef = useRef<ListSyncEngine | null>(null);
+    const [engine, setEngine] = useState<ListSyncEngine | null>(null);
 
     // The list on screen right now, readable from an async callback that closed
     // over an older one. Requests in flight when the week changes answer about
@@ -167,14 +215,16 @@ export default function HomeScreen() {
     }));
 
 
-    // True while the latest items/meals state came from the server (WS or
-    // categorize) rather than a local edit — those changes must NOT be saved
-    // back, or every broadcast would trigger a write and clients would
-    // ping-pong saves at each other.
-    const applyingRemoteRef = useRef(false);
-    // No saves until the first server snapshot for the current list has
-    // arrived; otherwise the debounced save could overwrite the list with the
-    // initial empty state.
+    // No saves until this list's state has actually been loaded — from disk or
+    // from the server. Without it the first render, whose `items` is the empty
+    // array this screen starts with, would be recorded as an edit that emptied
+    // the week.
+    //
+    // The companion flag that used to sit here — "this change came from the
+    // server, don't save it back" — is gone. The engine answers that by
+    // comparing against the revision the server confirmed, which is a fact
+    // rather than a flag that has to be set and cleared correctly around every
+    // asynchronous apply.
     const hasLoadedRef = useRef(false);
 
     // Ids we tried and failed to file. Without this the auto-sort effect would
@@ -190,49 +240,60 @@ export default function HomeScreen() {
     const needsSection = (i: Item) =>
         hasText(i) && !i.section && !sortFailedIdsRef.current.has(i.id);
 
-    const applyRemoteList = (list: List) => {
-        if (!list) return;
-        applyingRemoteRef.current = true;
+    /**
+     * Puts a snapshot on screen — from the socket, from a merge, or from the
+     * on-device mirror. Never stamps: the raw setters are used deliberately, so
+     * rows the other person edited do not come out looking like they were
+     * edited here.
+     */
+    const renderSnapshot = useCallback((snapshot: { items?: Item[]; meals?: Meal[] }) => {
+        if (!snapshot) return;
         hasLoadedRef.current = true;
         setIsListLoading(false);
-        if (typeof list.rev === 'number') revRef.current = list.rev;
 
         // Repair missing/invalid LexoRanks (e.g. legacy 'NEEDS-RANK' rows), and
         // read `items` in whichever shape RTDB stored it — an array with a hole
         // in it comes back as a keyed object, and demanding Array.isArray here
         // meant showing an empty list rather than the one we were sent.
-        const withOrder = sanitizeListOrders(list.items)
+        // Copied before sorting. `sanitizeListOrders` hands back the SAME array
+        // when nothing needed repair, and `sort` mutates in place — so without
+        // the spread this reorders the engine's own copy of the document as a
+        // side effect of drawing it.
+        const withOrder = [...sanitizeListOrders(snapshot.items)]
             .sort((a: Item, b: Item) => (a.listOrder ?? '').localeCompare(b.listOrder ?? ''));
 
         // An empty list is left empty. It used to be given a blank placeholder
         // row, which the grocery view renders as an unlabelled checkbox — one
         // more empty row to clean up, and one the user never asked for. The view
         // has a real empty state and offers to add the first item itself.
-        setItems(withOrder);
+        setItemsRaw(withOrder);
         // `meals` can come back keyed too, for the same reason.
-        setMeals(asArray(list.meals));
-    };
+        setMealsRaw(asArray(snapshot.meals));
+    }, []);
 
     // Handles ALL incoming data (Initial Fetch + Real-time Updates)
     useEffect(() => {
         if (!selectedList?.id || !selectedGroup?.id) {
-            setItems([]);
-            setMeals([]);
+            setItemsRaw([]);
+            setMealsRaw([]);
             setIsListLoading(false);
             return;
         }
         hasLoadedRef.current = false;
-        revRef.current = undefined;
         // Nothing on screen belongs to the week we are switching to. Holding on
         // to the previous list's items and meals until a snapshot arrives shows
         // one week's food under another week's heading, which reads as real
         // rather than as still loading.
-        setItems([]);
-        setMeals([]);
+        setItemsRaw([]);
+        setMealsRaw([]);
         setIsListLoading(true);
         // These track ids on the list being left behind; the snapshot for the
         // new one decides its own state.
         sortFailedIdsRef.current = new Set();
+
+        const engine = getListSyncEngine(selectedGroup.id, selectedList.id);
+        engineRef.current = engine;
+        setEngine(engine);
 
         // listenToList fetches an auth token before it opens the socket, so the
         // unsubscribe it hands back can arrive AFTER this effect has been torn
@@ -241,6 +302,44 @@ export default function HomeScreen() {
         // top of the new week. The flag closes over the teardown instead.
         let cancelled = false;
         let unsubscribe: (() => void) | undefined;
+
+        // The on-device mirror FIRST, before a token is fetched or a socket is
+        // opened. This is the whole offline story in three lines: a phone with
+        // no signal paints the real week immediately instead of a spinner over
+        // an empty list that the tab layout would then replace with an error
+        // screen. When there IS signal this loses nothing — the snapshot lands a
+        // moment later and the engine reconciles it against exactly this state.
+        engine.hydrate().then(cached => {
+            if (cancelled) return;
+            if (cached) {
+                // A snapshot that arrived while the read was in flight is newer
+                // than what came off disk; don't paint over it.
+                if (!hasLoadedRef.current) renderSnapshot(cached);
+                return;
+            }
+            // Nothing on disk for this week. Online, that is fine — the snapshot
+            // is on its way. Offline it is not: no snapshot is coming, and the
+            // spinner would stay up forever over a week the user opened for the
+            // first time in a shop.
+            //
+            // So: stop waiting, and let them work. Marking it loaded means those
+            // edits are captured and mirrored to disk, and it is safe to do
+            // because the engine refuses to send anything until it has a
+            // confirmed document to build on — the empty list on screen can
+            // never be written over a week that actually has food in it.
+            if (!isOnline() && !hasLoadedRef.current) {
+                hasLoadedRef.current = true;
+                setIsListLoading(false);
+            }
+        }).catch(err => console.warn('Failed to read cached list', err));
+
+        // A merge can happen with no snapshot in sight — a queued offline save
+        // finally going out and coming back 409. This is how its result reaches
+        // the screen rather than only the disk.
+        const unsetRenderer = engine.setRenderer(snapshot => {
+            if (!cancelled) renderSnapshot(snapshot);
+        });
+
         const setupListener = async () => {
             try {
                 const stop = await listenToList(selectedGroup.id, selectedList.id, (list: List) => {
@@ -254,35 +353,19 @@ export default function HomeScreen() {
                         return;
                     }
 
-                    // The first snapshot for a list is its load, not an update
-                    // to something we already hold, so it applies no matter who
-                    // wrote it last. Both guards below are about updates.
-                    const isInitialLoad = !hasLoadedRef.current;
-
-                    // Our own write echoing back — never re-apply it. Once
-                    // loaded, that is: `lastClientId` is stored ON the list
-                    // document, so the first snapshot of a list this session
-                    // wrote to earlier still carries our id. Hard-ignoring that
-                    // one left the previous week on screen and, with
-                    // hasLoadedRef never set, silently disabled saving for the
-                    // week the user was actually looking at.
-                    if (!isInitialLoad && list.lastClientId === CLIENT_ID) {
-                        if (typeof list.rev === 'number') revRef.current = list.rev;
-                        return;
-                    }
-
-                    // Server-initiated (add-meal, categorize, migration) — these
-                    // carry no clientId and MUST always be applied. Time-gating
-                    // them is what let a meal added from Explore get silently
-                    // deleted by the next debounced save.
-                    const serverInitiated = list.lastClientId == null;
-
-                    // Another client's edit, while we're mid-keystroke: defer.
-                    // Our next save sends the older rev, so the server 409s it
-                    // and we rebase rather than overwriting their change.
-                    if (!isInitialLoad && !serverInitiated && Date.now() < dirtyUntilRef.current) return;
-
-                    applyRemoteList(list);
+                    // The engine decides what this snapshot means, because it is
+                    // the only thing that knows what the server last confirmed:
+                    // our own echo (adopt the revision, repaint nothing), a
+                    // change to a list we have no unsaved edits on (adopt it), or
+                    // a change that has to be merged with edits made here —
+                    // including edits made with no signal at all, minutes ago.
+                    //
+                    // It returns what should now be on screen, or null when the
+                    // answer is "nothing you don't already have".
+                    const next = engine.applyRemote(list, CLIENT_ID);
+                    hasLoadedRef.current = true;
+                    setIsListLoading(false);
+                    if (next) renderSnapshot(next);
                 });
                 if (cancelled) {
                     stop();
@@ -296,43 +379,34 @@ export default function HomeScreen() {
         setupListener();
         return () => {
             cancelled = true;
+            unsetRenderer();
             unsubscribe?.();
+            // Deliberately NOT stopping the engine. It keeps whatever this week
+            // still owes the server and keeps trying — leaving a week with
+            // unsaved edits is not the same as abandoning them.
         };
         // Depend on stable IDs: presence updates re-create the group object and
         // would otherwise tear the socket down on every status change.
-    }, [selectedList?.id, selectedGroup?.id]);
+    }, [selectedList?.id, selectedGroup?.id, renderSnapshot]);
 
-    // Handles ALL outgoing data (Debounced Saving)
-     useEffect(() => {
-        if (!selectedList?.id || !selectedGroup?.id) return;
+    // Handles ALL outgoing data.
+    //
+    // This is now one line, because everything that used to be here — the
+    // debounce, the revision bookkeeping, the 409 handling — belongs to the
+    // engine, and belongs there rather than in a component effect for a
+    // concrete reason: an effect dies with the screen. It could only ever save
+    // the week being looked at, and only while it was being looked at. A save
+    // that failed because the phone was in a chest freezer aisle had nowhere to
+    // live until the signal came back.
+    //
+    // Note there is no "did this change come from the server" guard any more.
+    // The engine compares against the revision the server confirmed, so a state
+    // that merely reflects what the server already has is not recorded as an
+    // edit, whoever produced it.
+    useEffect(() => {
         if (!hasLoadedRef.current) return;
-        if (applyingRemoteRef.current) {
-            applyingRemoteRef.current = false;
-            return;
-        }
-        const groupId = selectedGroup.id;
-        const listId = selectedList.id;
-        const timeout = setTimeout(() => {
-            updateList(groupId, listId, { items, meals, sort: LIST_SORT }, revRef.current)
-                .then(res => { if (typeof res?.rev === 'number') revRef.current = res.rev; })
-                .catch(err => {
-                    if (err instanceof StaleRevError) {
-                        // Someone committed first. Rebase onto their document
-                        // instead of overwriting it; without this the last
-                        // writer silently wins and the other user's edit is gone.
-                        console.warn('List save was stale; rebasing onto rev', err.rev);
-                        if (err.list) applyRemoteList(err.list);
-                        // Nothing to rebase onto. Keeping the rejected revision
-                        // would make every following save 409 the same way, so
-                        // let the next one through and take the snapshot after.
-                        else revRef.current = undefined;
-                        return;
-                    }
-                    console.error(err);
-                });
-        }, 500);
-        return () => clearTimeout(timeout);
-    }, [items, meals, selectedList?.id, selectedGroup?.id]);
+        engineRef.current?.recordLocal({ items, meals });
+    }, [items, meals]);
 
     const focusAtEnd = (id: string) => {
         const ref = inputRefs.current[id];
@@ -377,6 +451,72 @@ export default function HomeScreen() {
             keyboardDidShowListener.remove();
         };
     }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            const groupId = selectedGroup?.id;
+            if (!groupId) {
+                setStaples(new Set());
+                return;
+            }
+            let ignore = false;
+            // getStaples never rejects — an unreachable API and a household
+            // with no staples yet both render exactly today's list.
+            getStaples(groupId).then(entries => {
+                if (!ignore) setStaples(new Set(entries.map(e => e.key)));
+            });
+            return () => { ignore = true; };
+        }, [selectedGroup?.id])
+    );
+
+    /**
+     * Appends last week's unbought rows to this week's list.
+     *
+     * Ranked here rather than in the banner because this is where the rest of
+     * the list is: `nextListRank` needs every existing row to put these after
+     * all of them, and a rank generated against a stale snapshot lands them in
+     * the middle of somebody's aisles.
+     */
+    const handleCarryOver = useCallback((rows: Omit<Item, 'id' | 'listOrder'>[]) => {
+        if (rows.length === 0) return;
+        setItems(prev => {
+            let rank = nextListRank(prev);
+            const carried = rows.map(row => {
+                rank = rank.genNext();
+                return { ...row, id: uuid.v4() as string, listOrder: rank.toString() } as Item;
+            });
+            // A brand new week is one blank row waiting for text. Carrying rows
+            // in on top of it leaves an empty checkbox above them.
+            const isSingleEmpty = prev.length === 1 && !prev[0].isSection && (prev[0].text ?? '') === '';
+            return isSingleEmpty ? carried : [...prev, ...carried];
+        });
+        markDirty();
+    }, [markDirty]);
+
+    /**
+     * "I do buy this." Optimistic: the row is already back on the list by the
+     * time this runs (GroceryListView promotes it first), so all that is left
+     * is to stop the server saying it again.
+     */
+    const handleAlwaysShowStaple = useCallback(async (key: string, name: string) => {
+        const groupId = selectedGroup?.id;
+        if (!groupId) return;
+        setStaples(prev => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+        });
+        try {
+            await alwaysShowStaple(groupId, key);
+        } catch (error) {
+            console.error(`Failed to always-show staple ${name}:`, error);
+            // Left promoted locally on purpose. The row the user asked for is
+            // on their list, which is what they wanted; the worst case is that
+            // it is filed away again on the next list, where one more tap fixes
+            // it. Putting it back in the strip now would undo a deliberate
+            // action in front of them.
+        }
+    }, [selectedGroup?.id]);
 
     useFocusEffect(
         useCallback(() => {
@@ -444,13 +584,14 @@ export default function HomeScreen() {
             Alert.alert("No Recipe", "A recipe has not been added for this meal yet.");
             return;
         }
+        setRecipeToViewScale(meal.scale ?? 1);
         setRecipeToViewId(meal.recipeId);
     };
 
 
     const handleAddRecipe = (meal: Meal) => setRecipeToEdit(meal);
 
-    const handleAddMealsFromSuggestion = async (newMeals: Meal[], newItemsFromModal: Item[]) => {
+    const handleAddMealsFromSuggestion = (newMeals: Meal[], newItemsFromModal: Item[]) => {
         // 1. Prepare the new state variables
         const updatedMeals = [...meals, ...newMeals];
 
@@ -470,24 +611,21 @@ export default function HomeScreen() {
         setItems(finalNewItems);
         markDirty(); // Keep the dirty flag to prevent immediate listener overwrites
 
-        try {
-            // 3. Save the new, still-unsorted items immediately rather than
-            // waiting out the debounce — these came from a modal the user has
-            // just dismissed, and losing them to a backgrounded app would be
-            // losing a whole meal plan. The auto-sort effect files them into
-            // departments once the state above has committed.
-            if (selectedGroup && selectedList) {
-                const res = await updateList(selectedGroup.id, selectedList.id, {
-                    items: finalNewItems,
-                    meals: updatedMeals,
-                    sort: LIST_SORT,
-                }, revRef.current);
-                if (typeof res?.rev === 'number') revRef.current = res.rev;
-            }
-        } catch (error) {
-            console.error("Failed to save suggested meals:", error);
-            // Optional: Implement logic to revert the optimistic update on error
-            Alert.alert("Error", "Could not save new meals. Please try again.");
+        // 3. Send the new, still-unsorted items immediately rather than waiting
+        // out the debounce — these came from a modal the user has just
+        // dismissed, and a whole meal plan is a lot to lose. The auto-sort
+        // effect files them into departments once the state above has committed.
+        //
+        // No try/catch and no error alert. Recording is synchronous and writes
+        // to disk before it writes to the network, so there is nothing here that
+        // can fail in a way the user needs telling about: if the send doesn't go
+        // through, the plan is already mirrored on the device and the engine
+        // keeps trying. Telling someone their meal plan failed to save when it
+        // is sitting safely on their phone is worse than saying nothing.
+        const engine = engineRef.current;
+        if (engine) {
+            engine.recordLocal({ items: finalNewItems, meals: updatedMeals });
+            void engine.flush();
         }
     };
 
@@ -632,10 +770,17 @@ export default function HomeScreen() {
             // `items` has changed, so the effect below asks again with the order
             // the user has just set.
             if (reorderSeqRef.current !== askedForOrder) return;
-            applyFiledItems(sanitizeListOrders(newItems));
-            // This write moved the list on; adopt its revision so the save that
-            // follows isn't rejected as stale and rebased over the merge above.
-            if (typeof rev === 'number') revRef.current = rev;
+            // Adopt the server's document as the confirmed base BEFORE merging
+            // it into local state. Categorize commits its own revision, so
+            // without this the next save arrives stale and is merged against a
+            // document it already agrees with — work for nothing, and a
+            // needless broadcast to everyone else in the group.
+            //
+            // `meals` are untouched by filing, so the server's document is its
+            // items plus the meals we already hold.
+            const filed = sanitizeListOrders(newItems);
+            engineRef.current?.adoptServerWrite({ items: filed, meals }, rev);
+            applyFiledItems(filed);
             sortFailedIdsRef.current = new Set();
         } catch (err) {
             console.error('Auto-categorization failed', err);
@@ -693,7 +838,7 @@ export default function HomeScreen() {
             markDirty();
         }, 400);
         return () => clearTimeout(timer);
-    }, [items, editingId, isKeyboardVisible]);
+    }, [items, editingId, isKeyboardVisible, setItems]);
 
     const handleToggleCookbookById = async (recipeId: string) => {
         const isInCookbook = cookbookRecipeIds.has(recipeId);
@@ -850,6 +995,15 @@ export default function HomeScreen() {
                 {/* TODO: the keyboardavoiding here is not as good as on login page now. also add/edit recipe one is good. (CHECK IOS) */}
                 {/* TODO: on IOS, any action outside the keyboard should minimize it (unless its a click to another input). basically we want the keyboard to be smart enough to close when were not using it (on scroll)*/}
                 {/* TODO: on android, any action outside the keyboard should not minimize it, we use the back swipe to do this. */}
+                <SyncStatus engine={engine} />
+                {selectedView == ListView.GroceryList && (
+                    <CarryOverBanner
+                        groupId={selectedGroup?.id}
+                        currentList={selectedList}
+                        allLists={allLists}
+                        onCarryOver={handleCarryOver}
+                    />
+                )}
                 { selectedView == ListView.GroceryList ? (
                     <GroceryListView
                         items={items}
@@ -860,6 +1014,8 @@ export default function HomeScreen() {
                         isKeyboardVisible={isKeyboardVisible}
                         markDirty={markDirty}
                         onManualReorder={() => { reorderSeqRef.current += 1; }}
+                        staples={staples}
+                        onAlwaysShowStaple={handleAlwaysShowStaple}
                         ref={listRef}
                     />
                 ) : (
@@ -946,6 +1102,7 @@ export default function HomeScreen() {
                 isVisible={!!recipeToViewId}
                 onClose={() => setRecipeToViewId(null)}
                 recipeId={recipeToViewId}
+                scale={recipeToViewScale}
                 onEdit={handleEditRecipe}
                 isInCookbook={recipeToViewId ? cookbookRecipeIds.has(recipeToViewId) : false}
                 onCookbookUpdate={() => {

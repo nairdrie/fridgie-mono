@@ -40,6 +40,28 @@ export type Item = {
    * text changes, so a renamed item is re-filed.
    */
   section?: string;
+  /**
+   * The user has promoted this row back into the list body for this shop, even
+   * though its ingredient is one of the household's staples.
+   *
+   * Per-row and per-week rather than a change to the staple itself, because
+   * "I'm out of olive oil this week" and "we don't actually always have olive
+   * oil" are different statements. The second one is what
+   * DELETE /api/staples/:key is for.
+   */
+  stapleOverride?: boolean;
+  /**
+   * Wall-clock stamp of the last LOCAL edit to this row, written by whichever
+   * client made the change. Exists solely so a three-way merge can break a
+   * genuine collision — two people changing the SAME field of the SAME row
+   * between two saves. Every other conflict resolves structurally, so a phone
+   * with a wrong clock can at worst pick the wrong side of that collision; it
+   * can never lose a row or bring a deleted one back.
+   *
+   * The server neither reads nor writes it. It survives a round trip because
+   * `sanitizeItems` carries unknown keys through untouched.
+   */
+  updatedAt?: number;
 };
 
 /** Item as it crosses the wire: open/extensible, unknown keys preserved. */
@@ -78,6 +100,18 @@ export interface Group {
   members: UserProfile[];
   /** GET /api/group emits this; the server's old copy was missing it. */
   owner: string;
+  /**
+   * People this household actually cooks for, which is not the same as how
+   * many of them have the app — a couple where one partner never installed it
+   * is a group of one.
+   *
+   * Absent means DO NOT SCALE, and deliberately not "fall back to
+   * `members.length`": most groups have exactly one member, so that fallback
+   * would quietly quarter every quantity for every solo user the day it
+   * shipped, and someone cooking alone very often still cooks four portions.
+   * Scaling only ever happens because someone said what their household is.
+   */
+  householdSize?: number;
 }
 
 export type DayOfWeek =
@@ -91,6 +125,17 @@ export interface Meal {
   name: string;
   recipeId?: string;
   addedToCookbook?: boolean;
+  /**
+   * What the recipe's quantities were multiplied by when this meal's
+   * ingredients were put on the list.
+   *
+   * Stored rather than recomputed on read, because the household size can
+   * change after the shop: recomputing would make the cooking view quietly
+   * disagree with the amounts that were actually bought. Absent means 1.
+   */
+  scale?: number;
+  /** Merge tiebreak stamp — see `Item.updatedAt`. */
+  updatedAt?: number;
 }
 
 /**
@@ -181,6 +226,15 @@ export interface Recipe {
   photoURL?: string;
   ingredients: Ingredient[];
   instructions: string[];
+  /**
+   * People this recipe was written to feed.
+   *
+   * Read from the source's own `recipeYield` on import, asked of the model on
+   * generation, and editable by hand. Absent on every recipe written before
+   * this field existed, which is exactly why everything downstream reads
+   * absent as "don't scale" rather than assuming the prompt's serves-4.
+   */
+  servings?: number;
   /** Server-generated on import/suggest, and indexed for search. */
   tags?: string[];
   /** Set by the server; used to decide whether editing forks the recipe. */

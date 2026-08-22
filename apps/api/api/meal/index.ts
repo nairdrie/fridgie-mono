@@ -5,9 +5,11 @@ import { LexoRank } from 'lexorank'
 import { auth } from '@/middleware/auth'
 import { groupAuth } from '@/middleware/groupAuth'
 import { type Item, type Meal, type Recipe } from '@/utils/types'
+import { adminRtdb } from '@/utils/firebase'
 import { mutateList } from '@/utils/listStore'
 import { maxRank, sanitizeItems } from '@/utils/rank'
 import { normalizeQuantity } from '@/utils/quantity'
+import { scaleIngredients, servingsScale } from '@/utils/servings'
 import { categorizeNewItems } from '@/utils/categorize'
 import { keepUnanswered } from '@/utils/sections'
 
@@ -33,12 +35,33 @@ route.post('/', groupAuth, async (c) => {
         return c.json({ error: 'Missing required fields' }, 400)
     }
 
+    // What this household actually cooks for. Absent means don't scale — see
+    // `Group.householdSize` for why that must not fall back to a member count.
+    // Best-effort: a failed read costs correct amounts, not the whole add.
+    const householdSize = await adminRtdb
+        .ref(`groups/${groupId}/householdSize`)
+        .once('value')
+        .then((snap) => snap.val() as number | null)
+        .catch((e) => {
+            console.error('Could not read household size; adding unscaled:', e)
+            return null
+        })
+
+    // Computed once, outside the transaction body — that body can run several
+    // times, and the meal must not end up stamped with a different factor from
+    // the one its own ingredients were scaled by.
+    const scale = servingsScale(recipe.servings, householdSize)
+    const ingredients = scaleIngredients(recipe.ingredients || [], scale)
+
     const newMeal: Meal = {
         id: uuidv4(),
         listId: listId,
         name: recipe.name,
         recipeId: recipe.id,
     }
+    // Only when it did something. RTDB rejects undefined, and a stored 1 would
+    // claim the meal was scaled when it was copied verbatim.
+    if (scale !== 1) newMeal.scale = scale
 
     // Filled in by the transaction below: the rows this add put on the list,
     // and the only ones the categorization step is allowed to move.
@@ -64,7 +87,7 @@ route.post('/', groupAuth, async (c) => {
             // from the ids of that attempt, never an accumulation of all of them.
             addedItemIds.length = 0
 
-            const newItems: Item[] = (recipe.ingredients || []).map((ingredient) => {
+            const newItems: Item[] = ingredients.map((ingredient) => {
                 listRank = listRank.genNext()
                 const item: Item = {
                     id: uuidv4(),

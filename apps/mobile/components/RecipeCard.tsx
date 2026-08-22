@@ -1,7 +1,7 @@
 // components/RecipeCard.tsx
 
 import { Recipe } from '@/types/types';
-import { primary } from '@/utils/styles';
+import { hairline, ink, inkMuted, primary, surface } from '@/utils/styles';
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -32,11 +32,9 @@ export default function RecipeCard({ recipe, onAddToMealPlan, onView }: RecipeCa
             <View style={styles.cardContent}>
                 <Text style={styles.cardTitle} numberOfLines={1}>{recipe.name}</Text>
                 {recipe.authorName && (
-                    <View style={styles.dateLabel}>
-                        <Text style={styles.dateLabelText}>
-                            {recipe.authorName}
-                        </Text>
-                    </View>
+                    <Text style={styles.cardAuthor} numberOfLines={1}>
+                        by <Text style={styles.cardAuthorName}>{recipe.authorName}</Text>
+                    </Text>
                 )}
                 <Text style={styles.cardDescription} numberOfLines={2}>{recipe.description}</Text>
             </View>
@@ -48,28 +46,14 @@ export default function RecipeCard({ recipe, onAddToMealPlan, onView }: RecipeCa
 }
 
 const styles = StyleSheet.create({
-    cardContainer: { backgroundColor: '#fff', borderRadius: 12, marginBottom: 16, flexDirection: 'row', overflow: 'hidden', borderColor: '#ddd', borderWidth: 1 },
-    cardImage: { width: 100, height: '100%' },
-    cardContent: { flex: 1, padding: 12 },
-    cardTitle: { fontSize: 16, fontWeight: 'bold'},
-    cardDescription: { fontSize: 13, color: '#6c757d', lineHeight: 18 },
+    // A soft tile rather than a bordered box: these sit on white in Explore and
+    // the Cookbook, and the fill separates them more quietly than a hairline did.
+    cardContainer: { backgroundColor: surface, borderRadius: 16, marginBottom: 12, flexDirection: 'row', overflow: 'hidden' },
+    cardImage: { width: 96, height: '100%', backgroundColor: hairline },
+    cardContent: { flex: 1, paddingVertical: 12, paddingHorizontal: 14 },
+    cardTitle: { fontSize: 16, fontWeight: '600', color: ink, letterSpacing: -0.2 },
+    cardAuthor: { fontSize: 13, color: inkMuted, marginTop: 2 },
+    cardAuthorName: { color: primary, fontWeight: '600' },
+    cardDescription: { fontSize: 13, lineHeight: 18, color: inkMuted, marginTop: 6 },
     addButton: { justifyContent: 'center', paddingHorizontal: 10 },
-    dateLabel: {
-        alignSelf: 'flex-start',
-        width: 'auto',
-        flexDirection: 'row',
-        alignItems: 'center',
-        // paddingVertical: 4,
-        // paddingHorizontal: 8,
-        // backgroundColor: '#eefff2ff',
-        borderRadius: 12,
-        // marginBottom: 8,
-    },
-    dateLabelText: {
-        // marginHorizontal: 5,
-        marginBottom: 3,
-        color: primary,
-        fontWeight: '500',
-        fontSize: 12,
-    }
 });

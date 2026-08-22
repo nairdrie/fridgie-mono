@@ -4,9 +4,11 @@ import { auth } from '@/middleware/auth';
 import { requireAccount } from '@/middleware/requireAccount';
 import { fs } from '@/utils/firebase';
 import { normalizeIngredients } from '@/utils/quantity';
+import { normalizeRecipeServings } from '@/utils/servings';
 import { completeJson, models } from '@/utils/claude';
 import {
   quantityFormatRules,
+  servingsRules,
   recipeSchema,
   recipeWritingRules,
   tagVocabulary,
@@ -214,6 +216,9 @@ ordinary kitchen unless the request says otherwise.
 ${recipeWritingRules}
 ${tagVocabulary}
 ${quantityFormatRules}
+${servingsRules}
+Like the generation path, you are inventing these dishes rather than reading
+them off a source, so "servings" is never null here — write for 4 and say 4.
 `;
 
 route.use('*', auth, requireAccount);
@@ -359,7 +364,7 @@ route.post('/', async (c) => {
       effort: 'medium',
     });
 
-    const recipes = (result.recipes ?? []).map((r) => ({
+    const recipes = (result.recipes ?? []).map((r) => normalizeRecipeServings({
       ...r,
       ingredients: normalizeIngredients(r.ingredients),
     }));

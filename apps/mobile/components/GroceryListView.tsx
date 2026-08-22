@@ -10,12 +10,14 @@ import {
     quantitiesEquivalent,
 } from '@/utils/quantity';
 import { nextListRank, safeParseRank } from '@/utils/rank';
-import { primary } from '@/utils/styles';
+import { isStapleRow, stapleKey } from '@/utils/staples';
+import { hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
+    Alert,
     Keyboard,
     Pressable,
     StyleSheet,
@@ -32,6 +34,16 @@ import SwipeToDeleteRow from './SwipeToDeleteRow';
 type AggregatedItem = Item & {
  sourceIds: string[];
  totalQuantity: string;
+};
+
+/** Stable identity, so the split memo doesn't re-run on every render. */
+const EMPTY_STAPLES: ReadonlySet<string> = new Set();
+
+/** True when `editingId` points at this row, by either of the ids it can hold. */
+const isRowBeingEdited = (row: AggregatedItem | Item, editingId: string): boolean => {
+    if (!editingId) return false;
+    if (row.id === editingId) return true;
+    return 'sourceIds' in row && (row as AggregatedItem).sourceIds.includes(editingId);
 };
 
 /** What the screen can ask of the list, via its ref. */
@@ -55,6 +67,15 @@ interface GroceryListViewProps {
    * would put the row back; the screen uses this to throw such an answer away.
    */
   onManualReorder?: () => void;
+  /**
+   * Canonical keys of the ingredients this household has been observed to
+   * always have in — see packages/shared/staples.ts. Empty for a household that
+   * has not rejected anything three times yet, and for one whose staples failed
+   * to load, which is why an empty set has to render exactly today's list.
+   */
+  staples?: ReadonlySet<string>;
+  /** "I do buy this" — permanently stops a key being treated as a staple. */
+  onAlwaysShowStaple?: (key: string, name: string) => void;
 }
 
 const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
@@ -66,12 +87,16 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     isKeyboardVisible,
     markDirty,
     onManualReorder,
+    staples,
+    onAlwaysShowStaple,
 }, ref) => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [selectedItem, setSelectedItem] = useState<AggregatedItem | null>(null);
     // Checked items are put away, not shown crossed out in place, so the section
     // starts closed — opening it is asking to see what you already have.
     const [showChecked, setShowChecked] = useState(false);
+    // Same reasoning as the checked section: filed away, opened on request.
+    const [showStaples, setShowStaples] = useState(false);
 
     const aggregatedItems = useMemo((): (AggregatedItem | Item)[] => {
         const itemMap = new Map<string, Item[]>();
@@ -121,6 +146,10 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 sourceIds: sources.map(s => s.id),
                 totalQuantity,
                 checked: sources.every(s => s.checked),
+                // `some`, not `every`: one source saying "we're out of this"
+                // is enough to want the row on the list, and promoting sets it
+                // on all of them anyway.
+                stapleOverride: sources.some(s => s.stapleOverride),
             });
         }
 
@@ -143,9 +172,11 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
      * twice. A heading with nothing under it at all is one the user has just
      * written and not filled in yet, so that one stays.
      */
-    const { openRows, checkedRows } = useMemo(() => {
+    const { openRows, checkedRows, stapleRows } = useMemo(() => {
         const open: (AggregatedItem | Item)[] = [];
         const checked: AggregatedItem[] = [];
+        const staple: AggregatedItem[] = [];
+        const stapleSet = staples ?? EMPTY_STAPLES;
         // Backwards, so a heading is reached knowing what survived beneath it.
         let openBelow = 0;
         let rowsBelow = 0;
@@ -160,6 +191,19 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             rowsBelow++;
             if (row.checked) {
                 checked.push(row as AggregatedItem);
+            } else if (
+                // Checked wins over staple: a row already in the trolley has
+                // been bought, and saying "you usually have this" about it
+                // would be arguing with something that already happened.
+                !row.stapleOverride
+                // A row being edited stays put. Filing it away mid-keystroke
+                // would take the keyboard with it. Both id shapes are checked
+                // because the screen holds an aggregate's own id on focus but a
+                // SOURCE id when arrowing backwards into one.
+                && !isRowBeingEdited(row, editingId)
+                && isStapleRow(row.text, stapleSet)
+            ) {
+                staple.push(row as AggregatedItem);
             } else {
                 openBelow++;
                 open.push(row);
@@ -167,8 +211,53 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         }
         open.reverse();
         checked.reverse();
-        return { openRows: open, checkedRows: checked };
-    }, [aggregatedItems, editingId]);
+        staple.reverse();
+        return { openRows: open, checkedRows: checked, stapleRows: staple };
+    }, [aggregatedItems, editingId, staples]);
+
+    // A staple row does NOT count towards keeping its heading on screen: an
+    // aisle whose only rows are things you already have is an empty aisle, and
+    // showing the heading alone would put "Pantry" over nothing.
+
+    useEffect(() => {
+        if (stapleRows.length === 0) setShowStaples(false);
+    }, [stapleRows.length]);
+
+    /**
+     * "We're out of this one" — puts the row back in the list for this shop.
+     *
+     * Deliberately per-row and per-week. The permanent version ("we don't
+     * actually always have this") is the long press below, because the two are
+     * different statements and conflating them would make one tap in the
+     * supermarket quietly rewrite the household's staples.
+     */
+    const promoteStaple = (aggItem: AggregatedItem) => {
+        Haptics.selectionAsync().catch(() => {});
+        setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id)
+            ? { ...item, stapleOverride: true }
+            : item));
+        markDirty();
+    };
+
+    const confirmAlwaysShow = (aggItem: AggregatedItem) => {
+        const key = stapleKey(aggItem.text);
+        if (!key || !onAlwaysShowStaple) return;
+        const name = (aggItem.text ?? '').trim();
+        Alert.alert(
+            `Always show ${name}?`,
+            'It will stop being treated as something you keep in, and will show up on every list that needs it.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Always show',
+                    onPress: () => {
+                        promoteStaple(aggItem);
+                        onAlwaysShowStaple(key, name);
+                    },
+                },
+            ],
+        );
+    };
 
     // Nothing left to put away: next time something is checked the section
     // should open closed again rather than remembering a session-old choice.
@@ -607,11 +696,16 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         <View style={{ flex: 1 }}>
             { aggregatedItems.length === 0 ? (
                 <View style={styles.emptyMealsContainer}>
+                    <View style={styles.emptyIcon}>
+                        <Ionicons name="cart-outline" size={28} color={primary} />
+                    </View>
                     <Text style={styles.emptyMealsText}>Your list is empty</Text>
+                    <Text style={styles.emptySubtext}>Add something you need, or plan a meal and its ingredients land here.</Text>
                     <TouchableOpacity
                         style={styles.addMealButton}
                         onPress={() => addItemAfter()}>
-                        <Text style={styles.addMealText}>+ Add Item</Text>
+                        <Ionicons name="add" size={18} color={primary} />
+                        <Text style={styles.addMealText}>Add item</Text>
                     </TouchableOpacity>
                 </View>
             ) : (
@@ -645,6 +739,58 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     contentContainerStyle={styles.listContent}
                     ListFooterComponent={
                         <>
+                            {/* Above the checked section on purpose. The list
+                                reads top to bottom as still to buy, then things
+                                you already have, then things now in the trolley
+                                — least settled to most. */}
+                            {stapleRows.length > 0 && (
+                                <View style={styles.checkedSection}>
+                                    <Pressable
+                                        style={styles.checkedHeader}
+                                        onPress={() => setShowStaples(prev => !prev)}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ expanded: showStaples }}
+                                        accessibilityLabel={`You usually have these, ${stapleRows.length} item${stapleRows.length === 1 ? '' : 's'}`}
+                                    >
+                                        <Ionicons
+                                            name={showStaples ? 'chevron-down' : 'chevron-forward'}
+                                            size={14}
+                                            color="#8e8e93"
+                                        />
+                                        <Text style={styles.checkedHeaderText}>You usually have these</Text>
+                                        <Text style={styles.checkedCount}>{stapleRows.length}</Text>
+                                    </Pressable>
+                                    {showStaples && (
+                                        <>
+                                            {/* Says what a tap does before the
+                                                user has to guess. The rows are
+                                                not swipeable or draggable in
+                                                here — they are a question, not
+                                                a list. */}
+                                            <Text style={styles.stapleHint}>
+                                                Tap one to add it back for this shop. Hold to stop treating it
+                                                as something you keep in.
+                                            </Text>
+                                            {stapleRows.map(row => (
+                                                <Pressable
+                                                    key={row.id}
+                                                    style={styles.stapleRow}
+                                                    onPress={() => promoteStaple(row)}
+                                                    onLongPress={() => confirmAlwaysShow(row)}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={`Add ${row.text} back to the list`}
+                                                >
+                                                    <Ionicons name="add-circle-outline" size={20} color={inkFaint} />
+                                                    <Text style={styles.stapleText} numberOfLines={1}>{row.text}</Text>
+                                                    {!!row.totalQuantity && (
+                                                        <Text style={styles.stapleQuantity}>{row.totalQuantity}</Text>
+                                                    )}
+                                                </Pressable>
+                                            ))}
+                                        </>
+                                    )}
+                                </View>
+                            )}
                             {checkedRows.length > 0 && (
                                 <View style={styles.checkedSection}>
                                     <Pressable
@@ -701,34 +847,38 @@ const styles = StyleSheet.create({
     tapToAdd: { flexGrow: 1, minHeight: 120 },
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5, minHeight: 36, backgroundColor: '#fff' },
     dragHandle: { paddingHorizontal: 15, paddingVertical: 5 },
-    dragIcon: { fontSize: 18, color: '#ccc' },
+    dragIcon: { fontSize: 18, color: '#cfd4cb' },
     // Kept in the layout rather than removed, so a checked row lines up with the
     // rows above it instead of shifting left once it is put away.
     dragIconIdle: { opacity: 0 },
-    checkedSection: { marginTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e5ea', backgroundColor: '#fff' },
+    checkedSection: { marginTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline, backgroundColor: '#fff' },
     checkedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 12 },
-    checkedHeaderText: { fontSize: 13, fontWeight: '600', color: '#8e8e93', letterSpacing: 0.5, textTransform: 'uppercase' },
-    checkedCount: { fontSize: 13, color: '#8e8e93' },
-    checkbox: { width: 24, height: 24, marginRight: 10, borderWidth: 1, borderColor: '#999', alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
-    editInput: { fontSize: 16, flex: 1, paddingVertical: 2, color: 'black' },
-    checked: { textDecorationLine: 'line-through', color: '#999' },
+    stapleHint: { fontSize: 12, color: inkFaint, lineHeight: 17, paddingHorizontal: 15, paddingBottom: 10 },
+    stapleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, paddingVertical: 11 },
+    stapleText: { flex: 1, fontSize: 16, color: inkMuted },
+    stapleQuantity: { fontSize: 13, color: inkFaint },
+    checkedHeaderText: { fontSize: 13, fontWeight: '700', color: inkMuted, letterSpacing: 1.1, textTransform: 'uppercase' },
+    checkedCount: { fontSize: 13, color: inkFaint },
+    checkbox: { width: 24, height: 24, marginRight: 10, borderWidth: 1.5, borderColor: '#cfd4cb', alignItems: 'center', justifyContent: 'center', borderRadius: 7 },
+    editInput: { fontSize: 16, flex: 1, paddingVertical: 2, color: ink },
+    checked: { textDecorationLine: 'line-through', color: inkFaint },
     clearButton: { paddingHorizontal: 8, paddingVertical: 4, width: 35, alignItems: 'center' },
-    clearText: { fontSize: 16, color: '#999', paddingRight: 5 },
-    sectionText: { fontWeight: 'bold', fontSize: 18, color: '#333' },
-    quantityLabel: { backgroundColor: '#ebebebff', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginRight: 6 },
-    quantityChecked: { backgroundColor: '#eeeeee' },
-    quantityText: { color: '#333' },
+    clearText: { fontSize: 16, color: inkFaint, paddingRight: 5 },
+    sectionText: { fontWeight: '700', fontSize: 18, color: ink, letterSpacing: -0.2 },
+    quantityLabel: { backgroundColor: '#e9ece6', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginRight: 6 },
+    quantityChecked: { backgroundColor: surface },
+    quantityText: { color: ink },
+    // An invitation rather than a shrug: what this space is for, then the one
+    // action that fills it.
     emptyMealsContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        paddingHorizontal: 48,
     },
-    emptyMealsText: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: 'grey'
-
-    },
-    addMealButton: { paddingVertical: 5 },
-    addMealText: { color: primary, fontSize: 16, textAlign: 'center'  }
+    emptyIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: surface, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    emptyMealsText: { fontSize: 20, fontWeight: '700', color: ink, letterSpacing: -0.3 },
+    emptySubtext: { fontSize: 14, lineHeight: 20, color: inkMuted, textAlign: 'center', marginTop: 6 },
+    addMealButton: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 18, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999, borderWidth: 1, borderColor: hairline, backgroundColor: '#fff' },
+    addMealText: { color: primary, fontSize: 15, fontWeight: '600' }
 });

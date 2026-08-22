@@ -31,11 +31,38 @@ because Metro doesn't watch or resolve files outside the app directory.
 | `types.ts` | no — erased | The client/server data contract |
 | `quantity.ts` | yes | parse / convert / format / normalize / aggregate |
 | `rank.ts` | yes | LexoRank repair and ordering |
+| `mergeList.ts` | yes | three-way merge of a list document |
+| `servings.ts` | yes | recipe yield, and scaling quantities to a household |
+| `itemText.ts` | yes | canonicalizing grocery item text into a stable key |
+| `staples.ts` | yes | what the household always has, and what counts as saying so |
+| `cookTimers.ts` | yes | durations mentioned in a recipe step |
 
 `quantity.ts` and `rank.ts` exist because both apps previously had their own
 copies that drifted: the two rank modules repaired invalid ranks differently
 (producing conflicting orderings for the same list), and the two quantity
 modules disagreed on plurals, unit aliases, trailing periods, and rounding.
+
+`mergeList.ts` is here for the same reason before it has happened: two copies
+of a conflict-resolution rule would resolve the same conflict differently, and
+two devices that disagree about who won never converge. It resolves a list per
+ROW and per FIELD rather than picking a winning document — see the header
+comment for the rules, and `apps/api/tests/mergeList.test.ts` for each of them
+pinned as a test. Today only the client calls it; it lives here so that the
+server can adopt the identical rules without a second implementation.
+
+`itemText.ts` was `apps/api/utils/itemMatch.ts` until `staples.ts` needed the
+client to derive the same key for a row that the server had counted. Its output
+is frozen: those keys are RTDB keys, and every category-cache entry ever written
+is stored under them.
+
+`cookTimers.ts` has only a client caller today, like `mergeList.ts` — it lives
+here because it is pure logic with real edge cases worth pinning in tests
+(`"cut into 2 inch pieces"` must never become a timer).
+
+`servings.ts` follows the same rule as the rest: the recipe is
+never rewritten, only the rows it puts on a list are, so a shared recipe means
+the same thing to everyone who has it. See its header for why a yield that
+counts objects ("makes 12 cookies") is rejected rather than scaled.
 
 The canonical/display split in `quantity.ts` matters: `formatQuantity` is the
 **stored** form (singular, `"2 cup"`), `formatQuantityDisplay` is for UI only

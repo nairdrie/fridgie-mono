@@ -14,8 +14,10 @@ import {
   quantityFormatRules,
   recipeSchema,
   recipeWritingRules,
+  servingsRules,
   tagVocabulary,
 } from '@/utils/recipePrompts';
+import { normalizeRecipeServings, parseServings } from '@/utils/servings';
 
 const route = new Hono();
 
@@ -48,6 +50,7 @@ Set "photoURL" to the URL of a photo of the finished dish if the page has one, e
 ${recipeWritingRules}
 ${tagVocabulary}
 ${quantityFormatRules}
+${servingsRules}
 If the page does not contain a culinary recipe, set "found" to false and "recipe" to null.
 `;
 
@@ -67,6 +70,7 @@ A still photo of the finished dish is supplied separately, so always set "photoU
 ${recipeWritingRules}
 ${tagVocabulary}
 ${quantityFormatRules}
+${servingsRules}
 If this is not a cooking video, set "found" to false and "recipe" to null.
 `;
 
@@ -93,6 +97,7 @@ Use "sourceKeywords" only as candidates for the tag list — they are the site's
 ${recipeWritingRules}
 ${tagVocabulary}
 ${quantityFormatRules}
+${servingsRules}
 `;
 
 /**
@@ -286,6 +291,20 @@ route.post('/', async (c) => {
 
     // Belt-and-braces: canonicalize whatever quantity strings the model produced
     recipe.ingredients = normalizeIngredients(recipe.ingredients);
+
+    // Servings resolve the same way photoURL and name do above, and for the
+    // same reason: where the page states its own yield that is the fact, and
+    // the model's reading of it is at best a copy. `parseServings` applies the
+    // object-yield rule ("makes 12 cookies" is not 12 servings) that
+    // `servingsRules` states in prose, so both paths agree.
+    //
+    // Absent stays absent. Nothing downstream may assume the prompt's
+    // serves-4: a recipe with no yield must not be scaled at all, and writing
+    // a guess here would make that indistinguishable from a stated 4.
+    const stated = source ? parseServings(source.recipeYield) : null;
+    if (stated) recipe.servings = stated;
+    normalizeRecipeServings(recipe);
+
     return c.json(recipe);
   } catch (error) {
     if (error instanceof ImportError) {

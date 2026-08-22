@@ -1,12 +1,14 @@
 // components/ViewRecipeModal.tsx
 import { useAuth } from '@/context/AuthContext';
 import { Recipe } from '@/types/types';
-import { primary } from '@/utils/styles';
+import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { scaleIngredients } from '@/utils/servings';
 import { addUserCookbookRecipe, getRecipe, removeUserCookbookRecipe } from '../utils/api';
 import AddToMealPlanModal from './AddToMealPlanModal'; // Import the new component
+import CookMode from './CookMode';
 
 interface ViewRecipeModalProps {
     isVisible: boolean;
@@ -15,13 +17,23 @@ interface ViewRecipeModalProps {
     onEdit: (recipe: Recipe) => void;
     isInCookbook: boolean;
     onCookbookUpdate: () => void;
+    /**
+     * The factor this recipe's ingredients were scaled by when they went on a
+     * shopping list — `Meal.scale`, passed only when the recipe is being opened
+     * from a planned meal.
+     *
+     * Absent everywhere else on purpose: in the cookbook, in Explore, and on a
+     * profile there is no shop to agree with, and a recipe should read as its
+     * author wrote it.
+     */
+    scale?: number;
 }
 
 // TODO: ensure forking is working. (if I add to meal plan or cookbook, we dont need to. unless i want to edit)
 // TODO: author, likes, comments 
 // TODO: report recipe (for image or inappropriate content)
 
-export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, isInCookbook, onCookbookUpdate }: ViewRecipeModalProps) {
+export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, isInCookbook, onCookbookUpdate, scale = 1 }: ViewRecipeModalProps) {
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [isFetching, setIsFetching] = useState(false);
     const [isCurrentlyInCookbook, setIsCurrentlyInCookbook] = useState(isInCookbook);
@@ -30,14 +42,29 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
 
     const { user } = useAuth();
 
+    // What the cook actually needs in front of them: the amounts the shopping
+    // was done against. Recomputing from the current household size instead
+    // would let this screen quietly disagree with what is in the cupboard.
+    const ingredients = useMemo(
+        () => scaleIngredients(recipe?.ingredients ?? [], scale),
+        [recipe?.ingredients, scale],
+    );
+    const scaleNote = useMemo(() => {
+        if (scale === 1) return recipe?.servings ? `Serves ${recipe.servings}` : null;
+        const written = recipe?.servings ? ` · written for ${recipe.servings}` : '';
+        return `Scaled ${scale > 1 ? 'up' : 'down'}${written}`;
+    }, [scale, recipe?.servings]);
+
     // [NEW] State for the meal plan modal
     const [isMealPlanModalVisible, setIsMealPlanModalVisible] = useState(false);
+    const [isCooking, setIsCooking] = useState(false);
 
     useEffect(() => {
         if (isVisible) {
             setIsCurrentlyInCookbook(isInCookbook);
         } else {
             setIsConfirmingRemove(false);
+            setIsCooking(false);
         }
 
         if (!recipeId || !isVisible) {
@@ -126,6 +153,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
 
     const handleClose = () => {
         setIsConfirmingRemove(false);
+        setIsCooking(false);
         onClose();
     };
 
@@ -176,16 +204,52 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                         <Ionicons name="pencil" size={20} color="#fff" />
                                                     </TouchableOpacity>
                                                 </View>
-                                                { recipe.authorName && 
-                                                  <Text style={styles.recipeAuthor}>{recipe.authorName}</Text>
+                                                { recipe.authorName &&
+                                                  <Text style={styles.recipeAuthor}>by <Text style={styles.recipeAuthorName}>{recipe.authorName}</Text></Text>
                                                 }
-                                                
-                                                <Text style={styles.recipeDescription}>{recipe.description}</Text>
-                                                <Text style={styles.recipeSectionTitle}>Ingredients</Text>
-                                                {recipe.ingredients.map((ing, index) => (
-                                                    <Text key={index} style={styles.recipeIngredient}>• {ing.quantity} {ing.name}</Text>
-                                                ))}
-                                                <Text style={styles.recipeSectionTitle}>Instructions</Text>
+
+                                                {!!recipe.description && (
+                                                    <Text style={styles.recipeDescription}>{recipe.description}</Text>
+                                                )}
+
+                                                {!!recipe.tags?.length && (
+                                                    <View style={styles.tagRow}>
+                                                        {recipe.tags.slice(0, 4).map((tag) => (
+                                                            <View key={tag} style={styles.tag}>
+                                                                <Text style={styles.tagText}>{tag}</Text>
+                                                            </View>
+                                                        ))}
+                                                    </View>
+                                                )}
+
+                                                <View style={styles.sectionHeader}>
+                                                    <Text style={styles.sectionTitle}>Ingredients</Text>
+                                                    <Text style={styles.sectionCount}>{recipe.ingredients.length}</Text>
+                                                </View>
+                                                {!!scaleNote && (
+                                                    <View style={styles.scaleNoteRow}>
+                                                        <Ionicons name="people-outline" size={14} color={inkMuted} />
+                                                        <Text style={styles.scaleNoteText}>{scaleNote}</Text>
+                                                    </View>
+                                                )}
+                                                <View style={styles.ingredientCard}>
+                                                    {ingredients.map((ing, index) => (
+                                                        <View key={index} style={[styles.ingredientRow, index > 0 && styles.ingredientDivider]}>
+                                                            <View style={styles.ingredientDot} />
+                                                            <Text style={styles.ingredientText}>
+                                                                {!!ing.quantity && <Text style={styles.ingredientQuantity}>{ing.quantity} </Text>}
+                                                                {ing.name}
+                                                            </Text>
+                                                        </View>
+                                                    ))}
+                                                </View>
+
+                                                <View style={styles.sectionHeader}>
+                                                    <Text style={styles.sectionTitle}>Instructions</Text>
+                                                    <Text style={styles.sectionCount}>
+                                                        {recipe.instructions.length} {recipe.instructions.length === 1 ? 'step' : 'steps'}
+                                                    </Text>
+                                                </View>
                                             </View>
                                         </>
                                     }
@@ -193,13 +257,44 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                     keyExtractor={(_, index) => `instr-${index}`}
                                     renderItem={({ item, index }) => (
                                         <View style={styles.bodyContainer}>
-                                            <Text style={styles.recipeInstruction}>{index + 1}. {item}</Text>
+                                            {/* The number sits in its own column, so a step that runs to a
+                                                second line stays lined up with itself instead of tucking
+                                                back under the digit. The rule below each number carries the
+                                                eye down to the next one. */}
+                                            <View style={styles.stepRow}>
+                                                <View style={styles.stepMarker}>
+                                                    <View style={styles.stepBadge}>
+                                                        <Text style={styles.stepNumber}>{index + 1}</Text>
+                                                    </View>
+                                                    {index < recipe.instructions.length - 1 && <View style={styles.stepConnector} />}
+                                                </View>
+                                                <Text style={styles.stepText}>{item}</Text>
+                                            </View>
                                         </View>
                                     )}
+                                    ListFooterComponent={<View style={styles.listFooterSpacer} />}
                                     showsVerticalScrollIndicator={false}
                                 />
 
                                 <View style={styles.footer}>
+                                    {/* Only where there is something to follow.
+                                        A recipe with no steps — an import that
+                                        found ingredients and nothing else —
+                                        would open a cook mode with an empty
+                                        screen and a progress bar reading
+                                        "0 of 0". */}
+                                    {recipe.instructions.length > 0 && (
+                                        <TouchableOpacity
+                                            style={styles.secondaryButton}
+                                            onPress={() => setIsCooking(true)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Start cooking"
+                                        >
+                                            <Ionicons name="flame-outline" size={20} color={primary} />
+                                            <Text style={styles.secondaryButtonText}>Cook</Text>
+                                        </TouchableOpacity>
+                                    )}
+
                                     {/* [NEW] Add to Meal Plan Button */}
                                     <TouchableOpacity
                                         style={styles.secondaryButton}
@@ -243,6 +338,22 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                 onClose={() => setIsMealPlanModalVisible(false)}
                 recipe={recipe}
             />
+
+            {/* Its own full-screen Modal, not a view inside the sheet above.
+                The sheet is 85% tall with a dimmed backdrop, which is right for
+                reading a recipe and wrong for following one at arm's length —
+                and `useKeepAwake` should only hold the screen on while the cook
+                view is genuinely mounted. */}
+            <Modal
+                animationType="slide"
+                visible={isCooking && !!recipe}
+                onRequestClose={() => setIsCooking(false)}
+                presentationStyle="pageSheet"
+            >
+                {recipe && (
+                    <CookMode recipe={recipe} scale={scale} onClose={() => setIsCooking(false)} />
+                )}
+            </Modal>
         </>
     );
 }
@@ -256,18 +367,40 @@ const styles = StyleSheet.create({
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     recipeImage: { width: '100%', height: 220, backgroundColor: '#f0f0f0', resizeMode: 'cover' },
     bodyContainer: { paddingHorizontal: 20 },
-    titleContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 10 },
-    recipeTitle: { fontSize: 24, fontWeight: 'bold', flex: 1, marginRight: 10 },
-    recipeAuthor: {
-      color: primary,
-      fontSize: 18,
-      marginBottom: 10
-    },
+    titleContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 4 },
+    recipeTitle: { fontSize: 26, fontWeight: '700', letterSpacing: -0.4, color: ink, flex: 1, marginRight: 10 },
+    recipeAuthor: { fontSize: 14, color: inkMuted },
+    recipeAuthorName: { color: primary, fontWeight: '600' },
     editButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: primary, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 },
-    recipeDescription: { fontSize: 16, color: '#555', marginBottom: 20, fontStyle: 'italic' },
-    recipeSectionTitle: { fontSize: 20, fontWeight: '700', marginTop: 15, marginBottom: 10, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 5 },
-    recipeIngredient: { fontSize: 16, lineHeight: 24, marginLeft: 10 },
-    recipeInstruction: { fontSize: 16, lineHeight: 26, marginBottom: 10 },
+    recipeDescription: { fontSize: 15, lineHeight: 23, color: inkMuted, marginTop: 12 },
+
+    tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+    tag: { backgroundColor: accentSoft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
+    tagText: { fontSize: 12, fontWeight: '600', color: primary, textTransform: 'capitalize' },
+
+    // Small caps eyebrow instead of the old ruled heading — the ingredient card
+    // and the step column already give the sections their own shape.
+    sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 28, marginBottom: 12 },
+    sectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted },
+    sectionCount: { fontSize: 13, color: inkFaint },
+    scaleNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -8, marginBottom: 10 },
+    scaleNoteText: { fontSize: 13, color: inkMuted },
+
+    ingredientCard: { backgroundColor: surface, borderRadius: 16, paddingHorizontal: 16 },
+    ingredientRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 11 },
+    ingredientDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
+    ingredientDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: primary, marginTop: 8, marginRight: 12 },
+    ingredientText: { flex: 1, fontSize: 16, lineHeight: 22, color: ink },
+    ingredientQuantity: { fontWeight: '700' },
+
+    stepRow: { flexDirection: 'row', alignItems: 'flex-start' },
+    stepMarker: { width: 28, alignItems: 'center', alignSelf: 'stretch' },
+    stepBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center' },
+    stepNumber: { fontSize: 13, fontWeight: '700', color: primary },
+    stepConnector: { flex: 1, width: 2, borderRadius: 1, backgroundColor: hairline, marginTop: 6 },
+    // flex: 1 keeps the wrapped lines inside this column, clear of the number.
+    stepText: { flex: 1, fontSize: 16, lineHeight: 25, color: ink, marginLeft: 14, marginTop: 3, paddingBottom: 22 },
+    listFooterSpacer: { height: 12 },
     // [UPDATED] Footer styles for two buttons
     footer: { padding: 20, borderTopWidth: 1, borderTopColor: '#f0f0f0', backgroundColor: '#fff', flexDirection: 'row', justifyContent: 'space-between', gap: 10 },
     // [UPDATED] Primary button now has flex: 1

@@ -12,6 +12,7 @@ import { Platform } from 'react-native';
 import uuid from 'react-native-uuid';
 import { Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, SuggestionRequest, UserProfile, UserSearchResult } from "../types/types";
 import { authStatePromise } from "./authState";
+import { reportReachable, reportUnreachable } from "./connectivity";
 import { auth } from "./firebase";
 
 // API root. Configure per environment via EXPO_PUBLIC_API_URL
@@ -128,6 +129,12 @@ async function authorizedFetch(
     // An abort and a genuine network failure are the same thing to a caller:
     // the server could not be reached. Say so, rather than surfacing
     // "Aborted", which reads like the user cancelled something.
+    //
+    // This is also the app's primary offline signal. Status 0 means the
+    // request never reached the server, which is what parks an unsaved edit
+    // on the device for later; an HTTP error status means we ARE online and
+    // something else is wrong, so those deliberately do not report here.
+    reportUnreachable()
     if (err?.name === 'AbortError') {
       throw new ApiError(`The server did not respond within ${Math.round(timeoutMs / 1000)}s.`, 0)
     }
@@ -135,6 +142,10 @@ async function authorizedFetch(
   } finally {
     clearTimeout(timer)
   }
+
+  // Any answer at all — including a 4xx — proves the server is reachable, and
+  // is what releases the queued offline edits.
+  reportReachable()
 
   if (!res.ok && !allowStatus.includes(res.status)) {
     // Try to get a more specific error message from the response body
@@ -265,6 +276,41 @@ export async function unfollowUser(uid: string): Promise<void> {
 
 
 
+// --- Staples API ---
+
+export interface StapleEntry {
+  /** Canonical key — what `stapleKey(row.text)` must equal to match a row. */
+  key: string;
+  /** Last wording seen for it. Display only; never matched on. */
+  name: string;
+  rejections: number;
+}
+
+/**
+ * The household's staples.
+ *
+ * Never throws: a failed read and a household with no staples yet must render
+ * the same list, because the safe failure here is showing a row you already own
+ * rather than hiding one you needed.
+ */
+export async function getStaples(groupId: string): Promise<StapleEntry[]> {
+  try {
+    const res = await authorizedFetch(`${BASE_URL}/staples?groupId=${groupId}`);
+    const body = await res.json();
+    return Array.isArray(body?.staples) ? body.staples : [];
+  } catch (error) {
+    console.error('Failed to load staples:', error);
+    return [];
+  }
+}
+
+/** "I do buy this" — permanently stops a key being treated as a staple. */
+export async function alwaysShowStaple(groupId: string, key: string): Promise<void> {
+  await authorizedFetch(`${BASE_URL}/staples/${encodeURIComponent(key)}?groupId=${groupId}`, {
+    method: 'DELETE',
+  });
+}
+
 // --- Group Management API ---
 export async function sendGroupInvitation(groupId: string, inviteeUid: string): Promise<void> {
   console.log("SENDING GROUP INVITE");
@@ -288,7 +334,13 @@ export async function getPendingInvitations(groupId: string): Promise<PendingInv
  */
 export async function updateGroup(
     groupId: string,
-    updates: { name?: string; addMembers?: string[]; removeMembers?: string[] }
+    updates: {
+        name?: string;
+        addMembers?: string[];
+        removeMembers?: string[];
+        /** null CLEARS the setting — the only way back to "don't scale". */
+        householdSize?: number | null;
+    }
 ): Promise<void> {
     await authorizedFetch(`${BASE_URL}/group/${groupId}`, {
         method: 'PUT',
@@ -557,6 +609,11 @@ export async function listenToList(
 
     ws.onopen = () => {
       attempt = 0;
+      // The socket's existing backoff doubles as the app's liveness probe: a
+      // phone that went offline and was then left alone makes no requests to
+      // succeed or fail, so without this it would never notice it came back.
+      // Announcing reachability here is what releases queued offline edits.
+      reportReachable();
     };
     ws.onmessage = (e) => {
       try {

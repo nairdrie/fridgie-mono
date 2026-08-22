@@ -24,6 +24,14 @@ export default function TabLayout() {
     // The condition is "we have nothing to show AND something failed", not
     // merely "something failed": a transient error while the week is already on
     // screen should not blow away what the user is looking at.
+    //
+    // That second clause now carries most of the weight. Both contexts fall
+    // back to the on-device cache before reporting a failure, so `groups` and
+    // `selectedList` are populated on a phone with no signal that has opened
+    // the app before — and this whole screen is skipped. What is left is the
+    // only case it was ever right for: a genuinely cold start, offline, with
+    // nothing cached to show. Everything else now degrades to a list that
+    // works and a quiet line saying edits are being kept on the device.
     const unreachable = (groupsError && groups.length === 0) || (loadError && !selectedList);
 
     React.useEffect(() => {

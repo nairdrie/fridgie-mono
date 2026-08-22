@@ -3,6 +3,7 @@ import { auth } from '@/middleware/auth';
 import { requireAccount } from '@/middleware/requireAccount';
 import { fs } from '@/utils/firebase';
 import { normalizeIngredients } from '@/utils/quantity';
+import { normalizeRecipeServings } from '@/utils/servings';
 import { completeJson, models } from '@/utils/claude';
 import { generatedRecipeSchema, recipeGenerationSystemPrompt } from '@/utils/recipePrompts';
 
@@ -106,6 +107,10 @@ route.post('/', async (c) => {
     // a null one differently when it decides whether to offer the picker.
     recipe.photoURL = null;
     recipe.ingredients = normalizeIngredients(recipe.ingredients);
+    // The prompt tells this path never to answer null — it chose the amounts,
+    // so it knows who they feed — but a dropped field must still degrade to
+    // "unscaled" rather than to a guess. See normalizeRecipeServings.
+    normalizeRecipeServings(recipe);
     return c.json(recipe);
   } catch (error) {
     console.error('Recipe generation failed:', error);

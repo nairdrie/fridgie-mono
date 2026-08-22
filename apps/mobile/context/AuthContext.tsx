@@ -1,6 +1,7 @@
 // context/AuthContext.tsx
 import { Group, UserProfile } from '@/types/types';
 import { getGroups, loginWithToken, registerForPushNotificationsAsync } from '@/utils/api';
+import { readCachedGroups, writeCachedGroups } from '@/utils/listCache';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, db } from '@/utils/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -216,6 +217,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     let presenceListeners: (()=>void)[] = [];
 
     const fetchGroupsAndListen = async () => {
+      // The cached groups first. Nothing downstream can happen without one —
+      // ListContext will not ask for weeks, the list screen will not render —
+      // so with no signal and no cache the app stops here, at the error screen,
+      // no matter how much is safely stored further down.
+      const cachedGroups = await readCachedGroups();
+      if (cachedGroups && cachedGroups.length > 0) {
+        setGroups(cachedGroups as GroupWithPresence[]);
+        setSelectedGroup(prev => {
+          if (prev) return prev;
+          const previouslySelected = storedGroupId
+            ? cachedGroups.find(g => g.id === storedGroupId)
+            : null;
+          return (previouslySelected || cachedGroups[0]) as GroupWithPresence;
+        });
+      }
+
       try {
         const fetchedGroups = await getGroups();
         presenceListeners.forEach(unsubscribe => unsubscribe());
@@ -246,6 +263,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         setGroups(fetchedGroups);
         setGroupsError(null);
+        void writeCachedGroups(fetchedGroups);
         if (fetchedGroups.length > 0) {
           const previouslySelected = storedGroupId ? fetchedGroups.find(g => g.id === storedGroupId) : null;
            setSelectedGroup(previouslySelected || fetchedGroups[0]);
@@ -255,8 +273,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       } catch (error) {
         console.error('Failed to fetch groups:', error);
-        setGroups([]);
         setGroupsError(error instanceof Error ? error : new Error(String(error)));
+        // Only blank the groups when there is genuinely nothing to fall back
+        // on. Clearing them unconditionally is what turned every dropped
+        // connection into a whole-app error screen.
+        if (!cachedGroups || cachedGroups.length === 0) setGroups([]);
       }
     };
     fetchGroupsAndListen();
