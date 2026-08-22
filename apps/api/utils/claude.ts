@@ -50,6 +50,10 @@ export const models = {
    *  to an enum and an RTDB cache in front so only NOVEL items ever arrive.
    *  Nothing here needs a frontier model. */
   categorize: 'claude-haiku-4-5',
+  /** The same job for a recipe title — which shelf of a cookbook it sits on —
+   *  with the same enum constraint, a title heuristic in front, and the answer
+   *  stored on the recipe so no recipe is ever asked about twice. */
+  recipeCategorize: 'claude-haiku-4-5',
 } as const;
 
 /**

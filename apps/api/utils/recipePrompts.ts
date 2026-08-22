@@ -7,6 +7,8 @@
 // Structure is now enforced by `recipeSchema` via structured outputs, so the
 // prose below only has to carry what a schema can't: meaning, not shape.
 
+import { RECIPE_CATEGORIES } from '@fridgie/shared/recipeCategory';
+
 /** Must stay in step with packages/shared/quantity.ts. */
 export const quantityFormatRules = `
 Quantity format rules (apply to every ingredient's "quantity" field):
@@ -44,6 +46,20 @@ Add relevant tags in the "tags" array, drawn from this list where applicable:
 ${TAGS.map((t) => `'${t}'`).join(', ')} (or another cuisine if none of these fit).
 `;
 
+/**
+ * The cookbook's shelves. Unlike `tags` this is one value from a CLOSED list —
+ * the schema's enum enforces that — because it is what the cookbook filters on,
+ * and a category nobody else knows about is a recipe nobody can find.
+ */
+export const categoryVocabulary = `
+Set "category" to the one section of a cookbook this recipe belongs in:
+${RECIPE_CATEGORIES.map((c) => `'${c}'`).join(', ')}.
+Go by what the dish IS and when it is eaten rather than what is in it — a chicken
+salad is a salad, a chicken pie is a main. Sweet things that finish a meal are
+'Desserts'; breads, muffins, scones and pastries are 'Baked Goods' even when
+sweet. Use 'Other' only when nothing else fits.
+`;
+
 /** Semantics the schema can't express. The shape itself is enforced, not asked for. */
 export const recipeWritingRules = `
 Write the description yourself — a short, engaging line about the dish. Paraphrase
@@ -71,12 +87,13 @@ export const recipeSchema = {
     ingredients: { type: 'array', items: ingredientSchema },
     instructions: { type: 'array', items: { type: 'string' } },
     tags: { type: 'array', items: { type: 'string' } },
+    category: { type: 'string', enum: [...RECIPE_CATEGORIES] },
     servings: {
       anyOf: [{ type: 'integer' }, { type: 'null' }],
       description: 'People the recipe feeds. null when the source does not say.',
     },
   },
-  required: ['name', 'description', 'ingredients', 'instructions', 'tags', 'servings'],
+  required: ['name', 'description', 'ingredients', 'instructions', 'tags', 'category', 'servings'],
   additionalProperties: false,
 } as const;
 
@@ -126,6 +143,7 @@ Transcribe what is actually written. Read carefully:
 
 ${recipeWritingRules}
 ${tagVocabulary}
+${categoryVocabulary}
 ${quantityFormatRules}
 ${servingsRules}
 Set "photoURL" to null — a photo of a page is not a photo of the finished dish.
@@ -165,6 +183,7 @@ give it a proper name.
 
 ${recipeWritingRules}
 ${tagVocabulary}
+${categoryVocabulary}
 ${quantityFormatRules}
 ${servingsRules}
 `;

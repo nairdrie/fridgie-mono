@@ -122,6 +122,7 @@ Consumed as TypeScript **source** — no build step, nothing published. See
 | `quantity.ts` | Yes |
 | `rank.ts` | Yes |
 | `mergeList.ts` | Yes |
+| `recipeCategory.ts` | Yes |
 
 `types.ts` must stay **type-only** (no `enum`, no `const`, no functions), which
 is why `ListView` lives in each app rather than here.

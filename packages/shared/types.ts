@@ -6,6 +6,12 @@
 //
 // Reconciled from the two copies that had drifted apart; where they disagreed the
 // side that matches actual runtime behaviour won, noted per field below.
+//
+// `import type` is erased exactly like the rest of this file, so pulling the
+// category union from the runtime module that owns the vocabulary costs nothing
+// and keeps a second hand-written copy of eleven strings from existing.
+
+import type { RecipeCategory } from './recipeCategory';
 
 /**
  * A grocery/meal item.
@@ -237,6 +243,19 @@ export interface Recipe {
   servings?: number;
   /** Server-generated on import/suggest, and indexed for search. */
   tags?: string[];
+  /**
+   * The one shelf this recipe sits on — see packages/shared/recipeCategory.ts.
+   *
+   * Distinct from `tags`, which say what a recipe IS LIKE (vegan, italian) and
+   * which a recipe can have many of. This says what it IS, which is why it is
+   * singular and drawn from a closed list: it is the cookbook's filter.
+   *
+   * Assigned by whoever produced the recipe — the model on every AI path, a
+   * title heuristic on save, and a backfill the first time an older recipe is
+   * fetched — so absent means "not filed yet", never "belongs nowhere". That
+   * one is spelled 'Other'.
+   */
+  category?: RecipeCategory;
   /** Set by the server; used to decide whether editing forks the recipe. */
   createdBy?: string;
   forkedFromId?: string;
@@ -248,6 +267,12 @@ export interface Recipe {
   authorName?: string;
   authorUid?: string;
   lastAte?: string;
+  /**
+   * When THIS user shelved it, ISO-8601. Present only on cookbook responses,
+   * since it is a fact about a cookbook entry rather than about the recipe —
+   * the same recipe has a different one for everybody who saved it.
+   */
+  addedAt?: string;
 }
 
 /** The raw invitation document as stored. */

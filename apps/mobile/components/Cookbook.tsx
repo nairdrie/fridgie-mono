@@ -1,10 +1,11 @@
 // components/Cookbook.tsx
 import { useAuth } from '@/context/AuthContext';
+import { useCookbookFilter } from '@/hooks/useCookbookFilter';
 import { addUserCookbookRecipe } from '@/utils/api';
 import { Item, Meal, Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -17,6 +18,7 @@ import {
 } from 'react-native';
 import AddEditRecipeModal from './AddEditRecipeModal';
 import AddToMealPlanModal from './AddToMealPlanModal'; // Import the new component
+import CookbookFilterBar, { CookbookGroupHeader } from './CookbookFilterBar';
 import RecipeCard from './RecipeCard';
 import ViewRecipeModal from './ViewRecipeModal';
 
@@ -27,7 +29,7 @@ interface CookbookProps {
 }
 
 export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProps) {
-    const [searchTerm, setSearchTerm] = useState('');
+    const filter = useCookbookFilter(recipes);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     // State for the new modal
@@ -50,14 +52,6 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
             setIsRefreshing(false);
         }
     }, [onRefresh]);
-
-    const filteredRecipes = useMemo(() => {
-        if (!searchTerm) return recipes;
-        return recipes.filter(recipe =>
-            recipe.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            recipe.description.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-    }, [recipes, searchTerm]);
 
     const handleAddToMealPlan = (recipe: Recipe) => {
         setSelectedRecipe(recipe);
@@ -112,34 +106,34 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
                 <TextInput
                     style={styles.searchInput}
                     placeholder="Search for recipes..."
-                    value={searchTerm}
+                    value={filter.searchTerm}
                     placeholderTextColor={'#999'}
-                    onChangeText={setSearchTerm}
+                    onChangeText={filter.setSearchTerm}
                 />
             </View>
 
+            <CookbookFilterBar
+                chips={filter.chips}
+                selected={filter.category}
+                onSelect={filter.setCategory}
+                sort={filter.sort}
+                onSortChange={filter.setSort}
+            />
+
             <FlatList
-                data={filteredRecipes}
-                keyExtractor={(item) => item.id}
+                data={filter.rows}
+                keyExtractor={(row) => row.key}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
-                    <>
-                        {/* {
-                            item.authorUid != user?.uid && (
-                                 <View style={styles.repostRow}>
-                                    <View style={styles.repostContainer}>
-                                        <Ionicons name="repeat" size={16} color="black" />
-                                        <Text style={styles.repostAuthor}>{item.authorName}</Text>
-                                    </View>
-                                 </View>
-                            )
-                        } */}
+                    item.type === 'header' ? (
+                        <CookbookGroupHeader category={item.category} count={item.count} />
+                    ) : (
                         <RecipeCard
-                            recipe={item}
+                            recipe={item.recipe}
                             onAddToMealPlan={handleAddToMealPlan}
                             onView={handleViewRecipe}
                         />
-                    </>
+                    )
                 )}
                 contentContainerStyle={{ paddingBottom: 20 }}
                 ListEmptyComponent={<Text style={styles.emptyText}>No recipes match your search.</Text>}

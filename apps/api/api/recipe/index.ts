@@ -3,10 +3,31 @@ import { Hono } from 'hono'
 import { invalidateSearchIndex } from '@/utils/searchIndex';
 import { fs } from '@/utils/firebase' // Use Firestore admin
 import { auth } from '@/middleware/auth'
+import { guessRecipeCategory, normalizeRecipeCategory } from '@/utils/recipeCategory'
 
 const route = new Hono()
 
 route.use('*', auth)
+
+/**
+ * The recipe as it will be STORED, with its cookbook shelf settled.
+ *
+ * Three cases, in order: a category we recognise is kept (every AI path returns
+ * one, and an edit round-trips whatever was already filed); otherwise the title
+ * decides it where it can, for free; otherwise the field is left off entirely.
+ *
+ * Deliberately no model call on this path — saving a recipe must not wait on
+ * one — and no re-filing of a recipe that already has a category. The cookbook
+ * fetch has the model, and picks up whatever is still unfiled.
+ */
+function withCategory<T extends Record<string, any>>(details: T): T {
+  const { category, ...rest } = details
+  const stated = normalizeRecipeCategory(category)
+  const settled = stated ?? guessRecipeCategory(details)
+  // `rest` on the update path is what leaves an unrecognised value alone rather
+  // than clearing what is already stored.
+  return (settled ? { ...rest, category: settled } : rest) as T
+}
 
 /**
  * POST /api/recipe — create or update a recipe.
@@ -36,7 +57,7 @@ route.post('/', async (c) => {
   } = await c.req.json()
 
   if (!id) {
-    const data = { ...recipeDetails, createdBy: uid, createdAt: new Date() }
+    const data = { ...withCategory(recipeDetails), createdBy: uid, createdAt: new Date() }
     const docRef = await fs.collection('recipes').add(data)
     invalidateSearchIndex()  // new recipe -> searchable now, not in <=5 min
     return c.json({ id: docRef.id, ...data }, 201)
@@ -46,7 +67,7 @@ route.post('/', async (c) => {
   const recipeDoc = await docRef.get()
 
   if (!recipeDoc.exists) {
-    const data = { ...recipeDetails, createdBy: uid, createdAt: new Date() }
+    const data = { ...withCategory(recipeDetails), createdBy: uid, createdAt: new Date() }
     await docRef.set(data)
     invalidateSearchIndex()
     return c.json({ id, ...data }, 201)
@@ -61,7 +82,7 @@ route.post('/', async (c) => {
     const { popularity, ratingCount, ratingTotal, ...carryOver } = existing
     const forkData = {
       ...carryOver,
-      ...recipeDetails,
+      ...withCategory(recipeDetails),
       createdBy: uid,
       createdAt: new Date(),
       forkedFromId: rootId,
@@ -71,9 +92,10 @@ route.post('/', async (c) => {
     return c.json({ id: forkRef.id, ...forkData }, 201)
   }
 
-  await docRef.update({ ...recipeDetails, updatedAt: new Date() })
+  const update = withCategory(recipeDetails)
+  await docRef.update({ ...update, updatedAt: new Date() })
   invalidateSearchIndex()
-  return c.json({ id, ...existing, ...recipeDetails })
+  return c.json({ id, ...existing, ...update })
 })
 
 export default route

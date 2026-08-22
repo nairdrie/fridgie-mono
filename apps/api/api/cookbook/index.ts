@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
 import { FieldValue } from 'firebase-admin/firestore'
-import { adminAuth, adminRtdb, fs } from '@/utils/firebase'
+import { fs } from '@/utils/firebase'
 import { auth } from '@/middleware/auth'
 import { requireAccount } from '@/middleware/requireAccount'
-import type { Group, Meal } from '@/utils/types'
 import { getAuth } from 'firebase-admin/auth'
+import { fileRecipes, normalizeRecipeCategory } from '@/utils/recipeCategory'
 
 const route = new Hono()
 
@@ -23,18 +23,6 @@ async function fetchRecipeDocsByIds(recipeIds: string[]) {
   )
   return snapshots.flatMap((snapshot) => snapshot.docs)
 }
-
-const getMealDate = (weekStart: string, dayOfWeek?: Meal['dayOfWeek']): Date => {
-  const weekStartDate = new Date(weekStart);
-  if (dayOfWeek) {
-    const dayMap = { 'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6 };
-    // Adjust for the week starting on a specific day if needed, assuming Sunday start
-    const dayOffset = dayMap[dayOfWeek];
-    weekStartDate.setDate(weekStartDate.getDate() + dayOffset);
-  }
-  return weekStartDate;
-};
-
 
 /**
  * POST /api/cookbook
@@ -96,88 +84,75 @@ route.post('/', requireAccount, async (c) => {
   }
 })
 
-export async function getCookbook(uid: string) {
+/**
+ * A Firestore timestamp, a Date, or a string, as an ISO-8601 string.
+ *
+ * All three are in the wild: the POST above writes `serverTimestamp()`, the
+ * seed script writes a `Date`, and a client that has just written one reads
+ * back null until the server stamp lands.
+ */
+function toIsoString(value: any): string | null {
+  if (!value) return null
+  if (typeof value?.toDate === 'function') return value.toDate().toISOString()
+  if (value instanceof Date) return value.toISOString()
+  return typeof value === 'string' ? value : null
+}
 
-    // --- Step 1: Get user's cookbook recipe IDs from Firestore ---
+/**
+ * Every recipe on a user's shelf, newest first.
+ *
+ * Two things here can't come off the recipe documents alone:
+ *
+ * 1. The ORDER. The cookbook subcollection knows when each recipe was shelved;
+ *    the recipes themselves don't. Firestore `in` queries return document-id
+ *    order regardless of the order the ids were passed in, and the fetch is
+ *    chunked on top of that, so the addedAt ordering has to be re-applied after
+ *    the fetch — until it was, "newest first" was really "by document id".
+ *
+ * 2. The CATEGORY, for any recipe saved before it had one. Filing them on read
+ *    is what stops the cookbook's filters being empty for existing users, and
+ *    each answer is written back onto the recipe, so a given recipe is filed
+ *    once ever rather than once per fetch.
+ */
+export async function getCookbook(uid: string) {
     const cookbookSnapshot = await fs.collection('users').doc(uid).collection('cookbook').orderBy('addedAt', 'desc').get()
-    
+
     if (cookbookSnapshot.empty) {
       return [];
     }
-    const recipeIds = cookbookSnapshot.docs.map(doc => doc.id)
 
-    // --- Step 2: Find all user's groups from RTDB ---
-    const groupsSnapshot = await adminRtdb.ref('groups').once('value');
-    // ✨ Define the type to match the new structure: { uid: true }
-    const allGroups = groupsSnapshot.val() as Record<string, { members?: Record<string, boolean> }> | null;
-    const groupIds: string[] = [];
+    const entries = cookbookSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      addedAt: toIsoString(doc.data()?.addedAt),
+    }))
+    const shelfOrder = new Map(entries.map((entry, index) => [entry.id, index]))
+    const addedAt = new Map(entries.map((entry) => [entry.id, entry.addedAt]))
 
-    if (allGroups) {
-      for (const groupId in allGroups) {
-        const group = allGroups[groupId];
-        // ✨ Correctly check if the user's UID exists as a key in the members object
-        if (group?.members?.[uid]) {
-          groupIds.push(groupId);
-        }
-      }
-    }
+    const recipeDocs = await fetchRecipeDocsByIds(entries.map((entry) => entry.id));
 
-    if (groupIds.length === 0) {
-      // If user has no groups, we can't find a lastAte date.
-      const recipeDocs = await fetchRecipeDocsByIds(recipeIds);
-      const recipes = recipeDocs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        lastAte: null, // No groups, so lastAte is null
-      }));
-      return recipes;
-    }
-
-    // --- Step 3: Scan RTDB lists for all meals across all user's groups ---
-    const lastAteMap = new Map<string, Date>();
-    const rtdbPromises = groupIds.map(groupId => 
-      adminRtdb.ref(`lists/${groupId}`).once('value')
-    );
-    const listSnapshots = await Promise.all(rtdbPromises);
-
-    for (const snapshot of listSnapshots) {
-      if (snapshot.exists()) {
-        const lists = snapshot.val();
-        for (const listId in lists) {
-          const list = lists[listId];
-          if (list.meals && Array.isArray(list.meals)) {
-            list.meals.forEach((meal: Meal) => {
-              if (meal.recipeId) {
-                const mealDate = getMealDate(list.weekStart, meal.dayOfWeek);
-                const existingDate = lastAteMap.get(meal.recipeId);
-                if (!existingDate || mealDate > existingDate) {
-                  lastAteMap.set(meal.recipeId, mealDate);
-                }
-              }
-            });
-          }
-        }
-      }
-    }
-
-    // --- Step 4: Fetch full recipe documents from Firestore and merge `lastAte` data ---
-    const recipeDocs = await fetchRecipeDocsByIds(recipeIds);
-
-    // 2. Get a list of *unique* author UIDs using a Set
+    // Authors and categories are independent questions about the same recipes,
+    // and both are round trips — one to Auth, one to the model. Ask together.
     const uniqueAuthorUids = [...new Set(recipeDocs.map(doc => doc.data().createdBy))];
-
-    // 3. Batch-fetch all unique authors in parallel
-    const authorPromises = uniqueAuthorUids.map(uid => 
-        getAuth().getUser(uid).catch(error => {
+    const [authorResults, categories] = await Promise.all([
+      Promise.all(uniqueAuthorUids.map(authorUid =>
+        getAuth().getUser(authorUid).catch(error => {
             // If a user is not found or another error occurs, return null
             // This prevents one failed lookup from crashing the entire Promise.all
-            console.error(`Could not fetch author for UID: ${uid}`, error.code);
+            console.error(`Could not fetch author for UID: ${authorUid}`, error.code);
             return null;
         })
-    );
-    const authorResults = await Promise.all(authorPromises);
+      )),
+      // Never throws — a cookbook that fails to load because a model was busy
+      // would be a far worse trade than one whose newest recipe has no chip yet.
+      fileRecipes(recipeDocs.map(doc => ({
+        id: doc.id,
+        name: doc.data().name,
+        description: doc.data().description,
+        category: doc.data().category,
+      }))),
+    ]);
 
-    // 4. Create an easy-to-use map of { uid: displayName } for quick lookups
+    // An easy-to-use map of { uid: displayName } for quick lookups
     const authorMap = new Map();
     authorResults.forEach(userRecord => {
         // Only add to the map if the user was successfully fetched
@@ -186,29 +161,36 @@ export async function getCookbook(uid: string) {
         }
     });
 
-    // 5. Finally, map the recipes and attach the author's name from your lookup map
     const recipes = recipeDocs.map(doc => {
         const recipeData = doc.data();
         const authorUid = recipeData.createdBy;
-        
+
         // This lookup is instant and requires no new API calls
         const authorName = authorMap.get(authorUid) || 'Unknown Author';
 
-        // (Your existing logic for lastAteDate)
-        // const lastAteDate = lastAteMap.get(doc.id);
+        // What is stored wins; what was just resolved fills the gap. Anything
+        // stored that this build doesn't recognise is dropped rather than sent
+        // on, since the client can only draw a chip for a category it knows.
+        const category = normalizeRecipeCategory(recipeData.category)
+          ?? categories.get(doc.id)
+          ?? undefined;
 
         return {
             id: doc.id,
             ...recipeData,
-            // lastAte: lastAteDate ? lastAteDate.toISOString() : null,
+            category,
+            addedAt: addedAt.get(doc.id) ?? null,
             authorName: authorName,
             authorUid: authorUid,
             author: authorName,
         };
     });
 
+    // Back into the order the shelf is actually kept in.
+    recipes.sort((a, b) => (shelfOrder.get(a.id) ?? 0) - (shelfOrder.get(b.id) ?? 0));
+
     return recipes;
-  
+
 }
 
 
