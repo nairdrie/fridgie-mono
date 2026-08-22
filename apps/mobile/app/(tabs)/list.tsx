@@ -9,6 +9,7 @@ import MealSuggestionsModal from '@/components/MealSuggestionsModal';
 import SyncStatus from '@/components/SyncStatus';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
+import { useCookbook } from '@/context/CookbookContext';
 import { useLists } from '@/context/ListContext';
 import { Item, List, ListView, Meal, Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
@@ -33,12 +34,13 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
-import { addUserCookbookRecipe, alwaysShowStaple, categorizeList, CLIENT_ID, getStaples, getUserCookbook, listenToList, removeUserCookbookRecipe } from '../../utils/api';
+import { alwaysShowStaple, categorizeList, CLIENT_ID, getStaples, listenToList } from '../../utils/api';
 import { isOnline } from '../../utils/connectivity';
 import { getListSyncEngine, type ListSyncEngine } from '../../utils/listSync';
 import { stampEdits } from '../../utils/stamp';
 import { cancelMealRatingReminder, scheduleMealRatingReminder } from '../../utils/mealReminders';
 import { parseWeekStart } from '../../utils/date';
+import { dropEmptiedSections } from '@fridgie/shared/listSections';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
 
 // LIST_SORT moved to utils/listSync — the engine is what writes it now, and it
@@ -132,7 +134,11 @@ export default function HomeScreen() {
     const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
     const fabAnimation = useSharedValue(0);
 
-    const [cookbookRecipeIds, setCookbookRecipeIds] = useState<Set<string>>(new Set());
+    // Whose shelf a recipe is on is one fact the whole app shares — see
+    // CookbookContext. This screen used to keep its own copy, fetched on every
+    // focus, which meant adding a recipe from Explore left the bookmark on the
+    // meal card here saying it had not been added.
+    const { isInCookbook, addRecipe, removeRecipe } = useCookbook();
 
     const hasCheckedForUnratedMeals = useRef(false);
 
@@ -579,22 +585,6 @@ export default function HomeScreen() {
         }
     }, [selectedGroup?.id]);
 
-    useFocusEffect(
-        useCallback(() => {
-            const fetchCookbook = async () => {
-                try {
-                    if(!user) return;
-                    const cookbookRecipes = await getUserCookbook(user.uid);
-                    const recipeIds = new Set(cookbookRecipes.map(r => r.id));
-                    setCookbookRecipeIds(recipeIds);
-                } catch (error) {
-                    console.error("Failed to fetch user cookbook:", error);
-                }
-            };
-            fetchCookbook();
-        }, [])
-    );
-
     useEffect(() => {
         const loadCollapsedState = async () => {
             try {
@@ -739,7 +729,13 @@ export default function HomeScreen() {
 
     const handleDeleteMeal = (mealId: string) => {
         setMeals(prev => prev.filter(meal => meal.id !== mealId));
-        setItems(prev => prev.filter(item => item.mealId !== mealId));
+        // A meal's ingredients are filed into aisles like any other row, so an
+        // aisle that held nothing else is left as a bare heading once they go.
+        // The grocery view can't drop those on its own — a heading with nothing
+        // under it is also what one the user has just written looks like — so
+        // the aisles this delete emptied are taken out here, where the list as
+        // it was a moment ago is still in hand to tell the two apart.
+        setItems(prev => dropEmptiedSections(prev, prev.filter(item => item.mealId !== mealId)));
         markDirty();
         if (selectedList) {
             cancelMealRatingReminder(selectedList.id, mealId).catch(console.error);
@@ -902,29 +898,15 @@ export default function HomeScreen() {
     }, [items, editingId, isKeyboardVisible, setItems]);
 
     const handleToggleCookbookById = async (recipeId: string) => {
-        const isInCookbook = cookbookRecipeIds.has(recipeId);
-        const originalCookbookIds = new Set(cookbookRecipeIds);
-
-        setCookbookRecipeIds(prev => {
-            const newSet = new Set(prev);
-            if (isInCookbook) {
-                newSet.delete(recipeId);
-            } else {
-                newSet.add(recipeId);
-            }
-            return newSet;
-        });
-
         try {
-            if (isInCookbook) {
-                await removeUserCookbookRecipe(recipeId);
+            if (isInCookbook(recipeId)) {
+                await removeRecipe(recipeId);
             } else {
-                await addUserCookbookRecipe(recipeId);
+                await addRecipe(recipeId);
             }
         } catch (error) {
-            console.error(`Failed to ${isInCookbook ? 'remove from' : 'add to'} cookbook:`, error);
+            console.error('Failed to update the cookbook:', error);
             Alert.alert("Error", `Could not update your cookbook. Please try again.`);
-            setCookbookRecipeIds(originalCookbookIds);
         }
     };
 
@@ -1039,9 +1021,9 @@ export default function HomeScreen() {
     const mealsWithCookbookStatus = React.useMemo(() => {
         return meals.map(meal => ({
             ...meal,
-            addedToCookbook: meal.recipeId ? cookbookRecipeIds.has(meal.recipeId) : false,
+            addedToCookbook: isInCookbook(meal.recipeId),
         }));
-    }, [meals, cookbookRecipeIds]);
+    }, [meals, isInCookbook]);
 
     if (isLoading || (selectedList && isListLoading)) {
         return <View style={styles.container}><ActivityIndicator /></View>;
@@ -1184,10 +1166,10 @@ export default function HomeScreen() {
                 // recipe screen drops its Add to Plan shortcut.
                 inMealPlan
                 onEdit={handleEditRecipe}
-                isInCookbook={recipeToViewId ? cookbookRecipeIds.has(recipeToViewId) : false}
-                onCookbookUpdate={() => {
-                    if (recipeToViewId) handleToggleCookbookById(recipeToViewId);
-                }}
+                // No onCookbookUpdate: this screen has no cookbook list of its
+                // own to refetch, and what used to be here TOGGLED THE RECIPE A
+                // SECOND TIME — the modal had already made the call, so adding
+                // from the meal plan added and then immediately removed.
             />
             <AddEditRecipeModal isVisible={!!recipeToEdit} onClose={() => setRecipeToEdit(null)} mealForRecipe={recipeToEdit} onRecipeSave={handleRecipeSaved} />
             <MealSuggestionsModal isVisible={isSuggestionModalVisible} onClose={() => setSuggestionModalVisible(false)} onAddSelectedMeals={handleAddMealsFromSuggestion} listId={selectedList?.id ?? ''} />

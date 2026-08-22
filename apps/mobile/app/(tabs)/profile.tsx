@@ -6,11 +6,12 @@ import NotificationsModal from '@/components/NotificationsModal';
 import RecipeCard from '@/components/RecipeCard';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
+import { useCookbook } from '@/context/CookbookContext';
 import { useNotifications } from '@/context/NotificationContext';
 import { useCookbookFilter } from '@/hooks/useCookbookFilter';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Item, Meal, Recipe } from '@/types/types';
-import { addUserCookbookRecipe, getUserCookbook, getUserProfile, removeUserCookbookRecipe, uploadUserPhoto } from '@/utils/api';
+import { getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { clearCache } from '@/utils/listCache';
 import { flushAllDirty, resetSyncEngines } from '@/utils/listSync';
@@ -256,6 +257,7 @@ const ProfileHeader = ({
 
 export default function UserProfile() {
     const { user: authUser, refreshAuthUser } = useAuth();
+    const { addRecipe, removeRecipe } = useCookbook();
     const router = useRouter();
 
     const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
@@ -404,10 +406,10 @@ export default function UserProfile() {
         closeRecipeEditor();
         try {
             if (previousId && previousId !== savedRecipe.id) {
-                await removeUserCookbookRecipe(previousId);
-                await addUserCookbookRecipe(savedRecipe.id);
+                await removeRecipe(previousId);
+                await addRecipe(savedRecipe.id);
             } else if (!previousId) {
-                await addUserCookbookRecipe(savedRecipe.id);
+                await addRecipe(savedRecipe.id);
             }
         } catch (error) {
             console.error('Failed to update the cookbook after saving a recipe', error);
@@ -636,7 +638,6 @@ export default function UserProfile() {
                     onClose={() => setRecipeToViewId(null)}
                     recipeId={recipeToViewId}
                     onEdit={handleEditRecipe}
-                    isInCookbook={cookbook.some(r => r.id === recipeToViewId)}
                     onCookbookUpdate={fetchProfileData}
                 />
                 

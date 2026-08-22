@@ -304,12 +304,15 @@ export default function ExploreScreen() {
                 </View>
             </SafeAreaView>
 
+            {/* Explore has no cookbook of its own to compare against, which is
+                why this used to hard-code `isInCookbook={false}` and label a
+                recipe already on the viewer's shelf "Add to Cookbook". The
+                modal asks `useCookbook` now, so it says the right thing here
+                without Explore having to know anything about shelves. */}
             <ViewRecipeModal
                 isVisible={!!recipeToViewId}
                 onClose={() => setRecipeToViewId(null)}
                 recipeId={recipeToViewId}
-                isInCookbook={false}
-                onCookbookUpdate={() => {}}
                 onEdit={() => {}}
             />
         </>

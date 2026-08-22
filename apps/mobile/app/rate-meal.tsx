@@ -1,7 +1,8 @@
 import { useAuth } from '@/context/AuthContext';
+import { useCookbook } from '@/context/CookbookContext';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Recipe } from '@/types/types';
-import { addUserCookbookRecipe, getRecipe, getUserCookbook, saveRecipe, submitRecipeFeedback, uploadRecipePhoto } from '@/utils/api';
+import { getRecipe, saveRecipe, submitRecipeFeedback, uploadRecipePhoto } from '@/utils/api';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -52,8 +53,11 @@ export default function RateMealScreen() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [showAddedToCookbook, setShowAddedToCookbook] = useState(false);
     const animatedValue = useRef(new Animated.Value(0)).current;
-    const [isInCookbook, setIsInCookbook] = useState(false);
     const { user } = useAuth();
+    // The viewer's own shelf, shared with every other screen — this used to be
+    // a second fetch of the whole cookbook just to answer one yes/no.
+    const { isInCookbook: hasRecipe, addRecipe } = useCookbook();
+    const isInCookbook = hasRecipe(recipeId);
 
     useEffect(() => {
         if (!recipeId) {
@@ -61,26 +65,19 @@ export default function RateMealScreen() {
             return;
         }
 
-        const fetchRecipeAndCookbook = async () => {
+        const fetchRecipe = async () => {
             try {
                 const fetchedRecipe = await getRecipe(recipeId);
                 setRecipe(fetchedRecipe);
-                if(!user) {
-                    return;
-                }
-                const cookbook = await getUserCookbook(user.uid);
-                const isRecipeInCookbook = cookbook.some(r => r.id === recipeId);
-                setIsInCookbook(isRecipeInCookbook);
-
             } catch (error) {
-                console.error("Failed to fetch recipe or cookbook for rating:", error);
+                console.error("Failed to fetch recipe for rating:", error);
                 Alert.alert("Error", "Could not load the recipe details.", [{ text: 'OK', onPress: () => router.back() }]);
             } finally {
                 setIsLoading(false);
             }
         };
 
-        fetchRecipeAndCookbook();
+        fetchRecipe();
     }, [recipeId]);
 
     const handleDislike = () => {
@@ -131,7 +128,7 @@ export default function RateMealScreen() {
     const handleAddToCookbook = async () => {
         setIsSubmitting(true);
         try {
-            await addUserCookbookRecipe(recipe!.id);
+            await addRecipe(recipe!.id);
             setShowAddedToCookbook(true);
             Animated.timing(animatedValue, {
                 toValue: 1,

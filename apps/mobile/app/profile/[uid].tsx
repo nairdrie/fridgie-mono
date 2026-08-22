@@ -169,6 +169,7 @@ export default function OtherUserProfileScreen() {
                             recipes={cookbook}
                             isLoading={isCookbookLoading}
                             onRefresh={fetchCookbook}
+                            isOwnCookbook={isOwnProfile}
                         />
                     </View>
                 </ScrollView>

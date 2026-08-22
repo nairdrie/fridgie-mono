@@ -37,6 +37,7 @@ because Metro doesn't watch or resolve files outside the app directory.
 | `staples.ts` | yes | what the household always has, and what counts as saying so |
 | `cookTimers.ts` | yes | durations mentioned in a recipe step |
 | `recipeCategory.ts` | yes | the cookbook's shelves, and guessing one from a title |
+| `listSections.ts` | yes | which aisle headings still have something under them |
 
 `quantity.ts` and `rank.ts` exist because both apps previously had their own
 copies that drifted: the two rank modules repaired invalid ranks differently
@@ -66,6 +67,14 @@ the server stores it, and the client draws a filter chip per category. A twelfth
 category invented on any one side is a recipe nobody can find. `types.ts` pulls
 the union from it with `import type`, which is erased like the rest of that
 file.
+
+`listSections.ts` is here on the same terms. A section holds its items by
+POSITION — a row belongs to the nearest heading above it in rank order — so
+removing rows can leave a heading standing over nothing, which is what deleting
+a meal used to do to every aisle only that meal was using. Telling an aisle a
+delete emptied apart from one the user has just written and not filled in yet
+takes the list as it was BEFORE the delete, so it is decided at the edit rather
+than at render time, and the rule is worth a test rather than a comment.
 
 `servings.ts` follows the same rule as the rest: the recipe is
 never rewritten, only the rows it puts on a list are, so a shared recipe means

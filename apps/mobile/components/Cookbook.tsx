@@ -1,7 +1,7 @@
 // components/Cookbook.tsx
 import { useAuth } from '@/context/AuthContext';
+import { useCookbook } from '@/context/CookbookContext';
 import { useCookbookFilter } from '@/hooks/useCookbookFilter';
-import { addUserCookbookRecipe } from '@/utils/api';
 import { Item, Meal, Recipe } from '@/types/types';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -26,9 +26,15 @@ interface CookbookProps {
     recipes: Recipe[];
     isLoading: boolean;
     onRefresh: () => void;
+    /**
+     * Whose shelf this is. On somebody else's profile the recipes here are
+     * theirs: adding one puts a copy on the VIEWER's shelf and changes nothing
+     * about the list on screen, so there is nothing here to refetch afterwards.
+     */
+    isOwnCookbook?: boolean;
 }
 
-export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProps) {
+export default function Cookbook({ recipes, isLoading, onRefresh, isOwnCookbook = true }: CookbookProps) {
     const filter = useCookbookFilter(recipes);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -41,6 +47,7 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
     const [recipeToEdit, setRecipeToEdit] = useState<Recipe | null>(null);
 
     const { user } = useAuth();
+    const { addRecipe } = useCookbook();
 
     const handleRefresh = useCallback(async () => {
         setIsRefreshing(true);
@@ -77,7 +84,7 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
         setRecipeToEdit(null);
         if (previousId && previousId !== savedRecipe.id) {
             try {
-                await addUserCookbookRecipe(savedRecipe.id);
+                await addRecipe(savedRecipe.id);
             } catch (error) {
                 console.error('Failed to add the copied recipe to the cookbook', error);
                 Alert.alert('Saved, but not filed', "Your copy was saved but couldn't be added to your cookbook.");
@@ -154,13 +161,17 @@ export default function Cookbook({ recipes, isLoading, onRefresh }: CookbookProp
                 recipe={selectedRecipe}
             />
             
+            {/* No `isInCookbook` here on purpose. It used to be
+                `recipes.some(...)` — true for everything on this list, which is
+                only the same question when the list is your own. On another
+                user's profile it labelled their whole shelf "In Cookbook" and
+                offered to remove recipes the viewer had never added. */}
             <ViewRecipeModal
                 isVisible={!!recipeToViewId}
                 onClose={() => setRecipeToViewId(null)}
                 recipeId={recipeToViewId}
                 onEdit={handleEditRecipe}
-                isInCookbook={recipes.some(r => r.id === recipeToViewId)}
-                onCookbookUpdate={onRefresh}
+                onCookbookUpdate={isOwnCookbook ? onRefresh : undefined}
             />
             
             <AddEditRecipeModal

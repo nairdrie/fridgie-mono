@@ -11,6 +11,20 @@ const route = new Hono()
 // All cookbook routes require authentication
 route.use('*', auth)
 
+/**
+ * DELETE /api/cookbook/:id
+ * Takes a recipe off the CALLER's own shelf — `uid` comes from the verified
+ * token, never from the request, so this can only ever act on your own
+ * cookbook however it is called.
+ *
+ * IDEMPOTENT, for the same reason POST /api/cookbook is: `popularity.cookbooks`
+ * counts PEOPLE, so it moves only when this user's membership actually
+ * changes. Removing a recipe that was never on the caller's shelf takes nothing
+ * off the count — without that, anyone looking at somebody else's cookbook
+ * could walk a stranger's recipe's popularity down one tap at a time, and a
+ * client that merely believed it had the recipe (a screen showing another
+ * user's shelf did exactly that) would do it by accident.
+ */
 route.delete('/', requireAccount, async (c) => {
   const uid = c.get('uid')
   const recipeId = c.req.param('id')
@@ -29,6 +43,12 @@ route.delete('/', requireAccount, async (c) => {
     // Use a transaction to ensure atomicity
     await fs.runTransaction(async (transaction) => {
       // Every read before any write, as Firestore requires.
+      const onShelf = (await transaction.get(cookbookRef)).exists
+      // Nothing of the caller's to remove: leave the count alone and say the
+      // same thing a real deletion says, since the end state is the one asked
+      // for either way.
+      if (!onShelf) return
+
       const recipeSnap = await transaction.get(recipeRef)
       const rootRecipeRef = recipeSnap.data()?.forkedFromId
         ? fs.collection('recipes').doc(recipeSnap.data()!.forkedFromId)
