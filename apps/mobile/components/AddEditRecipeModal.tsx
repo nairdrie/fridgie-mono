@@ -3,7 +3,7 @@ import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Image, Keyboard, KeyboardAvoidingView, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import uuid from 'react-native-uuid';
 import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 
@@ -243,50 +243,72 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     });
 
   /**
+   * Tells the user the camera is off limits, and offers the only thing that
+   * can change that once the OS has stopped asking: Settings.
+   */
+  const cameraDenied = (canAskAgain: boolean) => Alert.alert(
+    'Camera access needed',
+    canAskAgain
+      ? 'Fridgie needs camera access to photograph a recipe.'
+      : 'Fridgie needs camera access to photograph a recipe. You can turn it on in Settings.',
+    canAskAgain
+      ? [{ text: 'OK' }]
+      : [{ text: 'Not now', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() }]
+  );
+
+  /**
    * Puts the camera or the photo library in front of the user and hands back
    * what they picked, or null once they have been told why they can't be.
    *
-   * ANDROID, THE CAMERA, AND A PERMISSION THAT NEVER COMES BACK
+   * The permission is handled the way Expo documents it and the way the OS
+   * guidelines ask for: read the current state first, ask only if the OS is
+   * still willing to ask, and once it isn't, stop asking and offer Settings —
+   * all of it at the point of use, when the user has just said they want a
+   * photo, rather than up front.
    *
-   * `launchCameraAsync` asks Android for the camera permission on every single
-   * launch, whether or not it was granted months ago — expo-image-picker's
-   * `ensureCameraPermissionsAreGranted` calls `askForPermissions` flat out,
-   * with no check first, and still does in the newest version. That goes
-   * through expo's PermissionsService to `Activity.requestPermissions`, and
-   * React Native does not deliver a permission result when it arrives: it
-   * parks it in `mPermissionsCallback` and only runs it from the activity's
-   * next `onResume` (ReactActivityDelegate.java). Nothing resumes the activity
-   * when the answer was already "granted", so the result sits parked, the
-   * promise never settles, and the tap does nothing at all — no dialog, no
-   * camera. It is also why the camera once appeared minutes later out of
-   * nowhere: going into the photo library and backing out of it resumed the
-   * activity, which finally ran the parked callback.
+   * Exactly ONE request is made per tap, which matters more here than it looks.
+   * `launchCameraAsync` asks for the camera permission itself on Android — it
+   * calls `askForPermissions` with no check first (expo-image-picker's
+   * `ensureCameraPermissionsAreGranted`, unchanged as of 57.x) — so asking here
+   * as well puts two `Activity.requestPermissions` calls back to back. React
+   * Native parks a permission result and only delivers it from the activity's
+   * next `onResume`, and overlapping requests strand one of them; that is a tap
+   * that does nothing, and a camera that opens out of nowhere much later when
+   * something else finally resumes the activity. So on Android the read is only
+   * used to decide what to say, and the asking is left to the launcher. On iOS
+   * the launcher only *checks* and refuses outright without it, so there the
+   * asking has to happen here.
    *
-   * Nothing here can change what the library does. What it can do is stop
-   * asking from behind a Dialog — the sheet is one, and the launch is made
-   * with it off the screen — and refuse to hang silently if that isn't
-   * enough. See `launchWatched`.
-   *
-   * iOS is unaffected and takes the plain path: its `launchCameraAsync` only
-   * *checks* the permission and refuses outright without it, so that one is
-   * asked for here. Neither platform needs a permission for the photo library
-   * — the system picker runs out of process and hands back only what was
-   * chosen — and that is exactly why "Choose an Image" always worked.
+   * The photo library needs no permission on either platform — the system
+   * picker runs out of process and hands back only what was chosen — which is
+   * why "Choose an Image" always worked while this didn't.
    */
   const openRecipePhotoPicker = async (
     source: 'camera' | 'library'
   ): Promise<ImagePicker.ImagePickerResult | null> => {
-    const cameraDenied = (canAskAgain: boolean) => Alert.alert(
-      'Camera access needed',
-      canAskAgain
-        ? 'Fridgie needs camera access to photograph a recipe.'
-        : 'Fridgie needs camera access to photograph a recipe. You can turn it on in Settings.'
-    );
+    if (source === 'camera') {
+      // A plain read. It never reaches Activity.requestPermissions, so unlike a
+      // request it cannot be the thing that gets stuck.
+      let permission = await ImagePicker.getCameraPermissionsAsync();
 
-    if (source === 'camera' && Platform.OS !== 'android') {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) {
-        cameraDenied(permission.canAskAgain);
+      // Who does the asking is the whole point: iOS won't open the camera
+      // without the permission already in hand, so it is asked for here.
+      // Android's launcher asks for itself, and asking on top of that is what
+      // strands the request — so there, don't.
+      if (!permission.granted && permission.canAskAgain && Platform.OS !== 'android') {
+        permission = await ImagePicker.requestCameraPermissionsAsync();
+      }
+
+      // Turned down for good. The OS has stopped offering to ask, so launching
+      // would only bounce off the same wall — Settings is the only way back.
+      if (!permission.granted && !permission.canAskAgain) {
+        cameraDenied(false);
+        return null;
+      }
+
+      // Declined this time round, on the platform that won't try without it.
+      if (!permission.granted && Platform.OS !== 'android') {
+        cameraDenied(true);
         return null;
       }
     }
@@ -332,15 +354,29 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 
     const error: any = outcome.failed;
     console.error('Failed to open the image picker', error);
-    // Android turns a declined camera prompt into a rejection from the
-    // launcher rather than a status we could have read beforehand. Reading
-    // the permission afterwards is not requesting it, so it is safe here and
-    // is the difference between "allow it next time" and "go to Settings".
-    if (`${error?.code ?? ''} ${error?.message ?? ''}`.includes('USER_REJECTED_PERMISSIONS')) {
+    const failure = `${error?.code ?? ''} ${error?.message ?? ''}`;
+
+    // Android leaves its own camera prompt to the launcher, so a refusal
+    // arrives here rather than as a status we could have read beforehand.
+    // Reading it afterwards is not requesting it, so it is safe, and it is the
+    // difference between "allow it next time" and "go to Settings".
+    if (failure.includes('USER_REJECTED_PERMISSIONS')) {
       const permission = await ImagePicker.getCameraPermissionsAsync().catch(() => null);
       cameraDenied(permission?.canAskAgain ?? false);
       return null;
     }
+
+    // No camera app installed, or none the OS will let us see. Nothing to
+    // retry, so send them the way that does work.
+    if (failure.includes('MISSING_ACTIVITY_TO_HANDLE_INTENT') || failure.includes('CAMERA_UNAVAILABLE')) {
+      Alert.alert(
+        'No camera available',
+        "This device doesn't have a camera app we can open. You can still pick a photo you've already taken.",
+        [{ text: 'Not now', style: 'cancel' }, { text: 'Choose an Image', onPress: () => handleImportFromPhoto('library') }]
+      );
+      return null;
+    }
+
     Alert.alert(
       source === 'camera' ? "Couldn't open the camera" : "Couldn't open your photos",
       'Please try again, or enter the recipe manually.'

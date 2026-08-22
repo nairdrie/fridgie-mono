@@ -77,15 +77,13 @@ export default function CompleteProfileScreen() {
 
   const carouselData = [...defaultAvatars, 'upload'];
 
+  // No permission asked for: the system photo picker runs out of process and
+  // hands back only the one image the user chose, so there is nothing to grant.
+  // Asking anyway prompted for storage access on older Android for no reason,
+  // and every extra permission request is one more that can go astray.
   const handlePickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Sorry, we need camera roll permissions to make this work!');
-      return;
-    }
-
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.5,

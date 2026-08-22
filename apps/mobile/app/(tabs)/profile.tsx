@@ -425,14 +425,11 @@ export default function UserProfile() {
         }
     };
 
+    // No permission asked for — see complete-profile.tsx. The system picker
+    // needs none, and asking is how a request goes astray.
     const handlePickImage = async () => {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Sorry, we need camera roll permissions!');
-            return;
-        }
         let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             allowsEditing: true,
             aspect: [1, 1],
             quality: 0.5,

@@ -159,15 +159,12 @@ export default function RateMealScreen() {
     // would land on a copy nobody ever sees. Only the owner can add one here.
     const canEditPhoto = !!recipe && !!user && recipe.createdBy === user.uid;
 
+    // No permission asked for — see complete-profile.tsx. The system picker
+    // needs none, and asking is how a request goes astray.
     const handlePickImage = async () => {
         if (!canEditPhoto) return;
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Sorry, we need camera roll permissions to make this work!');
-            return;
-        }
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             allowsEditing: true,
             aspect: [16, 9],
             quality: 0.7,
