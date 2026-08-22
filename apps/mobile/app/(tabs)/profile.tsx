@@ -6,6 +6,7 @@ import RecipeCard from '@/components/RecipeCard';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
 import { useNotifications } from '@/context/NotificationContext';
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Item, Meal, Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getUserCookbook, getUserProfile, removeUserCookbookRecipe, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
@@ -97,6 +98,9 @@ const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bo
 const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisible: boolean; onClose: () => void; onNavigate: (path: string) => void; onDismiss: () => void }) => {
     const router = useRouter();
     const { user, refreshAuthUser } = useAuth();
+    // A row only grows a text field once you tap Edit, so which of them is being
+    // typed into is not known ahead of time — the scroller hears all of them.
+    const keyboard = useKeyboardAwareScroll({ enabled: isVisible });
 
     const handleEmailSave = async (newEmail: string) => {
         const userToUpdate = auth.currentUser;
@@ -125,7 +129,13 @@ const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisibl
                 {/* Without persistTaps the first tap on an editable row's Save
                     button is swallowed dismissing the keyboard, so saving a name
                     takes two taps and looks like the button does nothing. */}
-                <ScrollView style={styles.modalScrollView} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                    ref={keyboard.scrollRef}
+                    {...keyboard.scrollProps}
+                    style={styles.modalScrollView}
+                    contentContainerStyle={{ paddingBottom: keyboard.keyboardSpace }}
+                    keyboardShouldPersistTaps="handled"
+                >
                     <Text style={styles.sectionTitle}>Profile Information</Text>
                     <EditableInfoRow
                         label="Name"

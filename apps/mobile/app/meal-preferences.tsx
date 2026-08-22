@@ -1,5 +1,6 @@
 // screens/MealPreferencesScreen.tsx
 
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { getMealPreferences, saveMealPreferences } from '@/utils/api';
 import { primary } from '@/utils/styles';
 import { useRouter } from 'expo-router';
@@ -47,6 +48,7 @@ export default function MealPreferencesScreen() {
   const [currentStep, setCurrentStep] = useState(1);
 
   const router = useRouter();
+  const keyboard = useKeyboardAwareScroll();
 
   // State for user's selections
   const [dietaryNeeds, setDietaryNeeds] = useState<string[]>([]);
@@ -175,7 +177,14 @@ export default function MealPreferencesScreen() {
                 Step {currentStep} of {TOTAL_STEPS}
             </Text>
         </View>
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+        {/* The Next/Finish row is pinned below this, so a step's own text field
+            can end up under the keyboard with nothing beneath it to scroll up. */}
+        <ScrollView
+            ref={keyboard.scrollRef}
+            {...keyboard.scrollProps}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 20 + keyboard.keyboardSpace }]}
+            keyboardShouldPersistTaps="handled"
+        >
             {renderStepContent()}
         </ScrollView>
         <View style={styles.footer}>

@@ -1,4 +1,5 @@
 import { useAuth } from '@/context/AuthContext';
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Recipe } from '@/types/types';
 import { addUserCookbookRecipe, getRecipe, getUserCookbook, saveRecipe, submitRecipeFeedback, uploadRecipePhoto } from '@/utils/api';
 import { primary } from '@/utils/styles';
@@ -12,13 +13,13 @@ import {
     Alert,
     Animated,
     Image,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
     View
 } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 // TODO: FIXED? if its already in cookbook, dont show add to cookbook buttons
 // TODO: FIXED? dont show if they add date in the past immediately. only on app open.
@@ -40,6 +41,9 @@ const markMealAsRated = async (mealId: string) => {
 export default function RateMealScreen() {
     const router = useRouter();
     const { recipeId, mealId } = useLocalSearchParams<{ recipeId: string; mealId?: string }>();
+    // Wider than the default: Submit sits directly under the feedback box, and
+    // lifting the box alone would leave the button behind the keyboard.
+    const keyboard = useKeyboardAwareScroll({ gap: 60 });
 
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -217,12 +221,16 @@ export default function RateMealScreen() {
     }
 
     return (
-        <KeyboardAwareScrollView
-            enableOnAndroid={true}
-            extraScrollHeight={60}
-            keyboardOpeningTime={0}
+        <ScrollView
+            ref={keyboard.scrollRef}
+            {...keyboard.scrollProps}
+            style={styles.safeArea}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.safeArea}
+            // flexGrow, not the flex: 1 this used to inherit from safeArea. A
+            // content container pinned to flex: 1 is exactly as tall as the
+            // scroller, so it never scrolls — and the room made for the keyboard
+            // gets clipped away with everything else past the bottom edge.
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: keyboard.keyboardSpace }]}
         >
             <View style={styles.container}>
                 {showAddedToCookbook ? (
@@ -318,11 +326,12 @@ export default function RateMealScreen() {
                     </>
                 )}
             </View>
-        </KeyboardAwareScrollView>
+        </ScrollView>
     );
 }
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: '#fff' },
+    scrollContent: { flexGrow: 1 },
     container: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     title: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, textAlign: 'center' },
     recipeName: { fontSize: 24, fontWeight: '600', color: primary, marginBottom: 24, textAlign: 'center' },

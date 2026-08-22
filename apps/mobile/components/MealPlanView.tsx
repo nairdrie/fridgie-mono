@@ -1,4 +1,5 @@
 // components/MealPlanView.tsx
+import { useKeyboardAwareScroll } from "@/hooks/useKeyboardAwareScroll";
 import { Item, Meal } from "@/types/types";
 import { formatQuantity, parseQuantity } from "@/utils/quantity";
 import { hairline, ink, inkMuted, primary, surface } from "@/utils/styles";
@@ -10,6 +11,9 @@ import QuantityEditorModal from "./QuantityEditorModal";
 
 const DAYS_OF_WEEK: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const dayOrder = new Map(DAYS_OF_WEEK.map((day, i) => [day, i]));
+
+/** The floating action button hovers over the list; the last row has to clear it. */
+const FAB_CLEARANCE = 80;
 
 interface MealPlanViewProps {
   meals: Meal[];
@@ -55,6 +59,10 @@ export default function MealPlanView({
 
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+
+  // Every input in the plan — a meal's name, an ingredient's text — is inside
+  // this list, and focus bubbles, so the list hears all of them.
+  const keyboard = useKeyboardAwareScroll();
 
     const openQuantityEditor = (item: Item) => {
         setSelectedItem(item);
@@ -138,6 +146,8 @@ export default function MealPlanView({
      }
      { sortedMeals.length > 0 && 
       <FlatList
+        ref={keyboard.scrollRef}
+        {...keyboard.scrollProps}
         data={sortedMeals}
         keyExtractor={(item) => item.id}
         // A ScrollView left on the default 'never' captures the first tap
@@ -170,7 +180,13 @@ export default function MealPlanView({
         initialNumToRender={15}
         maxToRenderPerBatch={10}
         windowSize={10}
-        contentContainerStyle={styles.container}
+        // The last meal's ingredients used to sit at the very end of the
+        // content, which is as far as scrolling goes — so tapping one put the
+        // keyboard on top of it and there was nothing below to pull up in its
+        // place. The room under the plan is what gives that row somewhere to go:
+        // enough to clear the floating add button at rest, and the keyboard on
+        // top of that while one is being typed into.
+        contentContainerStyle={[styles.container, { paddingBottom: FAB_CLEARANCE + keyboard.keyboardSpace }]}
       />
      }
       <QuantityEditorModal

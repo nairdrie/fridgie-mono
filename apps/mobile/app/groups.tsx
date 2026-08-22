@@ -1,4 +1,5 @@
 import { useAuth } from '@/context/AuthContext';
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Group, PendingInvitation, UserProfile } from '@/types/types';
 import { ApiError, createGroup, declineGroupInvitation, deleteGroup, getPendingInvitations, searchUsers, sendGroupInvitation, updateGroup } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
@@ -522,9 +523,23 @@ export default function GroupsScreen() {
         setExpandedGroupId(prevId => (prevId === group.id ? null : group.id));
     };
 
+    // Two scrollers, one at a time: the page behind the Create Group sheet must
+    // not chase an input that belongs to the sheet.
+    const pageKeyboard = useKeyboardAwareScroll({ enabled: !isGroupModalVisible });
+    const modalKeyboard = useKeyboardAwareScroll({ enabled: isGroupModalVisible });
+
     return (
         <SafeAreaView style={styles.container}>
-            <ScrollView keyboardShouldPersistTaps="handled">
+            {/* An expanded group carries its own name field and member search,
+                and the last group on a long page has nothing below it — so
+                without room made for the keyboard those fields cannot be
+                scrolled out from under it. */}
+            <ScrollView
+                ref={pageKeyboard.scrollRef}
+                {...pageKeyboard.scrollProps}
+                contentContainerStyle={{ paddingBottom: pageKeyboard.keyboardSpace }}
+                keyboardShouldPersistTaps="handled"
+            >
                 <View style={styles.groupsContainer}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.headerLeft}>
@@ -573,7 +588,9 @@ export default function GroupsScreen() {
                 >
                 <SafeAreaView style={styles.modalViewContainer}>
                     <FlatList
-                        contentContainerStyle={styles.modalScrollView}
+                        ref={modalKeyboard.scrollRef}
+                        {...modalKeyboard.scrollProps}
+                        contentContainerStyle={[styles.modalScrollView, { paddingBottom: modalKeyboard.keyboardSpace }]}
                         keyboardShouldPersistTaps="handled"
                         data={searchResults}
                         keyExtractor={(item) => item.uid}

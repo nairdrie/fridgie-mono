@@ -1051,12 +1051,20 @@ export default function HomeScreen() {
         <>
         {isFocused && <StatusBar style="dark" />}
         <View style={{ paddingTop: 12, paddingBottom: 12,flex: 1, backgroundColor: '#fff' }}>
+            {/* No keyboardVerticalOffset. That prop corrects for a gap between
+                this view's bottom edge and the keyboard's top, and there is
+                none — the tab bar below is covered by the keyboard, not pushed
+                up by it. The 100 it used to carry was surplus, and it read as a
+                white band opening under the list whenever anything was typed.
+
+                Shrinking the list to the space above the keyboard is only half
+                of it: a row already at the bottom of the content still has
+                nowhere to scroll to. See useKeyboardAwareScroll, which both
+                lists below use to make that room and then use it. */}
             <KeyboardAvoidingView
                 style={styles.container}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={100}
             >
-                {/* TODO: the keyboardavoiding here is not as good as on login page now. also add/edit recipe one is good. (CHECK IOS) */}
                 {/* TODO: on IOS, any action outside the keyboard should minimize it (unless its a click to another input). basically we want the keyboard to be smart enough to close when were not using it (on scroll)*/}
                 {/* TODO: on android, any action outside the keyboard should not minimize it, we use the back swipe to do this. */}
                 {selectedView == ListView.GroceryList && (

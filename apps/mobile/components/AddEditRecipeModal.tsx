@@ -1,3 +1,4 @@
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Ingredient, Item, Meal, Recipe } from '@/types/types';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -45,6 +46,10 @@ interface AddEditRecipeModalProps {
 
 export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, recipeToEdit = null, onRecipeSave }: AddEditRecipeModalProps) {
   const { selectedGroup } = useAuth();
+  // Every field on this form is inside the scroller below, and focus bubbles,
+  // so the scroller hears all of them — including the ingredient and step rows,
+  // which come and go as the recipe is written.
+  const keyboard = useKeyboardAwareScroll({ enabled: isVisible });
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [importUrl, setImportUrl] = useState('');
   // Seeded from the meal's own title: someone who typed "Chicken Katsu" into
@@ -785,8 +790,14 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                   Cancel/Save row — was pushed off, leaving a full screen of
                   form background. flexShrink lets it give way instead. */}
               <ScrollView
+                ref={keyboard.scrollRef}
+                {...keyboard.scrollProps}
                 style={styles.modalScrollView}
-                contentContainerStyle={styles.modalScrollViewContent}
+                // The avoider above lifts the sheet clear of the keyboard, which
+                // shrinks this form rather than covering it — so a field near the
+                // bottom ends up below the fold instead of behind the keyboard,
+                // and something still has to scroll it back into sight.
+                contentContainerStyle={[styles.modalScrollViewContent, { paddingBottom: keyboard.keyboardSpace }]}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
               >

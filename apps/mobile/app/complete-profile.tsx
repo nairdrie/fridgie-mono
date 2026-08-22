@@ -1,4 +1,5 @@
 import { useAuth } from '@/context/AuthContext';
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, storage } from '@/utils/firebase';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -14,13 +15,13 @@ import {
   Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 
 async function updateUserProfile(data: { name: string; photoURL: string }) {
@@ -65,6 +66,9 @@ async function updateUserProfile(data: { name: string; photoURL: string }) {
 export default function CompleteProfileScreen() {
   const router = useRouter();
   const { user, refreshAuthUser } = useAuth();
+  // Wider than the default: the Continue button sits directly under the name
+  // field, and lifting the field alone would leave the button behind the keyboard.
+  const keyboard = useKeyboardAwareScroll({ gap: 60 });
   
 
   const [name, setName] = useState('');
@@ -141,17 +145,16 @@ export default function CompleteProfileScreen() {
   };
 
   return (
-    <KeyboardAwareScrollView
-          // One scroller, not two. A plain ScrollView nested inside this one
-          // owned the vertical gesture, so the auto-scroll that puts the focused
-          // input above the keyboard had nothing to scroll — the name field and
-          // Continue button, both at the bottom of the form, stayed under it.
+    // One scroller, not two. A plain ScrollView nested inside this one owned the
+    // vertical gesture, so the scroll that puts the focused input above the
+    // keyboard had nothing to scroll — the name field and Continue button, both
+    // at the bottom of the form, stayed under it.
+    <ScrollView
+          ref={keyboard.scrollRef}
+          {...keyboard.scrollProps}
           style={styles.safeArea}
-          enableOnAndroid={true} // makes sure Android scrolls too
-          extraScrollHeight={60} // bump focused input just above keyboard
-          keyboardOpeningTime={0} // avoid flicker
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.container}>
+          contentContainerStyle={[styles.container, { paddingBottom: keyboard.keyboardSpace }]}>
         <Text style={styles.title}>Welcome!</Text>
         <Text style={styles.subtitle}>Let's set up your profile.</Text>
         { selectedPhotoUrl &&
@@ -219,7 +222,7 @@ export default function CompleteProfileScreen() {
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue</Text>}
         </TouchableOpacity>
-    </KeyboardAwareScrollView>
+    </ScrollView>
   );
 }
 

@@ -26,6 +26,7 @@ import {
 } from 'firebase/auth';
 
 // --- Your Project's Imports ---
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { auth } from '@/utils/firebase';
 import {
   SocialAuthError,
@@ -65,6 +66,7 @@ const providerButtonLabel = (providerId: string) => `Continue with ${providerLab
 
 export default function LoginScreen() {
   const router = useRouter();
+  const keyboard = useKeyboardAwareScroll();
 
   // --- State Management ---
   const [loading, setLoading] = useState<LoadingState>("");
@@ -305,7 +307,9 @@ export default function LoginScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0} // tweak this
     >
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1 }}
+        ref={keyboard.scrollRef}
+        {...keyboard.scrollProps}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: keyboard.keyboardSpace }}
         keyboardShouldPersistTaps="handled"
       >
         <StatusBar style="light" />

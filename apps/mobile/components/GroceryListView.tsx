@@ -1,5 +1,6 @@
 // components/GroceryListView.tsx
 
+import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Item } from '@/types/types';
 import {
     aggregateQuantities,
@@ -38,6 +39,9 @@ type AggregatedItem = Item & {
 
 /** Stable identity, so the split memo doesn't re-run on every render. */
 const EMPTY_STAPLES: ReadonlySet<string> = new Set();
+
+/** The floating action button hovers over the list; the last row has to clear it. */
+const LIST_BOTTOM_SPACE = 80;
 
 /**
  * What decides that two rows are the same thing and should show as one.
@@ -333,6 +337,11 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // The FlatList is unmounted whenever the list is empty, so this is null as
     // often as it is set — every use goes through scrollToItemId below.
     const flatListRef = useRef<any>(null);
+
+    // Both inputs on this screen — a row's text and a section heading — live in
+    // the list, and focus bubbles, so the list hears both without either having
+    // to say so.
+    const keyboard = useKeyboardAwareScroll({ ref: flatListRef });
 
     /**
      * Which rows are on screen, as indices into `openRows`.
@@ -827,6 +836,10 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             ) : (
                 <DraggableFlatList
                     ref={flatListRef}
+                    // onScroll is spoken for here — this list drives its own
+                    // drag-to-autoscroll with it — so it reports where it is
+                    // scrolled to through onScrollOffsetChange instead.
+                    {...keyboard.draggableProps}
                     data={openRows} onDragEnd={applyDragOrder}
                     keyExtractor={item => item.id} renderItem={renderItem as any}
                     keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
@@ -882,7 +895,10 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     // not, so this looks fine everywhere except on a device.)
                     containerStyle={styles.list}
                     style={styles.list}
-                    contentContainerStyle={styles.listContent}
+                    // The bottom row of a list has nothing below it to scroll up
+                    // in its place, so without room made for the keyboard it can
+                    // never rise above one. See useKeyboardAwareScroll.
+                    contentContainerStyle={[styles.listContent, { paddingBottom: LIST_BOTTOM_SPACE + keyboard.keyboardSpace }]}
                     ListFooterComponent={
                         <>
                             {/* Above the checked section on purpose. The list
@@ -987,7 +1003,7 @@ export default GroceryListView;
 
 const styles = StyleSheet.create({
     list: { flex: 1 },
-    listContent: { flexGrow: 1, paddingBottom: 80 },
+    listContent: { flexGrow: 1, paddingBottom: LIST_BOTTOM_SPACE },
     // Grows to whatever is left below the last row, with enough of a floor that
     // a full list still has somewhere to tap.
     tapToAdd: { flexGrow: 1, minHeight: 120 },
