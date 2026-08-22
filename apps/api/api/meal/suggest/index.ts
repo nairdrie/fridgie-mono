@@ -7,6 +7,7 @@ import { normalizeIngredients } from '@/utils/quantity';
 import { normalizeRecipeServings } from '@/utils/servings';
 import { completeJson, models } from '@/utils/claude';
 import {
+  categoryVocabulary,
   quantityFormatRules,
   servingsRules,
   recipeSchema,
@@ -215,6 +216,7 @@ ordinary kitchen unless the request says otherwise.
 
 ${recipeWritingRules}
 ${tagVocabulary}
+${categoryVocabulary}
 ${quantityFormatRules}
 ${servingsRules}
 Like the generation path, you are inventing these dishes rather than reading

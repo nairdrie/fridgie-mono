@@ -10,6 +10,7 @@ import { collectTikTokSource, isTikTokUrl, sampleVideoFrames } from '@/utils/tik
 // The old inline copy told the model to collapse ranges ("2-3" -> "2"), which
 // is now wrong: the quantity engine keeps both ends so totals don't under-buy.
 import {
+  categoryVocabulary,
   importedRecipeSchema,
   quantityFormatRules,
   recipeSchema,
@@ -49,6 +50,7 @@ Pay attention to tags like <h1>/<h2> for the name, <ul>/<li> for ingredients, an
 Set "photoURL" to the URL of a photo of the finished dish if the page has one, else null.
 ${recipeWritingRules}
 ${tagVocabulary}
+${categoryVocabulary}
 ${quantityFormatRules}
 ${servingsRules}
 If the page does not contain a culinary recipe, set "found" to false and "recipe" to null.
@@ -69,6 +71,7 @@ Ignore the parts of a caption that are not the recipe — hashtags, follow-me pl
 A still photo of the finished dish is supplied separately, so always set "photoURL" to null.
 ${recipeWritingRules}
 ${tagVocabulary}
+${categoryVocabulary}
 ${quantityFormatRules}
 ${servingsRules}
 If this is not a cooking video, set "found" to false and "recipe" to null.
@@ -96,6 +99,7 @@ Where a preparation is implied by an ingredient line but no step covers it, add 
 Use "sourceKeywords" only as candidates for the tag list — they are the site's own labels, not ours, and many will not map to our vocabulary.
 ${recipeWritingRules}
 ${tagVocabulary}
+${categoryVocabulary}
 ${quantityFormatRules}
 ${servingsRules}
 `;
