@@ -664,8 +664,14 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             }
 
             const needed = desired.value - mealContribution;
+            // Converting a meal's own amount into another unit never lands back
+            // on the same number — 8 oz asked for in grams is 226.8 g against a
+            // 226.796 g contribution — and a typed round number ("227 g") misses
+            // by more. A shortfall this far inside the total is the same amount
+            // said differently, not a top-up worth shopping for.
+            const negligible = Math.abs(desired.value) * 0.01;
 
-            if (needed > 0) {
+            if (needed > negligible) {
                 const quantityToSet = formatQuantity(needed, desired.unit);
                 if (mainItem) {
                     return prev.map(item => item.id === mainItem.id
@@ -679,11 +685,18 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 return [...prev, newItem];
             }
 
-            if (needed === 0) {
-                // Meals cover the desired total exactly; no standalone item needed.
-                return prev
-                    .filter(item => item.id !== mainItem?.id)
-                    .map(item => sources.some(s => s.id === item.id) ? clearOverride(item) : item);
+            // Meals already cover the total. If what was entered is what the meals
+            // aggregate to anyway, there is nothing to remember: drop the standalone
+            // item and clear any override. Otherwise the same amount has been asked
+            // for in a different unit ("8 oz" → "226.8 g"), which only survives as an
+            // override — there is no standalone quantity left to carry it.
+            if (needed >= 0) {
+                if (quantitiesEquivalent(newQuant, overrideBase)) {
+                    return prev
+                        .filter(item => item.id !== mainItem?.id)
+                        .map(item => sources.some(s => s.id === item.id) ? clearOverride(item) : item);
+                }
+                return setOverride();
             }
 
             // Desired total is below what meals contribute. We can't shrink meal

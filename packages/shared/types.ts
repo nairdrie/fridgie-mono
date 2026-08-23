@@ -225,6 +225,12 @@ export interface Ingredient {
   quantity: string;
 }
 
+/**
+ * `'private'` keeps a recipe out of Explore, search and every other surface
+ * that shows strangers' recipes. It never affects the owner's own cookbook.
+ */
+export type RecipeVisibility = 'public' | 'private';
+
 export interface Recipe {
   id: string;
   name: string;
@@ -259,6 +265,35 @@ export interface Recipe {
   /** Set by the server; used to decide whether editing forks the recipe. */
   createdBy?: string;
   forkedFromId?: string;
+
+  /**
+   * Where this recipe came from, when it came from somewhere public.
+   *
+   * Set only by the importers, and only for sources that were already public
+   * on the open web — a TikTok, a recipe blog. The photo importer never sets
+   * it, because a photograph of someone's notebook has no public original to
+   * point at. That distinction is the whole rule Explore is built on: a recipe
+   * with a `sourceKey` may be surfaced to strangers with its origin credited,
+   * and one without it may not.
+   */
+  sourceUrl?: string;
+  /** Display name or @handle of whoever published `sourceUrl`. */
+  sourceAuthor?: string;
+  /**
+   * Server-DERIVED identity of the source, e.g. `tiktok:7311982...`.
+   *
+   * Never read from the request body — it is recomputed from `sourceUrl` on
+   * every write, because it is the key fifty independent imports of the same
+   * viral video collapse onto. A client that could choose it could choose
+   * which pile its recipe lands in.
+   */
+  sourceKey?: string;
+  /**
+   * Who may see this outside its owner's cookbook. Absent means `'public'`:
+   * every recipe written before this field existed was already readable from
+   * Explore, and pretending otherwise would retroactively hide them.
+   */
+  visibility?: RecipeVisibility;
 
   // ── Server-DERIVED, read-only ────────────────────────────────────────────
   // Synthesised per-request from `createdBy`; never stored. POST /api/recipe

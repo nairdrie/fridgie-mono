@@ -20,10 +20,10 @@ import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { displayQuantity, nextUnitInCycle } from '@/utils/quantity';
 import { scaleIngredients, servingsForScale, servingsRange, servingsScale } from '@/utils/servings';
-import { getRecipe, saveRecipe, updateGroup } from '../utils/api';
+import { getRecipe, hideRecipe, reportRecipe, saveRecipe, updateGroup, type ReportReason } from '../utils/api';
 import AddToMealPlanModal from './AddToMealPlanModal'; // Import the new component
 import CookMode from './CookMode';
 
@@ -61,7 +61,35 @@ interface ViewRecipeModalProps {
 
 // TODO: ensure forking is working. (if I add to meal plan or cookbook, we dont need to. unless i want to edit)
 // TODO: author, likes, comments
-// TODO: report recipe (for image or inappropriate content)
+
+/**
+ * The reasons offered, in the order they are shown.
+ *
+ * Deliberately short. A long menu makes people pick the first plausible entry
+ * rather than the true one, and every extra option costs more in mis-filed
+ * reports than it buys in precision. `other` is last so it is the fallback
+ * rather than the easy default.
+ */
+const REPORT_OPTIONS: { reason: ReportReason; label: string }[] = [
+    { reason: 'not-a-recipe', label: "This isn't a recipe" },
+    { reason: 'spam', label: 'Spam or advertising' },
+    { reason: 'offensive', label: 'Offensive or inappropriate' },
+    { reason: 'stolen-content', label: "Someone else's content" },
+    { reason: 'dangerous', label: 'Unsafe to cook' },
+    { reason: 'other', label: 'Something else' },
+];
+
+/** How a source URL is described once it is on screen. */
+const sourceLabel = (sourceUrl?: string): string => {
+    if (!sourceUrl) return 'the web';
+    try {
+        const host = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, '');
+        if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) return 'TikTok';
+        return host;
+    } catch {
+        return 'the web';
+    }
+};
 
 export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, onCookbookUpdate, scale = 1, inMealPlan = false }: ViewRecipeModalProps) {
     const [recipe, setRecipe] = useState<Recipe | null>(null);
@@ -253,6 +281,95 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
         }
     };
 
+    /** Whether the viewer is looking at somebody else's recipe. */
+    const isSomeoneElses = !!recipe && !!recipe.authorUid && recipe.authorUid !== user?.uid;
+
+    /**
+     * Open the original.
+     *
+     * Explore shows recipes imported from TikToks and recipe blogs, and the
+     * structured version on this screen is a reading of the original, not a
+     * replacement for it. Anyone deciding whether to trust the quantities
+     * should be one tap from the video they came out of.
+     */
+    const handleOpenSource = async () => {
+        if (!recipe?.sourceUrl) return;
+        const canOpen = await Linking.canOpenURL(recipe.sourceUrl).catch(() => false);
+        if (!canOpen) {
+            Alert.alert("Can't open that link", 'The original may have been taken down.');
+            return;
+        }
+        Linking.openURL(recipe.sourceUrl).catch(() => {
+            Alert.alert("Can't open that link", 'The original may have been taken down.');
+        });
+    };
+
+    const submitReport = async (reason: ReportReason) => {
+        if (!recipeId) return;
+        try {
+            await reportRecipe(recipeId, reason);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            // Deliberately does not say whether the recipe was taken down. The
+            // threshold is not the reporter's business, and telling them "2 more
+            // reports needed" is an invitation to go and find two more accounts.
+            Alert.alert('Thanks for telling us', "We'll take a look. You won't see this recipe again.");
+            onClose();
+        } catch (error) {
+            console.error('Report failed:', error);
+            Alert.alert('Report failed', 'Please try again in a moment.');
+        }
+    };
+
+    const handleReport = () => {
+        Alert.alert(
+            'Report this recipe',
+            "Tell us what's wrong with it.",
+            [
+                ...REPORT_OPTIONS.map((option) => ({
+                    text: option.label,
+                    onPress: () => submitReport(option.reason),
+                })),
+                { text: 'Cancel', style: 'cancel' as const },
+            ],
+        );
+    };
+
+    const handleHide = async () => {
+        if (!recipeId) return;
+        try {
+            await hideRecipe(recipeId);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onClose();
+        } catch (error) {
+            console.error('Hide failed:', error);
+            Alert.alert("Couldn't hide that", 'Please try again in a moment.');
+        }
+    };
+
+    /**
+     * The two escape hatches, kept apart.
+     *
+     * "Not for me" is one tap and affects nobody else. Reporting is a claim
+     * about the recipe that gets acted on, so it is worded as one and asks what
+     * is wrong before it does anything. Collapsing them into a single control
+     * would make the milder action carry the weight of the serious one.
+     *
+     * Only offered on other people's recipes: there is nothing to report about
+     * your own, and hiding one you own would take it out of your own Explore
+     * while leaving it in your cookbook, which reads as a bug.
+     */
+    const handleMorePress = () => {
+        Alert.alert(
+            recipe?.name ?? 'This recipe',
+            undefined,
+            [
+                { text: 'Not interested', onPress: handleHide },
+                { text: 'Report…', style: 'destructive', onPress: handleReport },
+                { text: 'Cancel', style: 'cancel' },
+            ],
+        );
+    };
+
     /**
      * Somebody else wrote this one. Editing it is allowed, but what actually
      * happens is a copy: the server forks a recipe saved by anyone other than
@@ -339,6 +456,16 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
                         <View style={styles.header}>
+                            {isSomeoneElses && (
+                                <TouchableOpacity
+                                    style={styles.moreButton}
+                                    onPress={handleMorePress}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Hide or report this recipe"
+                                >
+                                    <Ionicons name="ellipsis-horizontal" size={20} color="#fff" />
+                                </TouchableOpacity>
+                            )}
                             <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
                                 <Ionicons name="close-circle" size={32} color="#ccc" />
                             </TouchableOpacity>
@@ -377,6 +504,26 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                 { recipe.authorName &&
                                                   <Text style={styles.recipeAuthor}>by <Text style={styles.recipeAuthorName}>{recipe.authorName}</Text></Text>
                                                 }
+
+                                                {/* Where it actually came from, which is not the same as who saved
+                                                    it. Everything below the title is this app's reading of a video
+                                                    or a page somebody else published, and the credit for that
+                                                    belongs on the screen rather than in a database column. */}
+                                                {!!recipe.sourceUrl && (
+                                                    <TouchableOpacity
+                                                        style={styles.sourceRow}
+                                                        onPress={handleOpenSource}
+                                                        accessibilityRole="link"
+                                                        accessibilityLabel={`Open the original on ${sourceLabel(recipe.sourceUrl)}`}
+                                                    >
+                                                        <Ionicons name="link-outline" size={14} color={inkMuted} />
+                                                        <Text style={styles.sourceText} numberOfLines={1}>
+                                                            From {sourceLabel(recipe.sourceUrl)}
+                                                            {recipe.sourceAuthor ? ` · ${recipe.sourceAuthor}` : ''}
+                                                        </Text>
+                                                        <Ionicons name="open-outline" size={13} color={primary} />
+                                                    </TouchableOpacity>
+                                                )}
 
                                                 {!!recipe.description && (
                                                     <Text style={styles.recipeDescription}>{recipe.description}</Text>
@@ -682,8 +829,15 @@ const styles = StyleSheet.create({
     cookModeOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#fff' },
     modalContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '85%' },
     modalContent: { flex: 1, backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
-    header: { alignItems: 'flex-end', padding: 10, position: 'absolute', top: 0, right: 0, zIndex: 10 },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, position: 'absolute', top: 0, right: 0, zIndex: 10 },
     closeButton: { backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 16 },
+    // Matches the close button's scrim so the two read as one control cluster
+    // over whatever the recipe photo happens to be.
+    moreButton: {
+        width: 32, height: 32, borderRadius: 16,
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        justifyContent: 'center', alignItems: 'center',
+    },
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     recipeImage: { width: '100%', height: 220, backgroundColor: '#f0f0f0', resizeMode: 'cover' },
     bodyContainer: { paddingHorizontal: 20 },
@@ -691,6 +845,8 @@ const styles = StyleSheet.create({
     recipeTitle: { fontSize: 26, fontWeight: '700', letterSpacing: -0.4, color: ink, flex: 1, marginRight: 10 },
     recipeAuthor: { fontSize: 14, color: inkMuted },
     recipeAuthorName: { color: primary, fontWeight: '600' },
+    sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+    sourceText: { fontSize: 13, color: inkMuted, flexShrink: 1 },
     editButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: primary, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 },
     recipeDescription: { fontSize: 15, lineHeight: 23, color: inkMuted, marginTop: 12 },
 

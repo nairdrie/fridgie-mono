@@ -208,7 +208,7 @@ const ProfileHeader = ({
     authUser, 
     cookbook, 
     openPhotoModal, 
-    setNotificationsVisible, 
+    openNotifications, 
     setSettingsModalVisible,
     followerCount,
     followingCount
@@ -216,7 +216,7 @@ const ProfileHeader = ({
     authUser: User, 
     cookbook: Recipe[], 
     openPhotoModal: any, 
-    setNotificationsVisible: any, 
+    openNotifications: () => void, 
     setSettingsModalVisible: any,
     followerCount: number,
     followingCount: number,
@@ -224,7 +224,7 @@ const ProfileHeader = ({
     <>
         <View style={styles.profileContainer}>
             <View style={styles.headerButtons}>
-                <NotificationBell onPress={() => setNotificationsVisible(true)} />
+                <NotificationBell onPress={openNotifications} />
                 <TouchableOpacity onPress={() => setSettingsModalVisible(true)} style={styles.settingsButton}>
                     <Ionicons name="settings-outline" size={28} color="#000" />
                 </TouchableOpacity>
@@ -263,8 +263,15 @@ export default function UserProfile() {
     const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
     const [newPhotoUri, setNewPhotoUri] = useState<string | null>(null);
-    const { notifications, isLoading: isNotificationsLoading, acceptInvitation, declineInvitation } = useNotifications();
+    const { notifications, isLoading: isNotificationsLoading, acceptInvitation, declineInvitation, markAllRead } = useNotifications();
     const [isNotificationsVisible, setNotificationsVisible] = useState(false);
+
+    // Opening the list is what counts as seeing them: the badge clears here,
+    // while the notifications themselves stay on screen to be read.
+    const openNotifications = useCallback(() => {
+        setNotificationsVisible(true);
+        markAllRead();
+    }, [markAllRead]);
 
     const [profileData, setProfileData] = useState<{ followerCount: number, followingCount: number } | null>(null);
 
@@ -513,7 +520,7 @@ export default function UserProfile() {
                             authUser={authUser}
                             cookbook={cookbook}
                             openPhotoModal={openPhotoModal}
-                            setNotificationsVisible={setNotificationsVisible}
+                            openNotifications={openNotifications}
                             setSettingsModalVisible={setSettingsModalVisible}
                             followingCount={profileData?.followingCount || 0}
                             followerCount={profileData?.followerCount || 0}

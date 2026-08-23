@@ -56,6 +56,16 @@ export interface TikTokSource {
   /** The video's caption. Often the entire recipe on its own. */
   caption: string;
   author: string | null;
+  /**
+   * TikTok's numeric id for the video, from the rehydration blob.
+   *
+   * This is the only reliable way to identify a `vm.tiktok.com` short link,
+   * which carries no id until something follows the redirect — and it is what
+   * every import of one video is grouped by. Null when the page read failed.
+   */
+  videoId: string | null;
+  /** The creator's @handle, which is stable where their nickname is not. */
+  authorHandle: string | null;
   /** Speech, from TikTok's own subtitle track. Empty when the video has none. */
   transcript: string;
   photoURL: string | null;
@@ -255,6 +265,8 @@ export async function collectTikTokSource(url: string): Promise<TikTokSource> {
     // and having both means one source being down is not the end of the import.
     caption: (item?.desc || oembed?.caption || '').trim(),
     author: item?.author?.nickname || item?.author?.uniqueId || oembed?.author || null,
+    videoId: item?.id ? String(item.id) : null,
+    authorHandle: item?.author?.uniqueId ? String(item.author.uniqueId) : null,
     transcript,
     photoURL: item?.video?.cover || item?.video?.originCover || oembed?.photoURL || null,
     videoUrl: item?.video?.playAddr || item?.video?.downloadAddr || null,

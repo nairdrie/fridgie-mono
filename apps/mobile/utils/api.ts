@@ -374,6 +374,14 @@ export async function dismissNotification(notificationId: string): Promise<void>
 }
 
 /**
+ * Marks every unread notification for the current user as read, which is what
+ * clears the bell badge (the list endpoint only returns unread ones).
+ */
+export async function markNotificationsRead(): Promise<void> {
+    await authorizedFetch(`${BASE_URL}/notification/read`, { method: 'POST' });
+}
+
+/**
  * Searches for users by a query string.
  * @param query The search term (name, email, or phone).
  * @returns A promise that resolves to an array of matching user profiles.
@@ -731,6 +739,53 @@ export async function submitRecipeFeedback(
     body: JSON.stringify({ rating, feedback, mealId }),
   });
   return res.json();
+}
+
+/**
+ * The closed set of reasons a recipe can be reported for. Mirrors
+ * REPORT_REASONS in apps/api/utils/moderation.ts — the server rejects anything
+ * else, so the two lists have to move together.
+ */
+export type ReportReason =
+  | 'not-a-recipe'
+  | 'spam'
+  | 'offensive'
+  | 'stolen-content'
+  | 'dangerous'
+  | 'other';
+
+export interface ReportOutcome {
+  reportCount: number;
+  autoHidden: boolean;
+}
+
+/**
+ * Reports a recipe, which also hides it for the reporter.
+ *
+ * Distinct from `hideRecipe` on purpose: this one is a claim that nobody should
+ * see the recipe, and enough of them pull it from Explore automatically.
+ */
+export async function reportRecipe(
+  recipeId: string,
+  reason: ReportReason,
+  note?: string,
+): Promise<ReportOutcome> {
+  const res = await authorizedFetch(`${BASE_URL}/recipe/report/${recipeId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason, note }),
+  });
+  return res.json();
+}
+
+/** Hides a recipe from this user's Explore and search results. No claim attached. */
+export async function hideRecipe(recipeId: string): Promise<void> {
+  await authorizedFetch(`${BASE_URL}/recipe/hide/${recipeId}`, { method: 'POST' });
+}
+
+/** Undoes `hideRecipe`. */
+export async function unhideRecipe(recipeId: string): Promise<void> {
+  await authorizedFetch(`${BASE_URL}/recipe/hide/${recipeId}`, { method: 'DELETE' });
 }
 
 /**

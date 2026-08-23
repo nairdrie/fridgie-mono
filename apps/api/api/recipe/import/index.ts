@@ -309,6 +309,23 @@ route.post('/', async (c) => {
     if (stated) recipe.servings = stated;
     normalizeRecipeServings(recipe);
 
+    // --- WHERE IT CAME FROM ---
+    // Carried on the recipe from here to the save, so an imported dish can
+    // credit its origin and Explore can tell a public source from a private
+    // one. Everything the collector learned about the creator used to reach
+    // the model as prompt text and then be dropped on the floor.
+    //
+    // The canonical watch URL is preferred over whatever the user pasted:
+    // share links arrive as `vm.tiktok.com/ZGd.../?k=1` with a tracking tail,
+    // and two people sharing one video rarely paste the same string.
+    recipe.sourceUrl = tiktok?.videoId && tiktok.authorHandle
+      ? `https://www.tiktok.com/@${tiktok.authorHandle}/video/${tiktok.videoId}`
+      : url;
+    const attribution = tiktok
+      ? tiktok.author ?? (tiktok.authorHandle ? `@${tiktok.authorHandle}` : null)
+      : source?.author ?? null;
+    if (attribution) recipe.sourceAuthor = attribution;
+
     return c.json(recipe);
   } catch (error) {
     if (error instanceof ImportError) {

@@ -3,6 +3,7 @@ import {
     declineGroupInvitation,
     dismissNotification,
     getMyNotifications,
+    markNotificationsRead,
 } from '@/utils/api';
 import {
     createContext,
@@ -10,6 +11,7 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useMemo,
     useState,
 } from 'react';
 import { useAuth } from './AuthContext';
@@ -20,6 +22,7 @@ interface NotificationContextType {
     notificationCount: number;
     isLoading: boolean;
     fetchNotifications: () => Promise<void>;
+    markAllRead: () => Promise<void>;
     acceptInvitation: (invitationId: string, onSuccess?: () => void) => Promise<void>;
     declineInvitation: (invitationId: string) => Promise<void>;
 }
@@ -55,6 +58,31 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         fetchNotifications();
     }, [fetchNotifications]);
 
+    /**
+     * Clears the badge. Called when the user opens the notifications list: the
+     * items stay on screen for the rest of that session (marking read must not
+     * empty the list out from under them), but they count as seen, and the next
+     * fetch drops them because the list endpoint only returns unread ones.
+     */
+    const markAllRead = useCallback(async () => {
+        // Nothing unread means nothing to write — opening the modal repeatedly
+        // should not fire a request each time.
+        const wasUnread = new Set(notifications.filter(n => !n.read).map(n => n.id));
+        if (wasUnread.size === 0) return;
+        // Optimistic: the badge should go away on tap, not after a round trip.
+        setNotifications(prev => prev.map(n => (n.read ? n : { ...n, read: true })));
+        try {
+            await markNotificationsRead();
+        } catch (error) {
+            console.error("Failed to mark notifications read:", error);
+            // Put the badge back so it still reflects the server — but only for
+            // the ones this call touched, not any read earlier and successfully.
+            setNotifications(prev =>
+                prev.map(n => (wasUnread.has(n.id) ? { ...n, read: false } : n)),
+            );
+        }
+    }, [notifications]);
+
     const acceptInvitation = async (invitationId: string, onSuccess?: () => void) => {
         try {
             await acceptGroupInvitation(invitationId);
@@ -80,11 +108,19 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         setNotifications(prev => prev.filter(n => n.id !== notificationId));
     };
 
+    // Unread only: read notifications stay in the list for the current session
+    // but must not keep the badge lit.
+    const notificationCount = useMemo(
+        () => notifications.filter(n => !n.read).length,
+        [notifications],
+    );
+
     const value = {
         notifications,
-        notificationCount: notifications.length,
+        notificationCount,
         isLoading,
         fetchNotifications,
+        markAllRead,
         acceptInvitation,
         declineInvitation,
     };

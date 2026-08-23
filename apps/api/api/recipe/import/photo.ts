@@ -82,6 +82,13 @@ route.post('/', async (c) => {
 
     // A photo of a page is not a photo of the dish; never let one through.
     recipe.photoURL = null;
+
+    // The one importer that produces no `sourceUrl`, and the reason recipes
+    // carry a visibility at all. What arrives here is a photograph of a page —
+    // a handwritten card, a family cookbook, a friend's scribbled note — with
+    // no public original behind it. Nothing on this path may reach Explore
+    // unless its owner later says so.
+    recipe.visibility = 'private';
     recipe.ingredients = normalizeIngredients(recipe.ingredients);
     return c.json(recipe);
   } catch (error) {

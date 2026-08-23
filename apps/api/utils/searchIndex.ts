@@ -61,10 +61,15 @@ async function loadRecipes() {
   // instructions are deliberately not fetched — they are the bulk of a recipe
   // document and nobody searches for a numbered step.
   const snap = await fs.collection('recipes')
-    .select('name', 'description', 'tags', 'photoURL', 'ingredients')
+    .select('name', 'description', 'tags', 'photoURL', 'ingredients', 'visibility')
     .get();
 
-  return snap.docs.map((d) => {
+  return snap.docs.filter((d) => {
+    // Search shows other people's recipes, so it answers to the same rule
+    // Explore does. Absent means public: everything written before the field
+    // existed was already findable here.
+    return (d.data() ?? {}).visibility !== 'private';
+  }).map((d) => {
     const data = d.data() ?? {};
     const ingredients = Array.isArray(data.ingredients)
       ? data.ingredients.map((i: any) => String(i?.name ?? '')).filter(Boolean).join(' ')

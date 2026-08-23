@@ -22,10 +22,26 @@ export interface SourceRecipe {
   ingredients: string[];
   instructions: string[];
   photoURL: string | null;
+  /** Byline as the site published it, for crediting the import. */
+  author: string | null;
   /** `keywords`, `recipeCategory` and `recipeCuisine` merged — all tag candidates. */
   keywords: string[];
   recipeYield: string | null;
   totalTime: string | null;
+}
+
+/**
+ * schema.org `author` is a Person/Organization node on most sites, a bare
+ * string on some, and an array when a post has two bylines. Only the first
+ * name is kept — this credits a recipe, it does not catalogue a masthead.
+ */
+function authorName(raw: unknown): string | null {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof first === 'string') return plain(first) || null;
+  if (first && typeof first === 'object') {
+    return plain((first as Record<string, unknown>).name) || null;
+  }
+  return null;
 }
 
 /** Nested containers are walked, but a hostile or cyclic document should not hang us. */
@@ -206,6 +222,7 @@ export function extractRecipeJsonLd(html: string): SourceRecipe | null {
       ingredients,
       instructions,
       photoURL: firstImageUrl(node.image),
+      author: authorName(node.author),
       keywords: [
         ...toKeywordList(node.keywords),
         ...toKeywordList(node.recipeCategory),

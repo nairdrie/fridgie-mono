@@ -3,6 +3,7 @@ import { FieldPath } from 'firebase-admin/firestore';
 import { fs } from '@/utils/firebase';
 import { auth } from '@/middleware/auth';
 import { searchRecipes, searchUsers } from '@/utils/searchIndex';
+import { hiddenRecipeIds } from '@/utils/moderation';
 
 const route = new Hono();
 route.use('*', auth);
@@ -28,10 +29,15 @@ route.get('/', async (c) => {
   }
 
   try {
-    const [recipes, users] = await Promise.all([
-      searchRecipes(query, 10),
+    // Over-fetch so that hiding a result does not leave a short page. The index
+    // has already dropped private recipes; this drops the ones this particular
+    // viewer hid or reported, which is per-user and cannot live in the index.
+    const [candidates, users, hidden] = await Promise.all([
+      searchRecipes(query, 20),
       searchUsers(query, 3),
+      hiddenRecipeIds(c.get('uid') as string),
     ]);
+    const recipes = candidates.filter((r) => !hidden.has(r.id)).slice(0, 10);
 
     // Follower and recipe counts live on the Firestore user doc, not on the
     // searchable record, so they are merged in for the handful of hits we
