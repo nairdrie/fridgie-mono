@@ -26,6 +26,7 @@ import { scaleIngredients, servingsForScale, servingsRange, servingsScale } from
 import { getRecipe, hideRecipe, reportRecipe, saveRecipe, updateGroup, type ReportReason } from '../utils/api';
 import AddToMealPlanModal from './AddToMealPlanModal'; // Import the new component
 import CookMode from './CookMode';
+import InstructionText from './InstructionText';
 
 interface ViewRecipeModalProps {
     isVisible: boolean;
@@ -712,7 +713,10 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                     </View>
                                                     {index < recipe.instructions.length - 1 && <View style={styles.stepConnector} />}
                                                 </View>
-                                                <Text style={styles.stepText}>{item}</Text>
+                                                {/* Prose, but any oven temperature in it is tappable to
+                                                    read in the other scale — the ingredient list's unit
+                                                    conversion, brought to the steps. */}
+                                                <InstructionText step={item} style={styles.stepText} />
                                             </View>
                                         </View>
                                     )}

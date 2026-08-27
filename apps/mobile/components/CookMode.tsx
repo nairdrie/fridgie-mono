@@ -25,6 +25,7 @@
 // point is that the user can walk away.
 
 import { Ingredient, Recipe } from '@/types/types';
+import InstructionText from './InstructionText';
 import { findStepTimers, formatCountdown, formatDuration } from '@/utils/cookTimers';
 import { displayQuantity, nextUnitInCycle } from '@/utils/quantity';
 import { scaleIngredients } from '@/utils/servings';
@@ -278,7 +279,7 @@ export default function CookMode({ recipe, scale = 1, onClose }: CookModeProps) 
                     ? <Ionicons name="checkmark" size={16} color="#fff" />
                     : <Text style={styles.stepNumber}>{index + 1}</Text>}
                 </View>
-                <Text style={[styles.stepText, isDone && styles.stepTextDone]}>{step}</Text>
+                <InstructionText step={step} style={[styles.stepText, isDone && styles.stepTextDone]} />
               </View>
 
               {stepTimers[index]!.length > 0 && (
