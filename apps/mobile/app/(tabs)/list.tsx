@@ -1060,6 +1060,7 @@ export default function HomeScreen() {
                 { selectedView == ListView.GroceryList ? (
                     <GroceryListView
                         items={items}
+                        meals={meals}
                         setItems={setItems}
                         editingId={editingId}
                         setEditingId={setEditingId}
