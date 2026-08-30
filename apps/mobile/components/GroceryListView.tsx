@@ -12,6 +12,7 @@ import {
 } from '@/utils/quantity';
 import { nextListRank, safeParseRank } from '@/utils/rank';
 import { isStapleRow, stapleKey } from '@/utils/staples';
+import { dropEmptiedSections } from '@fridgie/shared/listSections';
 import { hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -490,14 +491,33 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         // Deletes every source, including meal ingredients — checking and
         // deleting intentionally act on the whole aggregate.
         const sourceIdsToDelete = new Set(aggItem.sourceIds);
-        const updatedItems = items.filter(item => !sourceIdsToDelete.has(item.id));
+        // Taking the last row out of an aisle would leave its heading standing
+        // over nothing. The render can't drop that on its own — a heading with
+        // no rows under it is also what one the user has just typed looks like —
+        // so it's dropped here, at the edit that emptied it, the same way
+        // deleting a meal is (see dropEmptiedSections).
+        const updatedItems = dropEmptiedSections(
+            items,
+            items.filter(item => !sourceIdsToDelete.has(item.id)),
+        );
         setItems(updatedItems);
         markDirty();
         if (focusPrevious && isKeyboardVisible) {
+            const survives = new Set(updatedItems.map(i => i.id));
             const currentIndex = aggregatedItems.findIndex(i => i.id === aggItem.id);
-            const prevItem = aggregatedItems[Math.max(0, currentIndex - 1)];
+            // Nearest row above that outlived the delete. A heading emptied by
+            // this delete is gone from the list now, so stepping onto it would
+            // drop the caret into a row that no longer exists — skip past it to
+            // whatever survived.
+            let prevItem: AggregatedItem | Item | undefined;
+            for (let i = currentIndex - 1; i >= 0; i--) {
+                const candidate = aggregatedItems[i];
+                if (candidate.isSection && !survives.has(candidate.id)) continue;
+                prevItem = candidate;
+                break;
+            }
 
-            if (prevItem && prevItem.id !== aggItem.id) {
+            if (prevItem) {
                 if ('sourceIds' in prevItem) {
                     setEditingId((prevItem as AggregatedItem).sourceIds[0]);
                 } else if (prevItem.isSection) {
@@ -612,11 +632,21 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             const clearOverride = (item: Item): Item =>
                 ({ ...item, overrideQuantity: undefined, overrideBase: undefined });
 
+            // Drops the standalone row and clears any override off the meal
+            // sources. If that row was the last thing in its aisle — the meal
+            // rows are filed under other headings — the bare heading it leaves
+            // behind goes too, the same way deleting the row outright does.
+            const withoutStandalone = (): Item[] =>
+                dropEmptiedSections(
+                    prev,
+                    prev
+                        .filter(item => item.id !== mainItem?.id)
+                        .map(item => sources.some(s => s.id === item.id) ? clearOverride(item) : item),
+                );
+
             // Empty input: drop the standalone item; meal-driven quantities remain.
             if (!newQuant) {
-                return prev
-                    .filter(item => item.id !== mainItem?.id)
-                    .map(item => sources.some(s => s.id === item.id) ? clearOverride(item) : item);
+                return withoutStandalone();
             }
 
             // Snapshot of the quantities the override would be replacing
@@ -692,9 +722,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             // override — there is no standalone quantity left to carry it.
             if (needed >= 0) {
                 if (quantitiesEquivalent(newQuant, overrideBase)) {
-                    return prev
-                        .filter(item => item.id !== mainItem?.id)
-                        .map(item => sources.some(s => s.id === item.id) ? clearOverride(item) : item);
+                    return withoutStandalone();
                 }
                 return setOverride();
             }

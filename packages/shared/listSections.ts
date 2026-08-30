@@ -7,9 +7,10 @@
 //
 // A section is a row like any other, and it holds its items by POSITION: a row
 // belongs to the nearest heading above it in rank order. Nothing points from a
-// heading back down at what it contains, so removing rows — deleting a meal,
-// which takes every ingredient it put on the list with it — cannot on its own
-// take the heading with them. What is left is "Produce" with nothing under it.
+// heading back down at what it contains, so removing rows — deleting a meal
+// takes every ingredient it put on the list, deleting a row takes just that one
+// — cannot on its own take the heading with them. What is left is "Produce"
+// with nothing under it.
 //
 // The grocery view already hides a heading whose rows have all been checked
 // off, but it deliberately keeps one with NO rows at all: that is what a
