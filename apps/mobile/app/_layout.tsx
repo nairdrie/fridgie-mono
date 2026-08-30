@@ -11,6 +11,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { CookbookProvider } from '@/context/CookbookContext';
 import { ListProvider } from '@/context/ListContext';
 import { NotificationProvider } from "@/context/NotificationContext";
+import { MEAL_RATING_ENABLED } from '@/constants/features';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -80,7 +81,10 @@ export default function RootLayout() {
               <CookbookProvider>
                 <RootView>
                   <StatusBar style="dark" />
-                  <MealRatingNotificationRouter />
+                  {/* Meal rating is switched off for now — see
+                      constants/features.ts. Leaving it unmounted means a
+                      tapped reminder routes nowhere. */}
+                  {MEAL_RATING_ENABLED && <MealRatingNotificationRouter />}
                   {/* The Stack component defines the navigator */}
                   <Stack>
                     <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
