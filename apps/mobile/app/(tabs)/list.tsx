@@ -39,6 +39,7 @@ import { isOnline } from '../../utils/connectivity';
 import { getListSyncEngine, type ListSyncEngine } from '../../utils/listSync';
 import { stampEdits } from '../../utils/stamp';
 import { cancelMealRatingReminder, scheduleMealRatingReminder } from '../../utils/mealReminders';
+import { MEAL_RATING_ENABLED } from '@/constants/features';
 import { parseWeekStart } from '../../utils/date';
 import { dropEmptiedSections } from '@fridgie/shared/listSections';
 import { nextListRank, sanitizeListOrders } from '../../utils/rank';
@@ -956,6 +957,9 @@ export default function HomeScreen() {
 
     useFocusEffect(
         useCallback(() => {
+            // Meal rating is switched off for now (see constants/features.ts):
+            // don't prompt for past unrated meals on app open.
+            if (!MEAL_RATING_ENABLED) return;
             // Immediately return if the check has already been done for this session
             if (hasCheckedForUnratedMeals.current) {
                 return;

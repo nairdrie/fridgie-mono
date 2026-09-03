@@ -1,6 +1,7 @@
 // context/AuthContext.tsx
 import { Group, UserProfile } from '@/types/types';
 import { getGroups, loginWithToken, registerForPushNotificationsAsync } from '@/utils/api';
+import { PUSH_NOTIFICATIONS_ENABLED } from '@/constants/features';
 import { readCachedGroups, writeCachedGroups } from '@/utils/listCache';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, db } from '@/utils/firebase';
@@ -88,7 +89,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(authUser);
 
       if (authUser) {
-        registerForPushNotificationsAsync();
+        // Push registration (permission prompt + token save) is switched off
+        // for now — see constants/features.ts.
+        if (PUSH_NOTIFICATIONS_ENABLED) registerForPushNotificationsAsync();
         if(authUser.isAnonymous && !authUser.photoURL) {
           const randomPhotoURL = defaultAvatars[Math.floor(Math.random() * defaultAvatars.length)];
           await updateProfile(authUser, {

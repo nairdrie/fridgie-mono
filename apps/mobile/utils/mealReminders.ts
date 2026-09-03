@@ -14,6 +14,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import type { DayOfWeek } from '@/types/types';
+import { MEAL_RATING_ENABLED } from '@/constants/features';
 import { parseWeekStart } from './date';
 
 const DAY_INDEX: Record<DayOfWeek, number> = {
@@ -84,6 +85,12 @@ interface ScheduleArgs {
 export async function scheduleMealRatingReminder({
   listId, mealId, recipeId, mealName, weekStart, dayOfWeek,
 }: ScheduleArgs): Promise<void> {
+  // Meal rating is switched off for now (see constants/features.ts). Bail
+  // before scheduling so no "How was dinner?" reminder is ever queued. Cancel
+  // stays live below so a device carrying a reminder from before can still
+  // shed it on the next edit.
+  if (!MEAL_RATING_ENABLED) return;
+
   const date = mealReminderDate(weekStart, dayOfWeek);
 
   // Backfilling a day that has already passed shouldn't fire a notification
