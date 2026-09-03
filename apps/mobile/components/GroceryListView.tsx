@@ -1,7 +1,8 @@
 // components/GroceryListView.tsx
 
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
-import { Item } from '@/types/types';
+import { Item, Meal } from '@/types/types';
+import { mealNameIndex, mealNamesForItems } from '@/utils/mealTags';
 import {
     aggregateQuantities,
     convert,
@@ -13,8 +14,9 @@ import {
 import { nextListRank, safeParseRank } from '@/utils/rank';
 import { isStapleRow, stapleKey } from '@/utils/staples';
 import { dropEmptiedSections } from '@fridgie/shared/listSections';
-import { hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
+import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
@@ -36,7 +38,16 @@ import SwipeToDeleteRow from './SwipeToDeleteRow';
 type AggregatedItem = Item & {
  sourceIds: string[];
  totalQuantity: string;
+ /**
+  * The distinct meals this row's ingredients were required for, by name. Empty
+  * for a row typed straight onto the list. Shown in grey beside the item as a
+  * backlink to the meal plan — see `showMealTags`.
+  */
+ mealNames: string[];
 };
+
+/** Remembers the show/which-meal toggle across app launches. */
+const SHOW_MEAL_TAGS_KEY = 'showMealTags';
 
 /** Stable identity, so the split memo doesn't re-run on every render. */
 const EMPTY_STAPLES: ReadonlySet<string> = new Set();
@@ -93,6 +104,12 @@ export interface GroceryListHandle {
 // --- COMPONENT PROPS ---
 interface GroceryListViewProps {
   items: Item[];
+  /**
+   * This week's meals, used only to name the backlink beside each item — which
+   * meal put it on the list. Optional and defaulted so a list with no plan (or
+   * one still loading) simply shows no tags.
+   */
+  meals?: Meal[];
   setItems: React.Dispatch<React.SetStateAction<Item[]>>;
   editingId: string;
   setEditingId: React.Dispatch<React.SetStateAction<string>>;
@@ -118,6 +135,7 @@ interface GroceryListViewProps {
 
 const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     items,
+    meals,
     setItems,
     editingId,
     setEditingId,
@@ -135,6 +153,29 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     const [showChecked, setShowChecked] = useState(false);
     // Same reasoning as the checked section: filed away, opened on request.
     const [showStaples, setShowStaples] = useState(false);
+
+    // Whether to show, beside each item, which meal put it on the list. On by
+    // default so the link to the plan is there to be seen, and remembered across
+    // launches once the user has an opinion either way — a deliberate display
+    // preference, unlike the two collapse states above which reset each session.
+    const [showMealTags, setShowMealTags] = useState(true);
+    useEffect(() => {
+        AsyncStorage.getItem(SHOW_MEAL_TAGS_KEY)
+            .then(stored => { if (stored !== null) setShowMealTags(stored === 'true'); })
+            .catch(() => {});
+    }, []);
+    const toggleMealTags = useCallback(() => {
+        Haptics.selectionAsync().catch(() => {});
+        setShowMealTags(prev => {
+            const next = !prev;
+            AsyncStorage.setItem(SHOW_MEAL_TAGS_KEY, String(next)).catch(() => {});
+            return next;
+        });
+    }, []);
+
+    // Meal id → name, rebuilt only when the plan changes. Kept out of the
+    // aggregation memo below so renaming a meal is the only thing that reruns it.
+    const mealNameLookup = useMemo(() => mealNameIndex(meals ?? []), [meals]);
 
     /**
      * The group the row under the cursor belonged to when its edit began.
@@ -211,6 +252,9 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 id: `agg-${sources.map(s => s.id).sort().join('-')}`,
                 sourceIds: sources.map(s => s.id),
                 totalQuantity,
+                // The meals that contributed to this row, deduped across its
+                // sources — one row can gather an ingredient from several meals.
+                mealNames: mealNamesForItems(sources, mealNameLookup),
                 checked: sources.every(s => s.checked),
                 // `some`, not `every`: one source saying "we're out of this"
                 // is enough to want the row on the list, and promoting sets it
@@ -226,7 +270,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         // though the memo never names it — which is also why the rule below
         // cannot see that it is used.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [items, editingId]);
+    }, [items, editingId, mealNameLookup]);
 
     /**
      * The list as it is actually shown: everything still to be bought, and
@@ -284,6 +328,14 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         staple.reverse();
         return { openRows: open, checkedRows: checked, stapleRows: staple };
     }, [aggregatedItems, editingId, staples]);
+
+    // Whether anything on the list came from a meal at all. The show-meals
+    // toggle is only offered when it would change something — a list of
+    // hand-typed rows has no backlinks to reveal.
+    const hasMealLinks = useMemo(
+        () => aggregatedItems.some(row => !!(row as AggregatedItem).mealNames?.length),
+        [aggregatedItems]
+    );
 
     // A staple row does NOT count towards keeping its heading on screen: an
     // aisle whose only rows are things you already have is an empty aisle, and
@@ -835,13 +887,28 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                         </TouchableOpacity>
                     )}
 
-                    <TextInput
-                        ref={assignRef(baseItemId)} value={aggItem.text} style={[styles.editInput, aggItem.checked && styles.checked]}
-                        onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => setEditingId(baseItemId)}
-                        onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => submitRow(aggItem)}
-                        onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && aggItem.text === '') { deleteItem(aggItem, true); } }}
-                        returnKeyType="next" blurOnSubmit={false}
-                    />
+                    {/* Text and its backlink stack in a column so the meal
+                        name sits directly under the item rather than fighting
+                        the input for the row's width. The input carries the
+                        column's full width without `flex`, so tapping anywhere
+                        along the row still lands in it. */}
+                    <View style={styles.itemBody}>
+                        <TextInput
+                            ref={assignRef(baseItemId)} value={aggItem.text} style={[styles.itemInput, aggItem.checked && styles.checked]}
+                            onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => setEditingId(baseItemId)}
+                            onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => submitRow(aggItem)}
+                            onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && aggItem.text === '') { deleteItem(aggItem, true); } }}
+                            returnKeyType="next" blurOnSubmit={false}
+                        />
+                        {showMealTags && aggItem.mealNames.length > 0 && (
+                            <View style={styles.mealTagRow}>
+                                <Ionicons name="restaurant-outline" size={11} color={inkFaint} style={styles.mealTagIcon} />
+                                <Text style={styles.mealTagText} numberOfLines={1}>
+                                    {aggItem.mealNames.join(', ')}
+                                </Text>
+                            </View>
+                        )}
+                    </View>
 
                     {isEditing && (
                         <TouchableOpacity onPressIn={() => deleteItem(aggItem, true)} style={styles.clearButton}>
@@ -851,7 +918,10 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 </View>
             </SwipeToDeleteRow>
         );
-    }, [items, editingId, aggregatedItems]);
+        // `showMealTags` is read inside a row, so it belongs here: without it the
+        // memoized row keeps a stale closure and the tags don't appear or vanish
+        // until something else (an edit, a check) forces the list to redraw.
+    }, [items, editingId, aggregatedItems, showMealTags]);
 
     const renderItem = useCallback(
         ({ item, drag, isActive }: RenderItemParams<AggregatedItem | Item>) => renderRow(item, drag, isActive),
@@ -883,6 +953,26 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     {...keyboard.draggableProps}
                     data={openRows} onDragEnd={applyDragOrder}
                     keyExtractor={item => item.id} renderItem={renderItem as any}
+                    // Sits above the first aisle so the backlinks can be turned
+                    // off when they get in the way and back on when they help.
+                    // Only when there is a meal on the list to link back to.
+                    ListHeaderComponent={hasMealLinks ? (
+                        <View style={styles.mealToggleHeader}>
+                            <Pressable
+                                style={[styles.mealToggle, showMealTags && styles.mealToggleOn]}
+                                onPress={toggleMealTags}
+                                accessibilityRole="switch"
+                                accessibilityState={{ checked: showMealTags }}
+                                accessibilityLabel="Show which meal each item is for"
+                                hitSlop={8}
+                            >
+                                <Ionicons name="restaurant-outline" size={13} color={showMealTags ? primary : inkMuted} />
+                                <Text style={[styles.mealToggleText, showMealTags && styles.mealToggleTextOn]}>
+                                    {showMealTags ? 'Meals shown' : 'Show meals'}
+                                </Text>
+                            </Pressable>
+                        </View>
+                    ) : null}
                     keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
                     initialNumToRender={20} maxToRenderPerBatch={10} windowSize={10}
                     // Reordering is a vertical gesture, so say so: without this
@@ -1064,6 +1154,20 @@ const styles = StyleSheet.create({
     checkedCount: { fontSize: 13, color: inkFaint },
     checkbox: { width: 24, height: 24, marginRight: 10, borderWidth: 1.5, borderColor: '#cfd4cb', alignItems: 'center', justifyContent: 'center', borderRadius: 7 },
     editInput: { fontSize: 16, flex: 1, paddingVertical: 2, color: ink },
+    // The item row's own input. No `flex` because its column parent (itemBody)
+    // owns the width; a column child with flex:1 would instead stretch tall.
+    itemBody: { flex: 1, justifyContent: 'center' },
+    itemInput: { fontSize: 16, paddingVertical: 2, color: ink },
+    // The backlink line under an item: which meal(s) put it on the list.
+    mealTagRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
+    mealTagIcon: { marginTop: 0.5 },
+    mealTagText: { flex: 1, fontSize: 12, color: inkFaint },
+    // The show/hide-backlinks control above the list.
+    mealToggleHeader: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 15, paddingTop: 8, paddingBottom: 2, backgroundColor: '#fff' },
+    mealToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: hairline, backgroundColor: '#fff' },
+    mealToggleOn: { borderColor: 'transparent', backgroundColor: accentSoft },
+    mealToggleText: { fontSize: 12, fontWeight: '600', color: inkMuted },
+    mealToggleTextOn: { color: primary },
     checked: { textDecorationLine: 'line-through', color: inkFaint },
     clearButton: { paddingHorizontal: 8, paddingVertical: 4, width: 35, alignItems: 'center' },
     clearText: { fontSize: 16, color: inkFaint, paddingRight: 5 },
