@@ -5,7 +5,7 @@ import { readCachedGroups, writeCachedGroups } from '@/utils/listCache';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, db } from '@/utils/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter, useSegments } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { onAuthStateChanged, signInAnonymously, updateProfile, User } from 'firebase/auth';
 import { goOnline, onDisconnect, onValue, ref, serverTimestamp, set } from 'firebase/database'; // ⬅️ Add serverTimestamp
 import React, { useCallback, useRef, useMemo, createContext, useContext, useEffect, useState } from 'react';
@@ -385,7 +385,7 @@ export const useAuth = () => useContext(AuthContext);
 
 export function useProtectedRoute() {
     const { user, loading } = useAuth(); // Assuming you have an 'isInitialized' state
-    const segments = useSegments();
+    const pathname = usePathname();
     const router = useRouter();
 
     useEffect(() => {
@@ -394,11 +394,21 @@ export function useProtectedRoute() {
             return;
         }
 
-        const inAppGroup = segments[0] === '(tabs)';
-
-        // If the user is signed in and is trying to access an auth screen, redirect to the app.
-        if (user && !inAppGroup) {
+        // This hook lives on the entry route ('/'), which stays MOUNTED beneath
+        // whatever gets pushed on top of it — so `pathname` here tracks the
+        // app-wide active route, and this effect keeps firing after the user has
+        // navigated away from '/'. Only redirect while '/' is itself the active
+        // route; keying off "any route outside (tabs)" swept up legitimate
+        // top-level screens like /rate-meal and bounced the user off them.
+        //
+        // That bounce is exactly the meal-rating notification loop: tapping the
+        // notification from a cold start pushes /rate-meal above this still-
+        // mounted entry route, this effect replaced it with /list, the list's
+        // unrated-meal check (app/(tabs)/list.tsx) re-opened /rate-meal, and the
+        // two fought in an endless slide-in/slide-out — the rating screen never
+        // settled.
+        if (user && pathname === '/') {
             router.replace('/list');
         }
-    }, [user, segments, loading, router]); // Re-run effect when these change
+    }, [user, pathname, loading, router]); // Re-run effect when these change
 }
