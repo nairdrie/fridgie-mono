@@ -115,3 +115,52 @@ describe('dropEmptiedSections', () => {
     expect(sketch(withoutMeal(items, 'roast'))).toEqual(['#Produce', 'apples'])
   })
 })
+
+/**
+ * The grocery view's own row delete — a swipe, the ✕, a backspace, or clearing
+ * a standalone quantity to nothing. Unlike a meal delete it never runs the
+ * server's re-file, so the empty aisle it can leave behind has to be taken here
+ * too. It removes every source of the row on screen, meal ingredients included.
+ */
+const withoutRows = <T extends SectionRow & { text: string }>(
+  rows: readonly T[],
+  ...texts: string[]
+): T[] => {
+  const gone = new Set(texts)
+  const removed = new Set(rows.filter((r) => !r.isSection && gone.has(r.text)).map((r) => r.id))
+  return dropEmptiedSections(rows, rows.filter((r) => !removed.has(r.id)))
+}
+
+describe('dropEmptiedSections on a single-row delete', () => {
+  test('drops an aisle when its last row is deleted', () => {
+    const items = list('#Produce', 'apples', '#Bakery', 'bread')
+
+    expect(sketch(withoutRows(items, 'apples'))).toEqual(['#Bakery', 'bread'])
+  })
+
+  test('keeps an aisle that still has a row after the delete', () => {
+    const items = list('#Produce', 'apples', 'bananas')
+
+    expect(sketch(withoutRows(items, 'apples'))).toEqual(['#Produce', 'bananas'])
+  })
+
+  test('drops an aisle whose last row was a meal ingredient', () => {
+    // Deleting the row on screen takes its meal sources with it, so the aisle
+    // that only that meal was using is left bare — and goes.
+    const items = list('#Meat & Poultry', 'chicken@roast', '#Produce', 'potatoes')
+
+    expect(sketch(withoutRows(items, 'chicken'))).toEqual(['#Produce', 'potatoes'])
+  })
+
+  test('leaves a heading the user has just typed and not filled in yet', () => {
+    const items = list('#Produce', 'apples', '#Party Snacks')
+
+    expect(sketch(withoutRows(items, 'apples'))).toEqual(['#Party Snacks'])
+  })
+
+  test('keeps an aisle whose only remaining row is checked off', () => {
+    const items = list('#Produce', 'apples', 'bananas!')
+
+    expect(sketch(withoutRows(items, 'apples'))).toEqual(['#Produce', 'bananas'])
+  })
+})
