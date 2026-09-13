@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "fridgie",
+    "name": "Fridgie",
     "slug": "fridgie",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -46,7 +46,7 @@
         {
           "appID": "776186408706339",
           "clientToken": "REPLACE_WITH_FACEBOOK_CLIENT_TOKEN",
-          "displayName": "fridgie",
+          "displayName": "Fridgie",
           "scheme": "fb776186408706339",
           "isAutoInitEnabled": false,
           "autoLogAppEventsEnabled": false,
