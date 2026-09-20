@@ -1,6 +1,8 @@
+import { AmbientBackground, GlassPressable, GlassSurface } from '@/components/ui/Glass';
+import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
-import { ActivityIndicator, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { primary } from '@/utils/styles';
 
 /**
@@ -25,14 +27,16 @@ export default function ConnectionError({
   retrying?: boolean;
 }) {
   return (
+    <AmbientBackground>
     <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
-        <Ionicons name="cloud-offline-outline" size={64} color="#c2c2c2" />
+      <Animated.View entering={FadeInDown.duration(500).reduceMotion(ReduceMotion.System)} style={styles.container}>
+        <View style={styles.iconHalo}><GlassSurface style={styles.iconCard}><Ionicons name="cloud-offline-outline" size={42} color={primary} /></GlassSurface></View>
+        <Text style={styles.eyebrow}>A MOMENT TO RECONNECT</Text>
         <Text style={styles.title}>Can&apos;t reach Fridgie</Text>
         <Text style={styles.body}>
           Your lists are safe. Check your connection and try again.
         </Text>
-        <TouchableOpacity
+        <GlassPressable
           style={[styles.button, retrying && styles.buttonDisabled]}
           onPress={onRetry}
           disabled={retrying}
@@ -41,21 +45,22 @@ export default function ConnectionError({
           {retrying
             ? <ActivityIndicator color="#fff" />
             : <Text style={styles.buttonText}>Try again</Text>}
-        </TouchableOpacity>
-      </View>
+        </GlassPressable>
+      </Animated.View>
     </SafeAreaView>
+    </AmbientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  title: { fontSize: 22, fontWeight: '700', color: '#333', marginTop: 20 },
-  body: { fontSize: 15, color: '#777', textAlign: 'center', marginTop: 8, lineHeight: 21 },
-  button: {
-    marginTop: 28, backgroundColor: primary, borderRadius: 25,
-    paddingVertical: 13, paddingHorizontal: 40, minWidth: 160, alignItems: 'center',
-  },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  safe: { flex: 1, backgroundColor: 'transparent' },
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 34 },
+  iconHalo: { width: 152, height: 152, borderRadius: 76, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(220,237,226,0.65)', marginBottom: 35 },
+  iconCard: { width: 100, height: 100, borderRadius: 33, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-8deg' }] },
+  eyebrow: { fontSize: 10, fontWeight: '700', letterSpacing: 1.5, color: '#78857D', marginBottom: 11 },
+  title: { fontSize: 28, fontWeight: '700', letterSpacing: -0.9, color: '#173F35', textAlign: 'center' },
+  body: { fontSize: 15, color: '#78857D', textAlign: 'center', marginTop: 12, lineHeight: 23, maxWidth: 280 },
+  button: { marginTop: 30, backgroundColor: primary, borderRadius: 20, paddingVertical: 17, paddingHorizontal: 42, minWidth: 180, alignItems: 'center', shadowColor: '#173F35', shadowOffset: { width: 0, height: 7 }, shadowRadius: 14, shadowOpacity: 0.12 },
+  buttonDisabled: { opacity: 0.5 },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

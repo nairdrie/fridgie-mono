@@ -1,31 +1,36 @@
-// components/NotificationBell.tsx
+import { GlassPressable, GlassSurface } from '@/components/ui/Glass';
 import { useNotifications } from '@/context/NotificationContext';
-import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 interface NotificationBellProps {
   onPress: () => void;
 }
 
 export default function NotificationBell({ onPress }: NotificationBellProps) {
-    const { notificationCount } = useNotifications();
+  const { notificationCount } = useNotifications();
+  const label = notificationCount > 0
+    ? `Notifications, ${notificationCount} unread ${notificationCount === 1 ? 'update' : 'updates'}`
+    : 'Notifications, all caught up';
 
-    return (
-        <TouchableOpacity onPress={onPress} style={styles.container}>
-            <Ionicons name="notifications-outline" size={28} color="#000" />
-            {notificationCount > 0 && (
-                <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
-                </View>
-            )}
-        </TouchableOpacity>
-    );
+  return (
+    <GlassSurface style={styles.glass}>
+      <GlassPressable onPress={onPress} style={styles.container} accessibilityLabel={label}>
+        <Ionicons name="notifications-outline" size={22} color="#173F35" />
+        {notificationCount > 0 && (
+          <View style={styles.badge} accessible={false}>
+            <Text style={styles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
+          </View>
+        )}
+      </GlassPressable>
+    </GlassSurface>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: { padding: 5 },
-    badge: { position: 'absolute', top: 0, right: 0, backgroundColor: primary, borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
-    badgeText: { color: 'white', fontSize: 12, fontWeight: 'bold' },
+  glass: { borderRadius: 23 },
+  container: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
+  badge: { position: 'absolute', top: 1, right: 0, backgroundColor: '#D88871', borderRadius: 10, minWidth: 18, height: 18, paddingHorizontal: 4, borderWidth: 2, borderColor: '#F5F5EF', justifyContent: 'center', alignItems: 'center' },
+  badgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700', lineHeight: 11 },
 });

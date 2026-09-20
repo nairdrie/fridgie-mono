@@ -12,7 +12,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useCookbook } from '@/context/CookbookContext';
 import { useLists } from '@/context/ListContext';
 import { Item, List, ListView, Meal, Recipe } from '@/types/types';
-import { primary } from '@/utils/styles';
+import { ink, inkMuted, primary } from '@/utils/styles';
+import { AmbientBackground, GlassPressable, useGlassPreferences } from '@/components/ui/Glass';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -29,11 +30,11 @@ import {
     StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
     View
 } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import uuid from 'react-native-uuid';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { alwaysShowStaple, categorizeList, CLIENT_ID, getStaples, listenToList } from '../../utils/api';
 import { isOnline } from '../../utils/connectivity';
 import { getListSyncEngine, type ListSyncEngine } from '../../utils/listSync';
@@ -67,7 +68,9 @@ const ROW_LAYOUT_MS = 60;
 const MAX_FOCUS_FRAMES = 30;
 
 export default function HomeScreen() {
+    const insets = useSafeAreaInsets();
     const router = useRouter();
+    const { reduceMotion } = useGlassPreferences();
     const { selectedList, isLoading, selectedGroup, selectedView, allLists } = useLists();
     const { user } = useAuth();
     
@@ -134,6 +137,12 @@ export default function HomeScreen() {
 
     const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
     const fabAnimation = useSharedValue(0);
+    // Empty states already provide their own add actions.
+    const showFab = !isKeyboardVisible && (selectedView === ListView.MealPlan ? meals.length > 0 : items.length > 0);
+
+    useEffect(() => {
+        setIsFabMenuOpen(false);
+    }, [showFab, selectedList?.id]);
 
     // Whose shelf a recipe is on is one fact the whole app shares — see
     // CookbookContext. This screen used to keep its own copy, fetched on every
@@ -163,15 +172,16 @@ export default function HomeScreen() {
     );
 
     useEffect(() => {
-        // 1. Directly command the animation to close. This is the key fix.
-        fabAnimation.value = withTiming(0, { duration: 150 });
+        // A new view starts with a closed menu. Motion-preference changes must
+        // not clear the user's active ingredient edit.
+        fabAnimation.value = 0;
         // 2. Sync the React state to ensure consistency.
         setIsFabMenuOpen(false);
         // 3. The row that was being edited belongs to the view we just left and
         // has been unmounted. React Native does not fire onBlur for that, so
         // nothing else would ever clear this.
         setEditingId('');
-    }, [selectedView]);
+    }, [selectedView, fabAnimation]);
 
     // When the user last touched the list. The only thing reading it is the
     // status pill, which stays quiet for the saves the app makes on its own
@@ -207,8 +217,8 @@ export default function HomeScreen() {
 
     // Animate FAB menu
     useEffect(() => {
-        fabAnimation.value = withTiming(isFabMenuOpen ? 1 : 0, { duration: 250 });
-    }, [isFabMenuOpen]);
+        fabAnimation.value = reduceMotion ? (isFabMenuOpen ? 1 : 0) : withSpring(isFabMenuOpen ? 1 : 0, { damping: 21, stiffness: 230 });
+    }, [isFabMenuOpen, reduceMotion, fabAnimation]);
 
 
     const fabRotation = useAnimatedStyle(() => ({
@@ -1030,13 +1040,13 @@ export default function HomeScreen() {
     }, [meals, isInCookbook]);
 
     if (isLoading || (selectedList && isListLoading)) {
-        return <View style={styles.container}><ActivityIndicator /></View>;
+        return <AmbientBackground style={styles.loadingContainer}><ActivityIndicator color={primary} /><Text style={styles.loadingText}>Getting your week ready…</Text></AmbientBackground>;
     }
 
     return (
         <>
         {isFocused && <StatusBar style="dark" />}
-        <View style={{ paddingTop: 12, paddingBottom: 12,flex: 1, backgroundColor: '#fff' }}>
+        <AmbientBackground>
             {/* No keyboardVerticalOffset. That prop corrects for a gap between
                 this view's bottom edge and the keyboard's top, and there is
                 none — the tab bar below is covered by the keyboard, not pushed
@@ -1053,7 +1063,7 @@ export default function HomeScreen() {
             >
                 {/* TODO: on IOS, any action outside the keyboard should minimize it (unless its a click to another input). basically we want the keyboard to be smart enough to close when were not using it (on scroll)*/}
                 {/* TODO: on android, any action outside the keyboard should not minimize it, we use the back swipe to do this. */}
-                {selectedView == ListView.GroceryList && (
+                {selectedView === ListView.GroceryList && (
                     <CarryOverBanner
                         groupId={selectedGroup?.id}
                         currentList={selectedList}
@@ -1061,7 +1071,7 @@ export default function HomeScreen() {
                         onCarryOver={handleCarryOver}
                     />
                 )}
-                { selectedView == ListView.GroceryList ? (
+                { selectedView === ListView.GroceryList ? (
                     <GroceryListView
                         items={items}
                         meals={meals}
@@ -1106,12 +1116,12 @@ export default function HomeScreen() {
                 scroll pane jumped down and then back up under the user's thumb. */}
             <SyncStatus engine={engine} />
 
-            {isFabMenuOpen && (
-                <Pressable style={StyleSheet.absoluteFill} onPress={() => setIsFabMenuOpen(false)} />
+            {showFab && isFabMenuOpen && (
+                <Pressable style={styles.backdrop} onPress={() => setIsFabMenuOpen(false)} accessibilityLabel="Close add menu" />
             )}
 
-            <View style={styles.bottomActionContainer}>
-                <View style={styles.fabContainer}>
+            {showFab && <View pointerEvents="box-none" style={[styles.bottomActionContainer, { bottom: Math.max(insets.bottom, 14) + 96 }]}>
+                <View pointerEvents="box-none" style={[styles.fabContainer, isFabMenuOpen && styles.fabContainerOpen]}>
                     {isFabMenuOpen && (
                         <>
                             {selectedView === ListView.MealPlan ? (
@@ -1119,49 +1129,51 @@ export default function HomeScreen() {
                                 // quickest action, the furthest is the most involved.
                                 <>
                                     <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
-                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="sparkles" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <GlassPressable style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="sparkles" size={20} color={primary} style={styles.secondaryButtonIcon}/>
                                             <Text style={styles.secondaryButtonText}>Suggest Meal</Text>
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     </Animated.View>
                                     <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { setCookbookModalVisible(true); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="book-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <GlassPressable style={styles.secondaryButton} onPress={() => { setCookbookModalVisible(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="book-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
                                             <Text style={styles.secondaryButtonText}>From Cookbook</Text>
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     </Animated.View>
                                     <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <GlassPressable style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="add-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
                                             <Text style={styles.secondaryButtonText}>New Meal</Text>
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     </Animated.View>
                                 </>
                             ) : (
                                 <>
                                     <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="reorder-two-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <GlassPressable style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="reorder-two-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
                                             <Text style={styles.secondaryButtonText}>Category</Text>
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     </Animated.View>
                                     <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                                        <TouchableOpacity style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="add-outline" size={20} color="#333" style={styles.secondaryButtonIcon}/>
+                                        <GlassPressable style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
+                                            <Ionicons name="add-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
                                             <Text style={styles.secondaryButtonText}>Item</Text>
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     </Animated.View>
                                 </>
                             )}
                         </>
                     )}
-                    <TouchableOpacity style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)}>
+                    <GlassPressable style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)} accessibilityLabel={isFabMenuOpen ? 'Close add menu' : selectedView === ListView.MealPlan ? 'Add to meal plan' : 'Add to shopping list'} accessibilityState={{ expanded: isFabMenuOpen }}>
+                        <View pointerEvents="none" style={styles.fabShine} />
                         <Animated.View style={fabRotation}>
-                            <Ionicons name="add" size={32} color="white" />
+                            <Ionicons name="add" size={25} color="white" />
                         </Animated.View>
-                    </TouchableOpacity>
+                        <Text style={styles.fabText}>{isFabMenuOpen ? 'Close' : selectedView === ListView.MealPlan ? 'Add meal' : 'Add item'}</Text>
+                    </GlassPressable>
                 </View>
-            </View>
+            </View>}
             <ViewRecipeModal
                 isVisible={!!recipeToViewId}
                 onClose={() => setRecipeToViewId(null)}
@@ -1185,20 +1197,22 @@ export default function HomeScreen() {
                 onClose={() => setCookbookModalVisible(false)}
                 listId={selectedList?.id ?? ''}
             />
-        </View>
+        </AmbientBackground>
         </>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#fff' },
+    container: { flex: 1 },
+    loadingContainer: { alignItems: 'center', justifyContent: 'center', gap: 13 },
+    loadingText: { fontSize: 14, color: inkMuted },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.2)',
+        backgroundColor: 'rgba(23,63,53,0.10)',
     },
     bottomActionContainer: {
         position: 'absolute',
-        bottom: 30,
+        bottom: 110,
         paddingHorizontal: 20,
         width: '100%',
         flexDirection: 'row',
@@ -1210,28 +1224,39 @@ const styles = StyleSheet.create({
     },
     fabContainer: {
         alignItems: 'flex-end',
-        width: 80,
-        // The menu buttons deliberately extend past this width.
+        width: 150,
+        justifyContent: 'flex-end',
         overflow: 'visible',
     },
+    // Native hit testing stops at a parent's bounds even when overflow is
+    // visible. The expanded actions must fit inside this actual touch region.
+    fabContainerOpen: { width: 260, height: 286 },
     fab: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+        minWidth: 132,
+        height: 56,
+        paddingHorizontal: 19,
+        gap: 7,
+        borderRadius: 28,
         backgroundColor: primary,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.48)',
+        flexDirection: 'row',
         justifyContent: 'center',
         alignItems: 'center',
-        elevation: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
+        overflow: 'hidden',
+        elevation: 6,
+        shadowColor: '#173F35',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.18,
+        shadowRadius: 13,
     },
+    fabShine: { position: 'absolute', top: 0, left: 0, right: 0, height: 27, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 28 },
+    fabText: { fontSize: 15, fontWeight: '600', color: '#fff' },
     secondaryFabContainer: {
         position: 'absolute',
-        // Anchored to the right and given room to grow leftward. Without an
-        // explicit width these size to the 80pt fabContainer and truncate any
-        // label longer than about one word ("Suggest M…", "From Cook…").
+        // Bottom anchoring keeps animation offsets stable when the touch
+        // container grows to enclose the open menu.
+        bottom: 0,
         right: 6,
         width: 240,
         alignItems: 'flex-end',
@@ -1239,16 +1264,18 @@ const styles = StyleSheet.create({
     secondaryButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#fff',
-        borderRadius: 25,
-        paddingVertical: 10,
-        paddingHorizontal: 15,
+        backgroundColor: 'rgba(255,255,255,0.96)',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.95)',
+        borderRadius: 26,
+        paddingVertical: 15,
+        paddingHorizontal: 19,
         marginBottom: 10,
         elevation: 6,
-        shadowColor: '#000',
+        shadowColor: '#173F35',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 3,
+        shadowOpacity: 0.10,
+        shadowRadius: 14,
     },
     secondaryButtonIcon: {
         marginRight: 8,
@@ -1256,6 +1283,6 @@ const styles = StyleSheet.create({
     secondaryButtonText: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#333'
+        color: ink
     },
 });

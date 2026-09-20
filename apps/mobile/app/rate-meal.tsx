@@ -266,7 +266,7 @@ export default function RateMealScreen() {
 
                         {step === 'feedback' && (
                             <>
-                                <Text style={styles.title}>Sorry you didn't like it!</Text>
+                                <Text style={styles.title}>Sorry you didn’t like it!</Text>
                                 <Text style={styles.subtitle}>What could be better?</Text>
                                 <TextInput
                                     style={styles.input}
@@ -383,4 +383,3 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
 });
-

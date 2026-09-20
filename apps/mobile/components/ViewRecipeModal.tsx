@@ -17,10 +17,13 @@ import { useAuth } from '@/context/AuthContext';
 import { useCookbook } from '@/context/CookbookContext';
 import { Recipe } from '@/types/types';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
+import { GlassPressable, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getCardStyleFromTags } from '@/utils/recipeStyling';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { displayQuantity, nextUnitInCycle } from '@/utils/quantity';
 import { scaleIngredients, servingsForScale, servingsRange, servingsScale } from '@/utils/servings';
 import { getRecipe, hideRecipe, reportRecipe, saveRecipe, updateGroup, type ReportReason } from '../utils/api';
@@ -31,6 +34,7 @@ import InstructionText from './InstructionText';
 interface ViewRecipeModalProps {
     isVisible: boolean;
     onClose: () => void;
+    onDismiss?: () => void;
     recipeId: string | null;
     onEdit: (recipe: Recipe) => void;
     /**
@@ -92,7 +96,9 @@ const sourceLabel = (sourceUrl?: string): string => {
     }
 };
 
-export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, onCookbookUpdate, scale = 1, inMealPlan = false }: ViewRecipeModalProps) {
+export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeId, onEdit, onCookbookUpdate, scale = 1, inMealPlan = false }: ViewRecipeModalProps) {
+    const insets = useSafeAreaInsets();
+    const { reduceMotion } = useGlassPreferences();
     const [recipe, setRecipe] = useState<Recipe | null>(null);
     const [isFetching, setIsFetching] = useState(false);
     const [isToggling, setIsToggling] = useState(false);
@@ -448,31 +454,32 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
     return (
         <>
             <Modal
-                animationType="slide"
+                animationType={reduceMotion ? "none" : "slide"}
                 transparent={true}
                 visible={isVisible}
                 onRequestClose={isCooking ? () => setIsCooking(false) : handleClose}
+                onDismiss={onDismiss}
             >
                 <Pressable style={styles.modalBackdrop} onPress={handleClose} />
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
-                        <View style={styles.header}>
+                        <GlassSurface style={styles.header} intensity={70}>
                             {isSomeoneElses && (
-                                <TouchableOpacity
+                                <GlassPressable
                                     style={styles.moreButton}
                                     onPress={handleMorePress}
                                     accessibilityRole="button"
                                     accessibilityLabel="Hide or report this recipe"
                                 >
-                                    <Ionicons name="ellipsis-horizontal" size={20} color="#fff" />
-                                </TouchableOpacity>
+                                    <Ionicons name="ellipsis-horizontal" size={20} color={ink} />
+                                </GlassPressable>
                             )}
-                            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-                                <Ionicons name="close-circle" size={32} color="#ccc" />
-                            </TouchableOpacity>
-                        </View>
+                            <GlassPressable style={styles.closeButton} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Close recipe">
+                                <Ionicons name="close" size={22} color={ink} />
+                            </GlassPressable>
+                        </GlassSurface>
 
-                        {isFetching && (<View style={styles.loaderContainer}><ActivityIndicator size="large" /></View>)}
+                        {isFetching && (<View style={styles.loaderContainer}><ActivityIndicator size="large" color={primary} /></View>)}
 
                         {recipe && (
                             <>
@@ -480,16 +487,24 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                     style={{ flex: 1 }}
                                     ListHeaderComponent={
                                         <>
-                                            <Image
-                                                source={recipe.photoURL ? { uri: recipe.photoURL } : require('../assets/images/plate.png')}
-                                                style={styles.recipeImage}
-                                            />
+                                            <View style={styles.heroImage}>
+                                                {recipe.photoURL ? <Image source={{ uri: recipe.photoURL }} style={styles.recipeImage} /> : (
+                                                    <View style={styles.recipeImagePlaceholder}>
+                                                        <View style={styles.heroOrb} />
+                                                        <Ionicons name={getCardStyleFromTags(recipe.tags).icon} size={100} color={primary} />
+                                                    </View>
+                                                )}
+                                                <GlassSurface style={styles.heroCategory} intensity={70}>
+                                                    <Ionicons name="restaurant-outline" size={13} color={ink} />
+                                                    <Text style={styles.heroCategoryText}>{recipe.category || 'Something delicious'}</Text>
+                                                </GlassSurface>
+                                            </View>
                                             <View style={styles.bodyContainer}>
                                                 <View style={styles.titleContainer}>
                                                     <Text style={styles.recipeTitle}>{recipe.name}</Text>
                                                     {/* Shown on everyone's recipes, not just your own. On
                                                         someone else's it makes a copy, and says so first. */}
-                                                    <TouchableOpacity
+                                                    <GlassPressable
                                                         style={styles.editButton}
                                                         onPress={handleEditPress}
                                                         accessibilityRole="button"
@@ -500,7 +515,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                         }
                                                     >
                                                         <Ionicons name="pencil" size={20} color="#fff" />
-                                                    </TouchableOpacity>
+                                                    </GlassPressable>
                                                 </View>
                                                 { recipe.authorName &&
                                                   <Text style={styles.recipeAuthor}>by <Text style={styles.recipeAuthorName}>{recipe.authorName}</Text></Text>
@@ -511,7 +526,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                     or a page somebody else published, and the credit for that
                                                     belongs on the screen rather than in a database column. */}
                                                 {!!recipe.sourceUrl && (
-                                                    <TouchableOpacity
+                                                    <GlassPressable
                                                         style={styles.sourceRow}
                                                         onPress={handleOpenSource}
                                                         accessibilityRole="link"
@@ -523,7 +538,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                             {recipe.sourceAuthor ? ` · ${recipe.sourceAuthor}` : ''}
                                                         </Text>
                                                         <Ionicons name="open-outline" size={13} color={primary} />
-                                                    </TouchableOpacity>
+                                                    </GlassPressable>
                                                 )}
 
                                                 {!!recipe.description && (
@@ -549,7 +564,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                         the count. */}
                                                     {canScale ? (
                                                         <View style={styles.servingsStepper}>
-                                                            <TouchableOpacity
+                                                            <GlassPressable
                                                                 style={styles.servingsButton}
                                                                 onPress={() => stepServings(-1)}
                                                                 disabled={servings! <= range.min}
@@ -558,11 +573,11 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                                 accessibilityLabel="Fewer servings"
                                                             >
                                                                 <Ionicons name="remove" size={16} color={servings! <= range.min ? inkFaint : primary} />
-                                                            </TouchableOpacity>
+                                                            </GlassPressable>
                                                             <Text style={styles.servingsValue} accessibilityLabel={`Adjusted for ${servings} servings`}>
                                                                 {servings} {servings === 1 ? 'serving' : 'servings'}
                                                             </Text>
-                                                            <TouchableOpacity
+                                                            <GlassPressable
                                                                 style={styles.servingsButton}
                                                                 onPress={() => stepServings(1)}
                                                                 disabled={servings! >= range.max}
@@ -571,14 +586,14 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                                 accessibilityLabel="More servings"
                                                             >
                                                                 <Ionicons name="add" size={16} color={servings! >= range.max ? inkFaint : primary} />
-                                                            </TouchableOpacity>
+                                                            </GlassPressable>
                                                         </View>
                                                     ) : draftYield !== null ? (
                                                         // Declaring the yield, not scaling by it: the ± moves
                                                         // a number that is about to be written onto the
                                                         // recipe, and the amounts below stay put until it is.
                                                         <View style={styles.servingsStepper}>
-                                                            <TouchableOpacity
+                                                            <GlassPressable
                                                                 style={styles.servingsButton}
                                                                 onPress={() => stepDraftYield(-1)}
                                                                 disabled={draftYield <= range.min || isSavingYield}
@@ -587,11 +602,11 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                                 accessibilityLabel="Fewer servings"
                                                             >
                                                                 <Ionicons name="remove" size={16} color={draftYield <= range.min ? inkFaint : primary} />
-                                                            </TouchableOpacity>
+                                                            </GlassPressable>
                                                             <Text style={styles.servingsValue}>
                                                                 {draftYield} {draftYield === 1 ? 'serving' : 'servings'}
                                                             </Text>
-                                                            <TouchableOpacity
+                                                            <GlassPressable
                                                                 style={styles.servingsButton}
                                                                 onPress={() => stepDraftYield(1)}
                                                                 disabled={draftYield >= range.max || isSavingYield}
@@ -600,8 +615,8 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                                 accessibilityLabel="More servings"
                                                             >
                                                                 <Ionicons name="add" size={16} color={draftYield >= range.max ? inkFaint : primary} />
-                                                            </TouchableOpacity>
-                                                            <TouchableOpacity
+                                                            </GlassPressable>
+                                                            <GlassPressable
                                                                 style={[styles.servingsButton, styles.servingsConfirm]}
                                                                 onPress={confirmYield}
                                                                 disabled={isSavingYield}
@@ -612,7 +627,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                                 {isSavingYield
                                                                     ? <ActivityIndicator size="small" color="#fff" />
                                                                     : <Ionicons name="checkmark" size={16} color="#fff" />}
-                                                            </TouchableOpacity>
+                                                            </GlassPressable>
                                                         </View>
                                                     ) : canDeclareYield ? (
                                                         // Nothing to scale from until someone says what these
@@ -620,7 +635,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                         // existed is in this state, which is most of a
                                                         // cookbook, so it is asked for here rather than left
                                                         // to be found in the editor.
-                                                        <TouchableOpacity
+                                                        <GlassPressable
                                                             style={styles.setServingsChip}
                                                             onPress={() => setDraftYield(usual ?? 4)}
                                                             accessibilityRole="button"
@@ -628,7 +643,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                         >
                                                             <Ionicons name="people-outline" size={14} color={primary} />
                                                             <Text style={styles.setServingsChipText}>Set servings</Text>
-                                                        </TouchableOpacity>
+                                                        </GlassPressable>
                                                     ) : (
                                                         <Text style={styles.sectionCount}>{recipe.ingredients.length}</Text>
                                                     )}
@@ -720,7 +735,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                             </View>
                                         </View>
                                     )}
-                                    ListFooterComponent={<View style={styles.listFooterSpacer} />}
+                                    ListFooterComponent={<View style={[styles.listFooterSpacer, { height: 112 + insets.bottom }]} />}
                                     showsVerticalScrollIndicator={false}
                                 />
 
@@ -728,7 +743,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                     last one clipped its own text. The two that are shortcuts are
                                     now icon tiles at a fixed width, which leaves the one that
                                     changes something the room to be a real button at any width. */}
-                                <View style={styles.footer}>
+                                <GlassSurface style={[styles.footer, { bottom: Math.max(insets.bottom, 12) }]} intensity={85}>
                                     {/* Only where there is something to follow.
                                         A recipe with no steps — an import that
                                         found ingredients and nothing else —
@@ -736,7 +751,7 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                         screen and a progress bar reading
                                         "0 of 0". */}
                                     {recipe.instructions.length > 0 && (
-                                        <TouchableOpacity
+                                        <GlassPressable
                                             style={styles.actionTile}
                                             onPress={() => setIsCooking(true)}
                                             accessibilityRole="button"
@@ -744,12 +759,12 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                         >
                                             <Ionicons name="flame-outline" size={20} color={primary} />
                                             <Text style={styles.actionTileText}>Cook</Text>
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     )}
 
                                     {/* Nothing to add: this recipe is already on the plan. */}
                                     {!inMealPlan && (
-                                        <TouchableOpacity
+                                        <GlassPressable
                                             style={styles.actionTile}
                                             onPress={() => setIsMealPlanModalVisible(true)}
                                             accessibilityRole="button"
@@ -757,14 +772,16 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                         >
                                             <Ionicons name="calendar-outline" size={20} color={primary} />
                                             <Text style={styles.actionTileText}>Plan</Text>
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     )}
 
                                     {/* Existing Add to Cookbook Button */}
-                                    <TouchableOpacity
+                                    <GlassPressable
                                         style={[styles.primaryButton, isConfirmingRemove && styles.removeButton]}
                                         onPress={handleCookbookButtonPress}
                                         disabled={isToggling}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={isConfirmingRemove ? "Confirm removal from cookbook" : isCurrentlyInCookbook ? "Remove from cookbook" : "Add to cookbook"}
                                     >
                                         {isToggling ? (
                                             <ActivityIndicator color="#fff" />
@@ -783,8 +800,8 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
                                                 </Text>
                                             </>
                                         )}
-                                    </TouchableOpacity>
-                                </View>
+                                    </GlassPressable>
+                                </GlassSurface>
                             </>
                         )}
                     </View>
@@ -827,81 +844,63 @@ export default function ViewRecipeModal({ isVisible, onClose, recipeId, onEdit, 
 }
 
 const styles = StyleSheet.create({
-    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-    // Over the sheet AND the dimmed backdrop behind it. Opaque, so nothing of
-    // the recipe underneath shows through at arm's length.
-    cookModeOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#fff' },
-    modalContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '85%' },
-    modalContent: { flex: 1, backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
-    header: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, position: 'absolute', top: 0, right: 0, zIndex: 10 },
-    closeButton: { backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 16 },
-    // Matches the close button's scrim so the two read as one control cluster
-    // over whatever the recipe photo happens to be.
-    moreButton: {
-        width: 32, height: 32, borderRadius: 16,
-        backgroundColor: 'rgba(0,0,0,0.3)',
-        justifyContent: 'center', alignItems: 'center',
-    },
+    modalBackdrop: { flex: 1, backgroundColor: 'rgba(15,37,28,0.32)' },
+    cookModeOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#F5F5EF' },
+    modalContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '93%' },
+    modalContent: { flex: 1, backgroundColor: '#F5F5EF', borderTopLeftRadius: 34, borderTopRightRadius: 34, overflow: 'hidden' },
+    header: { flexDirection: 'row', alignItems: 'center', gap: 3, padding: 4, position: 'absolute', top: 16, right: 16, zIndex: 10, borderRadius: 25 },
+    closeButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+    moreButton: { width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center' },
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    recipeImage: { width: '100%', height: 220, backgroundColor: '#f0f0f0', resizeMode: 'cover' },
-    bodyContainer: { paddingHorizontal: 20 },
-    titleContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 4 },
-    recipeTitle: { fontSize: 26, fontWeight: '700', letterSpacing: -0.4, color: ink, flex: 1, marginRight: 10 },
-    recipeAuthor: { fontSize: 14, color: inkMuted },
+    heroImage: { width: '100%', height: 278, backgroundColor: '#DCEDE2' },
+    recipeImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+    recipeImagePlaceholder: { flex: 1, backgroundColor: '#DCE9DB', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+    heroOrb: { position: 'absolute', width: 280, height: 280, borderRadius: 140, backgroundColor: '#E9CBB6', top: -120, right: -70 },
+    heroCategory: { position: 'absolute', bottom: 18, left: 22, borderRadius: 17, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6 },
+    heroCategoryText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.3, color: ink },
+    bodyContainer: { paddingHorizontal: 24 },
+    titleContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 25, marginBottom: 9 },
+    recipeTitle: { fontSize: 31, lineHeight: 36, fontWeight: '700', letterSpacing: -1.2, color: ink, flex: 1, marginRight: 15 },
+    recipeAuthor: { fontSize: 13, color: inkMuted },
     recipeAuthorName: { color: primary, fontWeight: '600' },
-    sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
-    sourceText: { fontSize: 13, color: inkMuted, flexShrink: 1 },
-    editButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: primary, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 },
-    recipeDescription: { fontSize: 15, lineHeight: 23, color: inkMuted, marginTop: 12 },
-
-    tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
-    tag: { backgroundColor: accentSoft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 },
-    tagText: { fontSize: 12, fontWeight: '600', color: primary, textTransform: 'capitalize' },
-
-    // Small caps eyebrow instead of the old ruled heading — the ingredient card
-    // and the step column already give the sections their own shape.
-    sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 28, marginBottom: 12 },
-    sectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted },
-    sectionCount: { fontSize: 13, color: inkFaint },
-    scaleNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -8, marginBottom: 10 },
-    scaleNoteText: { flex: 1, fontSize: 13, color: inkMuted },
-
-    // Sits where the ingredient count used to, so the header keeps its shape.
-    servingsStepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: accentSoft, borderRadius: 999, paddingHorizontal: 4, paddingVertical: 3, gap: 2 },
-    servingsButton: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-    servingsValue: { minWidth: 78, textAlign: 'center', fontSize: 13, fontWeight: '700', color: primary },
+    sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 11, minHeight: 28 },
+    sourceText: { fontSize: 12, color: inkMuted, flexShrink: 1 },
+    editButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: primary, justifyContent: 'center', alignItems: 'center', shadowColor: primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 3 },
+    recipeDescription: { fontSize: 15, lineHeight: 24, color: inkMuted, marginTop: 17 },
+    tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 18 },
+    tag: { backgroundColor: accentSoft, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 999 },
+    tagText: { fontSize: 11, fontWeight: '600', color: primary, textTransform: 'capitalize' },
+    sectionHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between', marginTop: 30, marginBottom: 14 },
+    sectionTitle: { fontSize: 22, fontWeight: '700', letterSpacing: -0.65, color: ink },
+    sectionCount: { fontSize: 12, color: inkMuted },
+    scaleNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -4, marginBottom: 12 },
+    scaleNoteText: { flex: 1, fontSize: 12, lineHeight: 18, color: inkMuted },
+    servingsStepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: accentSoft, borderRadius: 999, padding: 4, gap: 2 },
+    servingsButton: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center' },
+    servingsValue: { minWidth: 74, textAlign: 'center', fontSize: 12, fontWeight: '700', color: primary },
     servingsConfirm: { backgroundColor: primary, marginLeft: 2 },
-    setServingsChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: accentSoft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
-    setServingsChipText: { fontSize: 13, fontWeight: '700', color: primary },
-
-    ingredientCard: { backgroundColor: surface, borderRadius: 16, paddingHorizontal: 16 },
-    ingredientRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 11 },
+    setServingsChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: accentSoft, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9 },
+    setServingsChipText: { fontSize: 12, fontWeight: '700', color: primary },
+    ingredientCard: { backgroundColor: surface, borderRadius: 25, paddingHorizontal: 18, paddingVertical: 3, borderWidth: 1, borderColor: '#FFF' },
+    ingredientRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 14 },
     ingredientRowPressed: { opacity: 0.6 },
     ingredientDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     ingredientDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: primary, marginTop: 8, marginRight: 12 },
-    ingredientText: { flex: 1, fontSize: 16, lineHeight: 22, color: ink },
+    ingredientText: { flex: 1, fontSize: 15, lineHeight: 23, color: ink },
     ingredientQuantity: { fontWeight: '700' },
     ingredientQuantityConverted: { color: primary },
-    ingredientSwap: { marginLeft: 10, marginTop: 4 },
-
+    ingredientSwap: { marginLeft: 10, marginTop: 5 },
     stepRow: { flexDirection: 'row', alignItems: 'flex-start' },
-    stepMarker: { width: 28, alignItems: 'center', alignSelf: 'stretch' },
-    stepBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center' },
+    stepMarker: { width: 34, alignItems: 'center', alignSelf: 'stretch' },
+    stepBadge: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#DCEDE2', alignItems: 'center', justifyContent: 'center' },
     stepNumber: { fontSize: 13, fontWeight: '700', color: primary },
-    stepConnector: { flex: 1, width: 2, borderRadius: 1, backgroundColor: hairline, marginTop: 6 },
-    // flex: 1 keeps the wrapped lines inside this column, clear of the number.
-    stepText: { flex: 1, fontSize: 16, lineHeight: 25, color: ink, marginLeft: 14, marginTop: 3, paddingBottom: 22 },
-    listFooterSpacer: { height: 12 },
-
-    footer: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#f0f0f0', backgroundColor: '#fff', flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-    // Fixed width and a label under the icon: a shortcut that never has to
-    // compete with the button beside it for room. Two of these plus the
-    // cookbook button leave 200pt for its label on a 375pt phone, which is
-    // where the old three-across row ran out of screen and clipped its text.
-    actionTile: { width: 62, height: 52, borderRadius: 12, borderWidth: 1, borderColor: primary, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', gap: 2 },
-    actionTileText: { color: primary, fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
-    // flex: 1 — whatever is left after the tiles, on any screen.
-    primaryButton: { flex: 1, height: 52, backgroundColor: primary, borderRadius: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 10 },
-    primaryButtonText: { color: '#fff', fontSize: 15, fontWeight: 'bold', marginLeft: 8, flexShrink: 1 },
-    removeButton: { backgroundColor: '#c94444' },
+    stepConnector: { flex: 1, width: 1, backgroundColor: hairline, marginTop: 7, marginBottom: 7 },
+    stepText: { flex: 1, fontSize: 16, lineHeight: 26, color: ink, marginLeft: 15, marginTop: 3, paddingBottom: 26 },
+    listFooterSpacer: { height: 120 },
+    footer: { position: 'absolute', left: 12, right: 12, padding: 8, borderRadius: 30, flexDirection: 'row', alignItems: 'stretch', gap: 7 },
+    actionTile: { width: 58, height: 55, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.62)', alignItems: 'center', justifyContent: 'center', gap: 3 },
+    actionTileText: { color: primary, fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
+    primaryButton: { flex: 1, minHeight: 55, backgroundColor: primary, borderRadius: 22, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 10 },
+    primaryButtonText: { color: '#FFF', fontSize: 14, fontWeight: '700', marginLeft: 7, flexShrink: 1 },
+    removeButton: { backgroundColor: '#B8534B' },
 });

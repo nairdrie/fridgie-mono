@@ -14,6 +14,8 @@ import { NotificationProvider } from "@/context/NotificationContext";
 import { MEAL_RATING_ENABLED } from '@/constants/features';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { GlassPreferencesProvider, useGlassPreferences } from '@/components/ui/Glass';
+import { canvas } from '@/utils/styles';
 
 // Without a handler, a notification that arrives while the app is open is
 // swallowed silently — the OS assumes a foregrounded app will present it itself.
@@ -68,10 +70,16 @@ const RootView = ({ children }: { children: React.ReactNode }) => {
   return <GestureHandlerRootView style={{ flex: 1 }}>{children}</GestureHandlerRootView>;
 };
 
+function MotionStack({ children }: { children: React.ReactNode }) {
+  const { reduceMotion } = useGlassPreferences();
+  return <Stack screenOptions={{ contentStyle: { backgroundColor: canvas }, animation: reduceMotion ? 'none' : 'slide_from_right' }}>{children}</Stack>;
+}
+
 export default function RootLayout() {
 
   return (
       <SafeAreaProvider>
+        <GlassPreferencesProvider>
         <AuthProvider>
           <NotificationProvider>
             <ListProvider>
@@ -86,7 +94,7 @@ export default function RootLayout() {
                       tapped reminder routes nowhere. */}
                   {MEAL_RATING_ENABLED && <MealRatingNotificationRouter />}
                   {/* The Stack component defines the navigator */}
-                  <Stack>
+                  <MotionStack>
                     <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                     <Stack.Screen
                       name="index"
@@ -159,12 +167,13 @@ export default function RootLayout() {
                           fullScreenGestureEnabled: true
                         }}
                     />
-                  </Stack>
+                  </MotionStack>
                 </RootView>
               </CookbookProvider>
             </ListProvider>
           </NotificationProvider>
         </AuthProvider>
+        </GlassPreferencesProvider>
       </SafeAreaProvider>
   );
 }

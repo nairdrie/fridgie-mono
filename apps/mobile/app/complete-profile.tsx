@@ -1,3 +1,5 @@
+import { AmbientBackground, GlassPressable as TouchableOpacity, GlassSurface } from '@/components/ui/Glass';
+import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 import { useAuth } from '@/context/AuthContext';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { defaultAvatars } from '@/utils/defaultAvatars';
@@ -19,7 +21,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View
 } from 'react-native';
 
@@ -149,20 +150,23 @@ export default function CompleteProfileScreen() {
     // vertical gesture, so the scroll that puts the focused input above the
     // keyboard had nothing to scroll — the name field and Continue button, both
     // at the bottom of the form, stayed under it.
+    <AmbientBackground>
     <ScrollView
           ref={keyboard.scrollRef}
           {...keyboard.scrollProps}
           style={styles.safeArea}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[styles.container, { paddingBottom: keyboard.keyboardSpace }]}>
-        <Text style={styles.title}>Welcome!</Text>
-        <Text style={styles.subtitle}>Let's set up your profile.</Text>
-        { selectedPhotoUrl &&
-          <Image source={{ uri: selectedPhotoUrl }} style={styles.mainAvatar} />
-        }
-        
-
-        <Text style={styles.label}>Choose an Avatar</Text>
+          contentContainerStyle={[styles.container, { paddingBottom: Math.max(32, keyboard.keyboardSpace) }]}>
+        <Animated.View entering={FadeInDown.duration(550).reduceMotion(ReduceMotion.System)} style={styles.content}>
+        <View style={styles.welcomePill}><Ionicons name="sparkles-outline" size={14} color="#23785E" /><Text style={styles.welcomePillText}>A FRESH START</Text></View>
+        <Text style={styles.title}>A little more you.</Text>
+        <Text style={styles.subtitle}>Let’s make this kitchen yours.</Text>
+        <View style={styles.avatarHalo}>
+          {selectedPhotoUrl ? <Image source={{ uri: selectedPhotoUrl }} style={styles.mainAvatar} /> : <View style={[styles.mainAvatar, styles.avatarPlaceholder]}><Ionicons name="person-outline" size={52} color="#789787" /></View>}
+          <TouchableOpacity style={styles.photoButton} onPress={handlePickImage} accessibilityLabel="Choose a profile photo"><Ionicons name="camera" size={18} color="#fff" /></TouchableOpacity>
+        </View>
+        <GlassSurface style={styles.formCard}>
+        <Text style={styles.label}>Pick a little personality</Text>
         <View style={styles.carouselContainer}>
 
         <TouchableOpacity style={[styles.arrowButton, isAtStart && styles.transparentButton]} onPress={() => scrollTo('left')}>
@@ -209,10 +213,10 @@ export default function CompleteProfileScreen() {
         <Text style={styles.label}>What should we call you?</Text>
         <TextInput
           style={styles.input}
-          placeholder="Graham Cracker"
+          placeholder="Your name"
           value={name}
           onChangeText={setName}
-          placeholderTextColor="#999"
+          placeholderTextColor="#8B988E"
         />
 
         <TouchableOpacity
@@ -222,38 +226,38 @@ export default function CompleteProfileScreen() {
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue</Text>}
         </TouchableOpacity>
+        </GlassSurface>
+        <Text style={styles.footnote}>Good things start around the table.</Text>
+        </Animated.View>
     </ScrollView>
+    </AmbientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: '#fff' },
-    container: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-    title: { fontSize: 32, fontWeight: 'bold', marginBottom: 8 },
-    subtitle: { fontSize: 18, color: '#666', marginBottom: 32 },
-    mainAvatar: { width: 120, height: 120, borderRadius: 60, marginBottom: 16, backgroundColor: '#eee',  borderColor:'#e9e9e9ff', borderWidth:1},
-    label: { fontSize: 16, fontWeight: '500', alignSelf: 'flex-start', marginBottom: 12, marginTop: 24 },
-    avatarGrid: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 },
-    gridAvatar: { width: 50, height: 50, borderRadius: 25, margin: 5, backgroundColor: '#eee', borderColor:'#e9e9e9ff', borderWidth:1 },
-    selectedAvatar: { borderWidth: 3, borderColor: '#00715a' },
-    uploadButton: { width: 50, height: 50, borderRadius: 25, margin: 5, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
-    uploadText: { fontSize: 24, color: '#999' },
-    input: { width: '100%', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 14, fontSize: 16, marginBottom: 32 },
-    primaryButton: { width: '100%', backgroundColor: '#00715a', paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
-    primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-    disabledButton: { backgroundColor: '#a9a9a9' },
-    carouselContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        width: '100%', // Take up full width to position arrows
-    },
-    arrowButton: {
-        paddingHorizontal: 4,
-    },
-    transparentButton: {
-        opacity: 0
-    },
-    flatListContent: {
-        paddingHorizontal: 10, // Give some space at the start and end of the list
-    },
+    safeArea: { flex: 1, backgroundColor: 'transparent' },
+    container: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24, paddingTop: 36 },
+    content: { width: '100%', maxWidth: 460, alignItems: 'center' },
+    welcomePill: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 13, paddingVertical: 9, backgroundColor: '#E4EDE0', borderRadius: 20, marginBottom: 19 },
+    welcomePillText: { fontSize: 10, fontWeight: '700', color: '#476458', letterSpacing: 1.4 },
+    title: { fontSize: 34, fontWeight: '700', letterSpacing: -1.4, color: '#173F35', marginBottom: 8, textAlign: 'center' },
+    subtitle: { fontSize: 16, color: '#78857D', marginBottom: 28, textAlign: 'center' },
+    avatarHalo: { padding: 10, backgroundColor: 'rgba(220,237,226,0.65)', borderRadius: 60, marginBottom: 28 },
+    mainAvatar: { width: 116, height: 116, borderRadius: 48, backgroundColor: '#DCEDE2', borderColor: '#fff', borderWidth: 3 },
+    avatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+    photoButton: { position: 'absolute', bottom: 4, right: 4, width: 36, height: 36, borderRadius: 15, borderWidth: 2, borderColor: '#F5F5EF', backgroundColor: '#23785E', alignItems: 'center', justifyContent: 'center' },
+    formCard: { padding: 22, borderRadius: 30, alignItems: 'center', width: '100%' },
+    label: { fontSize: 13, fontWeight: '600', color: '#476458', alignSelf: 'flex-start', marginBottom: 12, marginTop: 10 },
+    gridAvatar: { width: 52, height: 52, borderRadius: 20, margin: 5, backgroundColor: '#E4EDE0', borderColor: '#FFF', borderWidth: 2 },
+    selectedAvatar: { borderWidth: 3, borderColor: '#23785E' },
+    uploadButton: { width: 52, height: 52, borderRadius: 20, margin: 5, backgroundColor: '#E6EBE4', justifyContent: 'center', alignItems: 'center' },
+    input: { width: '100%', borderWidth: 1, borderColor: '#E2E8DE', backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 18, padding: 17, fontSize: 16, color: '#173F35', marginBottom: 20 },
+    primaryButton: { width: '100%', backgroundColor: '#23785E', paddingVertical: 17, borderRadius: 20, alignItems: 'center' },
+    primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+    disabledButton: { opacity: 0.5 },
+    carouselContainer: { flexDirection: 'row', alignItems: 'center', width: '100%', marginBottom: 20 },
+    arrowButton: { paddingHorizontal: 3, minHeight: 44, justifyContent: 'center' },
+    transparentButton: { opacity: 0 },
+    flatListContent: { paddingHorizontal: 5 },
+    footnote: { fontSize: 12, color: '#78857D', marginTop: 23 },
 });

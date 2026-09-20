@@ -1,3 +1,4 @@
+import { GlassPressable as TouchableOpacity, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
 // components/QuantityEditorModal.tsx
 import { Item } from "@/types/types";
 import {
@@ -9,7 +10,7 @@ import {
 import { primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useMemo, useState } from "react";
-import { Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, View } from "react-native";
 
 // Re-exported for existing imports; implementation lives in utils/quantity.
 export { parseQuantityAndText } from "@/utils/quantity";
@@ -28,6 +29,7 @@ interface QuantityEditorModalProps {
 }
 
 export default function QuantityEditorModal({ isVisible, item, onSave, onClose }: QuantityEditorModalProps) {
+    const { reduceMotion } = useGlassPreferences();
     const [quantity, setQuantity] = useState('');
     // The last user-entered convertible quantity; unit cycling always converts
     // from this anchor so repeated cycles don't accumulate rounding error.
@@ -75,7 +77,7 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
         <Modal
             transparent={true}
             visible={isVisible}
-            animationType="fade"
+            animationType={reduceMotion ? "none" : "fade"}
             onRequestClose={onClose}
         >
             {/* The input autofocuses, so the keyboard is already up by the time
@@ -86,8 +88,8 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
                 style={styles.modalContainer}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             >
-                <View style={styles.modalContent}>
-                    <Text style={styles.modalTitle}>Edit Quantity</Text>
+                <GlassSurface style={styles.modalContent} intensity={85}>
+                    <Text style={styles.modalTitle}>How much?</Text>
                     <Text style={styles.modalItemName}>{item?.text}</Text>
                     <View style={styles.inputContainer}>
                         <TextInput
@@ -95,6 +97,7 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
                             value={quantity}
                             onChangeText={handleTextChange}
                             placeholder="e.g., 200g or 1 1/2 cups"
+                            placeholderTextColor="#8B988E"
                             autoFocus={true}
                             onSubmitEditing={handleSave}
                         />
@@ -102,6 +105,7 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
                             style={styles.cycleButton}
                             onPress={handleCycleUnits}
                             disabled={!convertibleInfo}
+                            accessibilityLabel="Convert to the next unit"
                         >
                             <Ionicons
                                 name="swap-horizontal-outline"
@@ -119,89 +123,23 @@ export default function QuantityEditorModal({ isVisible, item, onSave, onClose }
                             <Text style={styles.saveButtonText}>Save</Text>
                         </TouchableOpacity>
                     </View>
-                </View>
+                </GlassSurface>
             </KeyboardAvoidingView>
         </Modal>
     );
 }
- const styles = StyleSheet.create({
-  modalContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    },
-    modalContent: {
-        width: '85%',
-        backgroundColor: 'white',
-        borderRadius: 12,
-        padding: 20,
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        elevation: 5,
-    },
-    modalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        marginBottom: 8,
-    },
-    modalItemName: {
-        fontSize: 16,
-        color: '#666',
-        marginBottom: 16,
-    },
-    inputContainer: {
-      height:50,
-        flexDirection: 'row',
-        alignItems: 'center',
-        width: '100%',
-        borderWidth: 1,
-        borderColor: '#ccc',
-        borderRadius: 8,
-        marginHorizontal: 5
-    },
-    modalInput: {
-        flex: 1,
-        padding: 12,
-        fontSize: 16,
-        textAlign: 'center',
-        borderWidth: 0,
-        marginHorizontal: 5
-    },
-    cycleButton: {
-        paddingHorizontal: 12,
-        height: '100%',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    modalButtons: {
-        flexDirection: 'row',
-        marginTop: 20,
-        width: '100%',
-    },
-    modalButton: {
-        flex: 1,
-        padding: 12,
-        borderRadius: 8,
-        alignItems: 'center',
-    },
-    cancelButton: {
-        backgroundColor: '#f0f0f0',
-        marginRight: 5,
-    },
-    cancelButtonText: {
-        color: '#333',
-        fontWeight: '600',
-    },
-    saveButton: {
-        backgroundColor: primary,
-        marginLeft: 5
-    },
-    saveButtonText: {
-        color: '#fff',
-        fontWeight: '600',
-    }
+const styles = StyleSheet.create({
+    modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(23,63,53,0.24)' },
+    modalContent: { width: '88%', maxWidth: 410, backgroundColor: 'rgba(245,245,239,0.9)', borderRadius: 30, padding: 26, alignItems: 'center' },
+    modalTitle: { fontSize: 28, fontWeight: '700', letterSpacing: -0.9, color: '#173F35', marginBottom: 9 },
+    modalItemName: { fontSize: 15, color: '#78857D', marginBottom: 24, textAlign: 'center' },
+    inputContainer: { height: 58, flexDirection: 'row', alignItems: 'center', width: '100%', borderWidth: 1, borderColor: '#DFE7DA', backgroundColor: 'rgba(255,255,255,0.75)', borderRadius: 18 },
+    modalInput: { flex: 1, padding: 15, fontSize: 17, color: '#173F35', textAlign: 'center', borderWidth: 0 },
+    cycleButton: { paddingHorizontal: 16, height: '100%', justifyContent: 'center', alignItems: 'center' },
+    modalButtons: { flexDirection: 'row', marginTop: 24, width: '100%', gap: 10 },
+    modalButton: { flex: 1, padding: 16, borderRadius: 18, alignItems: 'center' },
+    cancelButton: { backgroundColor: '#E6EBE4' },
+    cancelButtonText: { color: '#476458', fontWeight: '600', fontSize: 15 },
+    saveButton: { backgroundColor: primary },
+    saveButtonText: { color: '#fff', fontWeight: '700', fontSize: 15 }
 });

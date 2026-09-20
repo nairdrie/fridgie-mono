@@ -9,7 +9,9 @@
 // forget is there.
 
 import { CategoryChip, CategoryFilter, COOKBOOK_SORTS, CookbookSort, sortLabel } from '@/utils/cookbookFilter';
-import { hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
+import { hairline, ink, inkFaint, inkMuted, primary } from '@/utils/styles';
+import { GlassPressable, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useState } from 'react';
 import {
@@ -18,7 +20,6 @@ import {
     ScrollView,
     StyleSheet,
     Text,
-    TouchableOpacity,
     View,
 } from 'react-native';
 
@@ -41,6 +42,8 @@ export default function CookbookFilterBar({
     showSort = true,
 }: CookbookFilterBarProps) {
     const [isSortOpen, setSortOpen] = useState(false);
+    const insets = useSafeAreaInsets();
+    const { reduceMotion } = useGlassPreferences();
 
     // A cookbook with everything on one shelf has nothing to filter and nothing
     // to reorder; the bar would be pure furniture.
@@ -57,7 +60,7 @@ export default function CookbookFilterBar({
                 {chips.map((chip) => {
                     const isSelected = chip.key === selected;
                     return (
-                        <TouchableOpacity
+                        <GlassPressable
                             key={chip.key}
                             style={[styles.chip, isSelected && styles.chipSelected]}
                             onPress={() => onSelect(chip.key)}
@@ -71,53 +74,60 @@ export default function CookbookFilterBar({
                             <Text style={[styles.chipCount, isSelected && styles.chipCountSelected]}>
                                 {chip.count}
                             </Text>
-                        </TouchableOpacity>
+                        </GlassPressable>
                     );
                 })}
             </ScrollView>
 
             {showSort && (
-                <TouchableOpacity
+                <GlassPressable
                     style={styles.sortButton}
                     onPress={() => setSortOpen(true)}
                     accessibilityRole="button"
                     accessibilityLabel={`Sort: ${sortLabel(sort)}`}
                 >
                     <Ionicons name="swap-vertical" size={18} color={inkMuted} />
-                </TouchableOpacity>
+                </GlassPressable>
             )}
 
             <Modal
                 visible={isSortOpen}
                 transparent
-                animationType="fade"
+                animationType={reduceMotion ? "none" : "fade"}
                 onRequestClose={() => setSortOpen(false)}
             >
                 <Pressable style={styles.sheetBackdrop} onPress={() => setSortOpen(false)}>
                     {/* Swallows a tap on the sheet itself, which would otherwise
                         reach the backdrop behind it and close it mid-choice. */}
-                    <Pressable style={styles.sheet} onPress={() => {}}>
-                        <Text style={styles.sheetTitle}>Sort by</Text>
+                    <Pressable onPress={() => {}} accessibilityViewIsModal>
+                    <GlassSurface style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }]} intensity={90}>
+                        <View style={styles.sheetHandle} />
+                        <View style={styles.sheetHeading}>
+                            <View style={{ flex: 1 }}><Text style={styles.sheetEyebrow}>YOUR COOKBOOK</Text><Text style={styles.sheetTitle}>Just how you like it</Text></View>
+                            <GlassPressable style={styles.sheetClose} onPress={() => setSortOpen(false)} accessibilityRole="button" accessibilityLabel="Close sorting options"><Ionicons name="close" size={20} color={ink} /></GlassPressable>
+                        </View>
                         {COOKBOOK_SORTS.map((option) => {
                             const isCurrent = option.key === sort;
                             return (
-                                <TouchableOpacity
+                                <GlassPressable
                                     key={option.key}
-                                    style={styles.sheetOption}
+                                    style={[styles.sheetOption, isCurrent && styles.sheetOptionCurrent]}
                                     onPress={() => {
                                         onSortChange(option.key);
                                         setSortOpen(false);
                                     }}
                                     accessibilityRole="button"
                                     accessibilityState={{ selected: isCurrent }}
+                                    accessibilityLabel={`Sort by ${option.label}`}
                                 >
                                     <Text style={[styles.sheetOptionText, isCurrent && styles.sheetOptionTextCurrent]}>
                                         {option.label}
                                     </Text>
-                                    {isCurrent && <Ionicons name="checkmark" size={20} color={primary} />}
-                                </TouchableOpacity>
+                                    <View style={[styles.selectionDot, isCurrent && styles.selectionDotCurrent]}>{isCurrent && <Ionicons name="checkmark" size={14} color="#FFF" />}</View>
+                                </GlassPressable>
                             );
                         })}
+                    </GlassSurface>
                     </Pressable>
                 </Pressable>
             </Modal>
@@ -141,40 +151,29 @@ export function CookbookGroupHeader({ category, count }: { category: string; cou
 }
 
 const styles = StyleSheet.create({
-    container: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    container: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
     chipRow: { gap: 8, paddingRight: 8 },
-    chip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-        borderRadius: 999,
-        backgroundColor: surface,
-    },
-    chipSelected: { backgroundColor: primary },
-    chipLabel: { fontSize: 13, fontWeight: '600', color: ink },
-    chipLabelSelected: { color: '#fff' },
-    chipCount: { fontSize: 12, fontWeight: '600', color: inkMuted },
-    chipCountSelected: { color: 'rgba(255, 255, 255, 0.75)' },
-    sortButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: surface,
-        borderWidth: 1,
-        borderColor: hairline,
-        marginLeft: 4,
-    },
-    sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.35)', justifyContent: 'flex-end' },
-    sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 20, paddingBottom: 36, paddingHorizontal: 20 },
-    sheetTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted, marginBottom: 8 },
-    sheetOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: hairline },
+    chip: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 14, minHeight: 42, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.75)', borderWidth: 1, borderColor: '#FFF' },
+    chipSelected: { backgroundColor: primary, borderColor: primary },
+    chipLabel: { fontSize: 12, fontWeight: '600', color: ink },
+    chipLabelSelected: { color: '#FFF' },
+    chipCount: { fontSize: 10, fontWeight: '600', color: inkMuted, backgroundColor: '#EAF0E6', paddingHorizontal: 6, paddingVertical: 3, overflow: 'hidden', borderRadius: 9 },
+    chipCountSelected: { color: '#FFF', backgroundColor: 'rgba(255,255,255,0.18)' },
+    sortButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.85)', borderWidth: 1, borderColor: '#FFF', marginLeft: 5 },
+    sheetBackdrop: { flex: 1, backgroundColor: 'rgba(17,42,32,0.25)', justifyContent: 'flex-end', padding: 10 },
+    sheet: { borderRadius: 32, paddingTop: 10, paddingHorizontal: 20 },
+    sheetHandle: { width: 34, height: 4, borderRadius: 2, alignSelf: 'center', backgroundColor: '#C0CABF', marginBottom: 21 },
+    sheetHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 21, gap: 8 },
+    sheetEyebrow: { fontSize: 9, letterSpacing: 1.8, fontWeight: '700', color: inkMuted, marginBottom: 5 },
+    sheetTitle: { fontSize: 23, fontWeight: '700', letterSpacing: -0.7, color: ink },
+    sheetClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E7EDE4', justifyContent: 'center', alignItems: 'center' },
+    sheetOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 58, borderRadius: 18, paddingHorizontal: 15, marginBottom: 5 },
+    sheetOptionCurrent: { backgroundColor: '#DCEDE2' },
     sheetOptionText: { fontSize: 16, color: ink },
     sheetOptionTextCurrent: { color: primary, fontWeight: '700' },
-    groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 8 },
-    groupHeaderText: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted },
-    groupHeaderCount: { fontSize: 12, fontWeight: '600', color: inkFaint },
+    selectionDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: hairline, alignItems: 'center', justifyContent: 'center' },
+    selectionDotCurrent: { backgroundColor: primary, borderColor: primary },
+    groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 13, marginBottom: 13 },
+    groupHeaderText: { fontSize: 19, fontWeight: '700', letterSpacing: -0.5, color: ink },
+    groupHeaderCount: { fontSize: 12, fontWeight: '500', color: inkFaint },
 });

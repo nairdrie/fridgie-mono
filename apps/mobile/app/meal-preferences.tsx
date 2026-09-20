@@ -1,3 +1,6 @@
+import { AmbientBackground, GlassPressable as TouchableOpacity, GlassSurface } from '@/components/ui/Glass';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 // screens/MealPreferencesScreen.tsx
 
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
@@ -15,7 +18,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 
@@ -36,7 +38,10 @@ const PreferenceTile = ({ label, isSelected, onPress }: { label: string, isSelec
   <TouchableOpacity
     style={[styles.tile, isSelected && styles.tileSelected]}
     onPress={onPress}
+    accessibilityRole="checkbox"
+    accessibilityState={{ checked: isSelected }}
   >
+    <Ionicons name={isSelected ? 'checkmark-circle' : 'ellipse-outline'} size={23} color={isSelected ? '#FFFFFF' : '#A4B5A6'} />
     <Text style={[styles.tileText, isSelected && styles.tileTextSelected]}>
       {label}
     </Text>
@@ -117,9 +122,7 @@ export default function MealPreferencesScreen() {
           <>
             <Text style={styles.title}>Any dietary needs?</Text>
             <Text style={styles.subtitle}>
-              These apply to every suggestion, every time. You can switch one off
-              for a single suggestion later — handy when you&apos;re cooking for
-              other people.
+              A few things that make a meal feel right for you. We’ll keep these in mind for every suggestion.
             </Text>
             <View style={styles.tileContainer}>
               {DIETARY_NEEDS.map(need => (
@@ -136,9 +139,9 @@ export default function MealPreferencesScreen() {
       case 2:
           return (
             <>
-              <Text style={styles.title}>Anything you never want to see?</Text>
+              <Text style={styles.title}>A few things to leave out?</Text>
               <Text style={styles.subtitle}>
-                Ingredients to keep out of every suggestion.
+                Tell us which ingredients you’d rather skip. We’ll leave them out of your meal suggestions.
               </Text>
               <TextInput
                 style={styles.input}
@@ -148,8 +151,7 @@ export default function MealPreferencesScreen() {
                 placeholderTextColor="#999"
               />
               <Text style={styles.footnote}>
-                Not sure what you feel like eating? That part isn&apos;t here —
-                you&apos;ll pick a cuisine or a mood when you ask for suggestions.
+                You can choose a cuisine or mood each time you ask for a meal. These preferences are your everyday starting point.
               </Text>
             </>
           );
@@ -159,23 +161,19 @@ export default function MealPreferencesScreen() {
   };
 
   return (
+    <AmbientBackground>
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
         <View style={styles.header}>
-            <Text style={styles.headerTitle}>Your everyday preferences</Text>
-            {/* This screen is reached by tapping "Suggest Meal", so without
-                saying so it reads as a form about tonight's dinner — people
-                filled in a craving and then wondered why every future
-                suggestion was Thai. */}
-            <Text style={styles.headerSubtitle}>
-                Saved once and applied to every suggestion — not just today&apos;s.
-            </Text>
-            <Text style={styles.progressText}>
-                Step {currentStep} of {TOTAL_STEPS}
-            </Text>
+            <View style={styles.navigationRow}>
+              <GlassSurface style={styles.backGlass}><TouchableOpacity style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={21} color="#173F35" /></TouchableOpacity></GlassSurface>
+              <Text style={styles.headerTitle}>MADE FOR YOU</Text>
+              <Text style={styles.progressText}>{currentStep} / {TOTAL_STEPS}</Text>
+            </View>
+            <View style={styles.progressTrack}><View style={[styles.progressSegment, styles.progressComplete]} /><View style={[styles.progressSegment, currentStep === 2 && styles.progressComplete]} /></View>
         </View>
         {/* The Next/Finish row is pinned below this, so a step's own text field
             can end up under the keyboard with nothing beneath it to scroll up. */}
@@ -185,7 +183,10 @@ export default function MealPreferencesScreen() {
             contentContainerStyle={[styles.scrollContent, { paddingBottom: 20 + keyboard.keyboardSpace }]}
             keyboardShouldPersistTaps="handled"
         >
-            {renderStepContent()}
+            <Animated.View key={currentStep} entering={FadeInDown.duration(320).reduceMotion(ReduceMotion.System)}>
+              <View style={styles.stepIcon}><Ionicons name={currentStep === 1 ? 'leaf-outline' : 'nutrition-outline'} size={28} color={primary} /></View>
+              {renderStepContent()}
+            </Animated.View>
         </ScrollView>
         <View style={styles.footer}>
           {currentStep > 1 && (
@@ -199,109 +200,49 @@ export default function MealPreferencesScreen() {
               style={[styles.navButton, styles.primaryButton]}
               onPress={handleNext}
             >
-              <Text style={[styles.navButtonText, styles.primaryButtonText]}>Next</Text>
+              <Text style={[styles.navButtonText, styles.primaryButtonText]}>Continue</Text><Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               style={[styles.navButton, styles.primaryButton]}
               onPress={handleFinish}
             >
-              <Text style={[styles.navButtonText, styles.primaryButtonText]}>Finish</Text>
+              <Text style={[styles.navButtonText, styles.primaryButtonText]}>Save preferences</Text><Ionicons name="checkmark" size={19} color="#FFFFFF" />
             </TouchableOpacity>
           )}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </AmbientBackground>
   );
 }
 
-// --- STYLES ---
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#fff', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0, },
-  container: { flex: 1, padding: 20 },
-  header: { alignItems: 'center', marginBottom: 20, },
-  headerTitle: { fontSize: 15, fontWeight: '700', color: '#333' },
-  headerSubtitle: { fontSize: 13, color: '#888', textAlign: 'center', marginTop: 2, marginBottom: 8, paddingHorizontal: 20 },
-  progressText: { fontSize: 13, color: '#aaa' },
-  footnote: { fontSize: 14, color: '#888', textAlign: 'center', marginTop: 8, lineHeight: 20 },
+  safeArea: { flex: 1, backgroundColor: 'transparent', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+  container: { flex: 1, paddingHorizontal: 24, paddingTop: 17, paddingBottom: 18 },
+  header: { marginBottom: 28 },
+  navigationRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 23 },
+  backGlass: { borderRadius: 19 },
+  backButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 10, letterSpacing: 1.5, fontWeight: '700', color: '#78857D' },
+  progressText: { fontSize: 12, fontWeight: '600', color: '#78857D', width: 40, textAlign: 'right' },
+  progressTrack: { flexDirection: 'row', gap: 7 },
+  progressSegment: { flex: 1, height: 4, borderRadius: 3, backgroundColor: '#E0E7DC' },
+  progressComplete: { backgroundColor: '#23785E' },
+  footnote: { fontSize: 13, color: '#78857D', marginTop: 12, lineHeight: 21, paddingHorizontal: 2 },
   scrollContent: { paddingBottom: 20, flexGrow: 1 },
-  title: { fontSize: 26, fontWeight: 'bold', textAlign: 'center', marginBottom: 8, color: '#222', },
-  subtitle: { fontSize: 16, textAlign: 'center', color: '#666', marginBottom: 30, },
-  tileContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', },
-  tile: {
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    margin: 6,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  tileSelected: {
-    backgroundColor: primary,
-    borderColor: primary,
-  },
-  tileText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  tileTextSelected: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    marginBottom: 15,
-  },
-  tagContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 10,
-  },
-  tag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#e0e0e0',
-    borderRadius: 15,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    margin: 4,
-  },
-  tagText: {
-    fontSize: 14,
-    marginRight: 8,
-  },
-  tagRemove: {
-    fontSize: 14,
-    color: '#555',
-    fontWeight: 'bold',
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  navButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 8,
-    backgroundColor: '#f0f0f0',
-  },
-  navButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  primaryButton: {
-    backgroundColor: primary,
-  },
-  primaryButtonText: {
-    color: '#fff',
-  },
+  stepIcon: { width: 60, height: 60, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DCEDE2', marginBottom: 22 },
+  title: { fontSize: 32, lineHeight: 37, fontWeight: '700', letterSpacing: -1.1, marginBottom: 13, color: '#173F35' },
+  subtitle: { fontSize: 14, lineHeight: 22, color: '#78857D', marginBottom: 28 },
+  tileContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  tile: { width: '47.8%', minHeight: 102, padding: 18, borderRadius: 23, borderWidth: 1, borderColor: '#FFFFFF', backgroundColor: 'rgba(255,255,255,0.75)', justifyContent: 'space-between', gap: 14 },
+  tileSelected: { backgroundColor: primary, borderColor: '#45927A' },
+  tileText: { fontSize: 14, fontWeight: '600', color: '#173F35' },
+  tileTextSelected: { color: '#fff', fontWeight: '600' },
+  input: { borderWidth: 1, borderColor: '#E2E8DE', borderRadius: 20, padding: 18, fontSize: 15, marginBottom: 15, backgroundColor: 'rgba(255,255,255,0.8)', color: '#173F35' },
+  footer: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 18, borderTopWidth: 1, borderTopColor: '#E2E8DE' },
+  navButton: { paddingVertical: 17, paddingHorizontal: 22, borderRadius: 19, backgroundColor: '#E6EBE4', flexDirection: 'row', gap: 10, alignItems: 'center', justifyContent: 'center' },
+  navButtonText: { fontSize: 15, fontWeight: '600', color: '#476458' },
+  primaryButton: { backgroundColor: primary },
+  primaryButtonText: { color: '#fff' },
 });

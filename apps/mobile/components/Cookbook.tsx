@@ -1,9 +1,9 @@
 // components/Cookbook.tsx
-import { useAuth } from '@/context/AuthContext';
 import { useCookbook } from '@/context/CookbookContext';
 import { useCookbookFilter } from '@/hooks/useCookbookFilter';
 import { Item, Meal, Recipe } from '@/types/types';
-import { primary } from '@/utils/styles';
+import { ink, inkMuted, primary } from '@/utils/styles';
+import { GlassSurface } from '@/components/ui/Glass';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useState } from 'react';
 import {
@@ -46,7 +46,6 @@ export default function Cookbook({ recipes, isLoading, onRefresh, isOwnCookbook 
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     const [recipeToEdit, setRecipeToEdit] = useState<Recipe | null>(null);
 
-    const { user } = useAuth();
     const { addRecipe } = useCookbook();
 
     const handleRefresh = useCallback(async () => {
@@ -100,24 +99,27 @@ export default function Cookbook({ recipes, isLoading, onRefresh, isOwnCookbook 
     if (!recipes || recipes.length === 0) {
         return (
             <View style={styles.feedPlaceholder}>
-                <Ionicons name="receipt-outline" size={48} color="#ccc" />
-                <Text style={styles.feedPlaceholderText}>Nothing to see here.</Text>
+                <View style={styles.emptyIcon}><Ionicons name="book-outline" size={32} color={primary} /></View>
+                <Text style={styles.emptyTitle}>{isOwnCookbook ? "Your favourites belong here" : "A cookbook in the making"}</Text>
+                <Text style={styles.feedPlaceholderText}>{isOwnCookbook ? "Save something delicious from Discover, or add a recipe of your own." : "The first recipe is always the start of something good."}</Text>
             </View>
         );
     }
 
     return (
         <View style={styles.container}>
-            <View style={styles.searchContainer}>
-                <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
+            <GlassSurface style={styles.searchContainer} intensity={60}>
+                <Ionicons name="search-outline" size={20} color={primary} style={styles.searchIcon} />
                 <TextInput
                     style={styles.searchInput}
-                    placeholder="Search for recipes..."
+                    placeholder="Find a favourite…"
+                    accessibilityLabel="Search this cookbook"
+                    returnKeyType="search"
                     value={filter.searchTerm}
-                    placeholderTextColor={'#999'}
+                    placeholderTextColor={inkMuted}
                     onChangeText={filter.setSearchTerm}
                 />
-            </View>
+            </GlassSurface>
 
             <CookbookFilterBar
                 chips={filter.chips}
@@ -142,7 +144,8 @@ export default function Cookbook({ recipes, isLoading, onRefresh, isOwnCookbook 
                         />
                     )
                 )}
-                contentContainerStyle={{ paddingBottom: 20 }}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 110 }}
                 ListEmptyComponent={<Text style={styles.emptyText}>No recipes match your search.</Text>}
                 refreshControl={
                     <RefreshControl
@@ -187,29 +190,12 @@ export default function Cookbook({ recipes, isLoading, onRefresh, isOwnCookbook 
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 12, marginBottom: 16, borderWidth: 1, borderColor: '#e9ecef' },
-    searchIcon: { marginRight: 8 },
-    searchInput: { flex: 1, height: 44, fontSize: 16 },
-    emptyText: { textAlign: 'center', marginTop: 20, color: '#6c757d' },
-    feedPlaceholder: { alignItems: 'center', justifyContent: 'center', padding: 40, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e9ecef' },
-    feedPlaceholderText: { marginTop: 16, fontSize: 16, color: '#6c757d', textAlign: 'center', marginBottom: 20 },
-    repostRow: {
-        flexDirection: 'row',
-        justifyContent: 'flex-start'
-    },
-    repostContainer: {
-        marginLeft: 10,
-        backgroundColor: '#d0f1ccff',
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 10,
-        paddingVertical: 2,
-        borderTopLeftRadius: 8,
-        borderTopRightRadius: 8
-    },
-    repostAuthor: {
-        color: 'black',
-        fontSize: 12,
-        marginLeft: 5
-    }
+    searchContainer: { flexDirection: 'row', alignItems: 'center', borderRadius: 24, paddingHorizontal: 17, marginBottom: 17 },
+    searchIcon: { marginRight: 10 },
+    searchInput: { flex: 1, minHeight: 52, fontSize: 15, color: ink, paddingVertical: 12 },
+    emptyText: { textAlign: 'center', marginTop: 30, color: inkMuted, fontSize: 15, lineHeight: 22 },
+    feedPlaceholder: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 35, backgroundColor: 'rgba(255,255,255,0.65)', borderRadius: 28, borderWidth: 1, borderColor: '#FFF' },
+    emptyIcon: { width: 74, height: 74, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DCEDE2', marginBottom: 20 },
+    emptyTitle: { fontSize: 22, fontWeight: '700', letterSpacing: -0.7, color: ink, textAlign: 'center' },
+    feedPlaceholderText: { marginTop: 10, fontSize: 14, lineHeight: 22, color: inkMuted, textAlign: 'center' },
 });

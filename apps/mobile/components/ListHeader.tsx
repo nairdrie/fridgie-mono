@@ -1,325 +1,113 @@
 import { useLists } from '@/context/ListContext';
 import { List, ListView } from '@/types/types';
-import { primary } from '@/utils/styles';
+import { canvas, ink, inkMuted, primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import {
-  Dimensions,
-  FlatList,
-  LayoutChangeEvent,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
-} from 'react-native';
+import { Dimensions, FlatList, Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import Modal from 'react-native-modal';
-import Animated, { interpolate, interpolateColor, useAnimatedStyle, useDerivedValue, withTiming } from 'react-native-reanimated';
+import Animated, { ReduceMotion, useAnimatedStyle, useDerivedValue, withSpring } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getWeekLabel, parseWeekEnd, parseWeekStart } from '../utils/date';
 import GroupIndicator from './GroupIndicator';
+import { GlassPressable, GlassSurface, useGlassPreferences } from './ui/Glass';
 
-const DEVICE_HEIGHT =
-  Dimensions.get('window').height + (Platform.OS === 'android' ? (StatusBar?.currentHeight ?? 0) : 0);
+const DEVICE_HEIGHT = Dimensions.get('window').height + (Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0);
+const dateRange = (week: List) => `${parseWeekStart(week.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${parseWeekEnd(week.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
 
 export default function ListHeader() {
-  const router = useRouter();
   const { allLists, selectedList, selectList, selectedView, selectView } = useLists();
+  const insets = useSafeAreaInsets();
+  const { reduceMotion } = useGlassPreferences();
   const [isModalVisible, setModalVisible] = useState(false);
-
- // State to hold the width of a single segment for the animation
-  const [segmentWidth, setSegmentWidth] = useState(0);
-
-  // const [activeView, setActiveView] = useState(selectedView);
-
-  // useEffect(() => {
-  //   setActiveView(selectedView);
-  // }, [selectedView]);
-  
-
-  // Newest week first: next week sits at the top, then this week, then backwards.
-  const weeksNewestFirst = useMemo(
-    () =>
-      [...allLists].sort(
-        (a, b) => parseWeekStart(b.weekStart).getTime() - parseWeekStart(a.weekStart).getTime()
-      ),
-    [allLists]
-  );
-
-  const handleSelectList = (list: List) => {
-    setModalVisible(false);
-    selectList(list);
-  };
-  
-  // This function captures the width of the segment on layout
-  const onSelectorLayout = (event: LayoutChangeEvent) => {
-    const { width } = event.nativeEvent.layout;
-    setSegmentWidth(width / 2);
-  };
-
-
-  // ✅ 1. Add the dependency array to useDerivedValue.
-  // This tells the hook to re-create the animation value whenever `selectedView` changes.
+  const [width, setWidth] = useState(0);
+  const weeksNewestFirst = useMemo(() => [...allLists].sort((a, b) => parseWeekStart(b.weekStart).getTime() - parseWeekStart(a.weekStart).getTime()), [allLists]);
+  const segment = Math.max(0, (width - 10) / 2);
   const progress = useDerivedValue(() => {
-    return withTiming(selectedView === ListView.GroceryList ? 0 : 1, { duration: 250 });
-  }, [selectedView]); // <--- THE FIX IS HERE
-
-  // ✅ 2. Drive the background animation from the `progress` value for perfect sync.
-  // This is more efficient and reliable than using a separate React state variable.
-  const animatedStyle = useAnimatedStyle(() => {
-    // Interpolate maps the progress (0 to 1) to the pixel translation (0 to segmentWidth)
-    const translateX = interpolate(
-      progress.value,
-      [0, 1],
-      [2, segmentWidth - 2] // Using a small margin for better centering
-    );
-
-    return {
-      transform: [{ translateX }],
-    };
-  });
-
-   const listTextStyle = useAnimatedStyle(() => {
-    const color = interpolateColor(
-      progress.value,
-      [0, 1], // Input Range
-      ['#FFFFFF', '#000000'] // Output Color (Active -> Inactive)
-    );
-    return {
-      color: color,
-    };
-  });
-
-  const mealsTextStyle = useAnimatedStyle(() => {
-    const color = interpolateColor(
-      progress.value,
-      [0, 1], // Input Range
-      ['#000000', '#FFFFFF'] // Output Color (Inactive -> Active)
-    );
-    return {
-      color: color,
-    };
-  });
-
-  // The unreachable-server state is owned by app/(tabs)/_layout.tsx, one level
-  // above both this header and the screen bodies. Rendering it here as well let
-  // a failed header sit above a plausible empty list, which reads as "nothing
-  // planned" rather than "could not load".
-  if (!selectedList)
-    return <></>;
+    const target = selectedView === ListView.GroceryList ? 0 : 1;
+    return reduceMotion ? target : withSpring(target, { damping: 21, stiffness: 250, mass: 0.7, reduceMotion: ReduceMotion.System });
+  }, [selectedView, reduceMotion]);
+  const selectionStyle = useAnimatedStyle(() => ({ transform: [{ translateX: progress.value * segment }] }));
+  const handleSelectList = (list: List) => { setModalVisible(false); selectList(list); };
+  if (!selectedList) return <View style={{ backgroundColor: canvas, height: insets.top }} />;
 
   return (
     <>
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.container}>
-          <View style={styles.headerUpper}>
-              {/* WEEK SELECTOR */}
-              <View style={styles.weekSelector}>
-                <Pressable onPress={() => setModalVisible(true)} style={styles.weekSelectorInner}>
-                  <Ionicons size={30} color={primary} name="calendar-outline"></Ionicons>
-                  <View style={styles.weekSelectorText}>
-                    <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
-                    <Text style={styles.subtitle}>
-                      {parseWeekStart(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - {parseWeekEnd(selectedList.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                    </Text>
-                  </View>
-                  
-                </Pressable>
-              </View>
-              <GroupIndicator />
-          </View>
-          <View style={styles.headerLower}>
-              {/* VIEW SELECTOR */}
-            <View style={styles.viewSelector} onLayout={onSelectorLayout}>
-              {segmentWidth > 0 && (
-                <Animated.View style={[styles.activeSegmentBackground, { width: segmentWidth }, animatedStyle]} />
-              )}
-              <TouchableOpacity
-                style={styles.segment}
-                onPress={() => selectView(ListView.GroceryList)}
-              >
-                <Animated.Text style={[styles.segmentText, listTextStyle]}>
-                  &nbsp;&nbsp;Grocery List
-                </Animated.Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.segment}
-                onPress={() => selectView(ListView.MealPlan)}
-              >
-                  <Animated.Text style={[styles.segmentText, mealsTextStyle]}>
-                  Meal Plan
-                </Animated.Text>
-                </TouchableOpacity>
-              </View>
-          </View>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <View pointerEvents="none" style={styles.glow} />
+        <View style={styles.brandRow}>
+          <View style={styles.wordmark}><View style={styles.brandIcon}><Ionicons name="leaf" size={16} color={primary} /></View><Text style={styles.brand}>fridgie<Text style={{ color: primary }}>.</Text></Text></View>
+          <GroupIndicator />
         </View>
-      </SafeAreaView>
-      <View>
-          <Modal
-            isVisible={isModalVisible}
-            onBackdropPress={() => setModalVisible(false)}
-            onBackButtonPress={() => setModalVisible(false)}   // Android back
-            swipeDirection="down"
-            onSwipeComplete={() => setModalVisible(false)}
-            backdropOpacity={0.4}
-            style={styles.modal}               // { justifyContent: 'flex-end', margin: 0 }
-            statusBarTranslucent               // Android: draw under status bar
-            coverScreen                        // ensure full-screen overlay (default true, explicit here)
-            deviceHeight={DEVICE_HEIGHT}       // avoids being “short” inside a custom header
-            useNativeDriverForBackdrop
-            useNativeDriver={false}
-          >
-            <View style={styles.sheet}>
-              {/* little grabber for UX */}
-              <View style={{ alignItems: 'center', paddingBottom: 8 }}>
-                <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: '#E0E0E0' }} />
-              </View>
-
-              <Text style={styles.sheetTitle}>Select a Week</Text>
-
-              <FlatList
-                data={weeksNewestFirst}
-                keyExtractor={(list) => list.id}
-                contentContainerStyle={{ paddingBottom: 16 }}
-                renderItem={({ item }) => (
-                  <TouchableOpacity onPress={() => handleSelectList(item)} style={styles.weekItem}>
-                    <View style={styles.weekSelectRow}>
-                      <View>
-                        <Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text>
-                        <Text style={styles.weekRange}>
-                          {parseWeekStart(item.weekStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} -{' '}
-                          {parseWeekEnd(item.weekStart).toLocaleDateString(
-                            undefined,
-                            { month: 'short', day: 'numeric' }
-                          )}
-                        </Text>
-                      </View>
-                      { item.id === selectedList?.id ? (
-                        <Ionicons name="checkmark-circle" size={20} color={primary} />
-                      ) : (
-                        <Ionicons name="ellipse-outline" size={20} color={primary} />
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                )}
-                // If list is long, allow inside scroll without closing the sheet
-                // react-native-modal handles scroll/propagation well
-              />
-            </View>
-          </Modal>
+        <View style={styles.titleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.eyebrow}>GOOD FOOD STARTS HERE</Text>
+            <Text style={styles.title}>{getWeekLabel(selectedList.weekStart)}</Text>
+          </View>
+          <GlassPressable accessibilityLabel={`Choose week. ${dateRange(selectedList)}`} onPress={() => setModalVisible(true)}>
+            <GlassSurface style={styles.calendarButton} intensity={35}><Ionicons name="calendar-outline" size={20} color={primary} /><Ionicons name="chevron-down" size={12} color={inkMuted} /></GlassSurface>
+          </GlassPressable>
+        </View>
+        <GlassPressable style={styles.dateButton} onPress={() => setModalVisible(true)} accessibilityLabel="Choose a different week">
+          <Text style={styles.subtitle}>{dateRange(selectedList)}</Text><View style={styles.dateDot} /><Text style={styles.dateHint}>Let’s make it delicious</Text>
+        </GlassPressable>
+        <GlassSurface intensity={45} style={styles.selector} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
+          {width > 0 && <Animated.View pointerEvents="none" style={[styles.selection, { width: segment }, selectionStyle]} />}
+          {[{ value: ListView.GroceryList, label: 'Groceries', icon: 'basket-outline' }, { value: ListView.MealPlan, label: 'Meal plan', icon: 'restaurant-outline' }].map(item => {
+            const selected = selectedView === item.value;
+            return <GlassPressable key={item.value} style={styles.segment} accessibilityLabel={item.label} accessibilityRole="tab" accessibilityState={{ selected }} onPress={() => selectView(item.value)}>
+              <Ionicons name={item.icon as 'basket-outline' | 'restaurant-outline'} size={18} color={selected ? ink : inkMuted} />
+              <Text style={[styles.segmentText, selected && styles.segmentSelected]}>{item.label}</Text>
+            </GlassPressable>;
+          })}
+        </GlassSurface>
       </View>
+      <Modal isVisible={isModalVisible} onBackdropPress={() => setModalVisible(false)} onBackButtonPress={() => setModalVisible(false)} swipeDirection="down" propagateSwipe onSwipeComplete={() => setModalVisible(false)} backdropOpacity={0.25} style={styles.modal} statusBarTranslucent coverScreen deviceHeight={DEVICE_HEIGHT} useNativeDriverForBackdrop animationInTiming={reduceMotion ? 0 : 350} animationOutTiming={reduceMotion ? 0 : 250}>
+        <GlassSurface intensity={90} style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 20) }]} accessibilityViewIsModal>
+          <View style={styles.grabber} />
+          <View style={styles.sheetHeading}><View><Text style={styles.eyebrow}>MAKE ROOM FOR GOOD FOOD</Text><Text style={styles.sheetTitle}>Pick your week</Text></View><GlassPressable onPress={() => setModalVisible(false)} style={styles.close} accessibilityLabel="Close week selector"><Ionicons name="close" size={22} color={ink} /></GlassPressable></View>
+          <FlatList data={weeksNewestFirst} keyExtractor={list => list.id} contentContainerStyle={{ paddingBottom: 12 }} renderItem={({ item }) => {
+            const selected = item.id === selectedList.id;
+            return <GlassPressable onPress={() => handleSelectList(item)} style={[styles.weekItem, selected && styles.selectedWeek]} accessibilityState={{ selected }}>
+              <View style={[styles.weekIcon, selected && { backgroundColor: '#D5E9DB' }]}><Ionicons name="calendar-outline" size={23} color={primary} /></View>
+              <View style={{ flex: 1 }}><Text style={styles.weekText}>{getWeekLabel(item.weekStart)}</Text><Text style={styles.weekRange}>{dateRange(item)}</Text></View>
+              <Ionicons name={selected ? 'checkmark-circle' : 'chevron-forward'} size={selected ? 25 : 18} color={selected ? primary : inkMuted} />
+            </GlassPressable>;
+          }} />
+        </GlassSurface>
+      </Modal>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    backgroundColor: '#fff', // Match your header background
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2, // Shadow moves downwards
-    },
-    shadowOpacity: 0.1, // Shadow is 10% opaque
-    shadowRadius: 3, // Blurs the shadow
-    // Android shadow prop
-    elevation: 5,
-  },
-  container: {
-    flexDirection: 'column',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    marginBottom: 12
-  },
-  backNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    color: primary
-  },
-  backNavText: {
-    color: primary,
-    fontSize: 16
-  },
-  headerUpper: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    width: '100%',
-  },
-  headerLower: {
-    flexDirection: 'row'
-  },
-  weekSelector: {
-    
-  },
-  weekSelectorInner: {
-    alignItems: 'center',
-    marginBottom: 16,
-    flexDirection: 'row'
-  },
-  weekSelectorText: {
-    marginLeft: 8
-  },
-  weekSelectRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-  },
-  title: {
-    fontSize: 22, // Bigger title
-    fontWeight: 'bold',
-    paddingTop: 4,
-    marginBottom:-4
-  },
-  subtitle: {
-    fontSize: 14,
-    color: primary, // Subtler color
-  },
-    viewSelector: {
-    flexDirection: 'row',
-    // backgroundColor: '#f0f0f0', // Lighter background
-    borderRadius: 10, // More rounded
-    height: 36,
-    position: 'relative',
-    justifyContent: 'flex-start',
-    width:'100%'
-  },
-  segment: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  segmentText: {
-    fontSize: 16,
-    fontWeight: '600',
-    // color: '#043308ff', // Grayer unselected text
-  },
-  segmentTextActive: {
-    // color: 'white', // Black selected text
-  },
-  activeSegmentBackground: {
-    position: 'absolute',
-    backgroundColor: primary, // White active background
-    borderRadius: 20,
-    margin: 2,
-    height: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  modal: { justifyContent: 'flex-end', margin: 0 },
-  sheet: { backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '70%' },
-  sheetTitle: { fontWeight: '600', fontSize: 18, marginBottom: 12, textAlign: 'center' },
-  weekItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  weekText: { fontSize: 16 },
-  weekRange: { fontSize: 12, color: '#666', paddingTop: 4 },
+  header: { backgroundColor: canvas, paddingHorizontal: 24, paddingBottom: 14, overflow: 'hidden' },
+  glow: { position: 'absolute', width: 300, height: 300, right: -140, top: -170, borderRadius: 150, backgroundColor: 'rgba(194,222,201,0.3)' },
+  brandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 19 },
+  wordmark: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  brandIcon: { width: 29, height: 29, backgroundColor: '#E0EDDF', borderRadius: 10, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-8deg' }] },
+  brand: { fontSize: 24, fontWeight: '800', letterSpacing: -1.2, color: ink },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  eyebrow: { color: inkMuted, fontSize: 9, fontWeight: '700', letterSpacing: 1.7, marginBottom: 5 },
+  title: { fontSize: 35, lineHeight: 41, fontWeight: '700', letterSpacing: -1.5, color: ink },
+  calendarButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: 68, height: 48, borderRadius: 24 },
+  dateButton: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7, minHeight: 30, marginTop: 2, marginBottom: 15 },
+  subtitle: { fontSize: 12, fontWeight: '600', color: inkMuted },
+  dateDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: '#B4BFB5' },
+  dateHint: { fontSize: 12, color: inkMuted },
+  selector: { flexDirection: 'row', height: 52, borderRadius: 27, padding: 5, backgroundColor: 'rgba(230,236,227,0.7)', boxShadow: '0 2px 8px rgba(23,63,53,0.025)' },
+  selection: { position: 'absolute', left: 4, top: 4, bottom: 4, backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 23, borderWidth: 1, borderColor: 'white', boxShadow: '0 2px 6px rgba(23,63,53,0.1)' },
+  segment: { flex: 1, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, borderRadius: 24 },
+  segmentText: { fontSize: 14, fontWeight: '500', color: inkMuted },
+  segmentSelected: { color: ink, fontWeight: '700' },
+  modal: { margin: 0, justifyContent: 'flex-end' },
+  sheet: { borderRadius: 34, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, padding: 22, maxHeight: '75%', backgroundColor: 'rgba(245,248,239,0.94)' },
+  grabber: { width: 36, height: 5, borderRadius: 3, backgroundColor: '#C3CEC2', alignSelf: 'center', marginTop: -9, marginBottom: 25 },
+  sheetHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
+  sheetTitle: { fontSize: 29, color: ink, fontWeight: '700', letterSpacing: -1 },
+  close: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.75)' },
+  weekItem: { flexDirection: 'row', alignItems: 'center', gap: 13, padding: 14, borderRadius: 23, marginBottom: 8, minHeight: 78 },
+  selectedWeek: { backgroundColor: 'rgba(222,237,222,0.8)', borderWidth: 1, borderColor: 'white' },
+  weekIcon: { width: 46, height: 46, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.6)', alignItems: 'center', justifyContent: 'center' },
+  weekText: { fontSize: 16, fontWeight: '600', color: ink },
+  weekRange: { fontSize: 13, marginTop: 5, color: inkMuted },
 });

@@ -14,7 +14,6 @@ import {
     StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,7 +22,8 @@ import uuid from 'react-native-uuid';
 import { useAuth } from '@/context/AuthContext';
 import { Item, Meal, MealPreferences, Recipe, SuggestionTurn } from '@/types/types';
 import { scaleIngredients, servingsScale } from '@/utils/servings';
-import { primary } from '@/utils/styles';
+import { ink, inkMuted, primary } from '@/utils/styles';
+import { GlassPressable, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
 import { ApiError, getMealPreferences, getMealSuggestions, saveRecipe } from '../utils/api';
 
 interface SuggestionModalProps {
@@ -72,6 +72,7 @@ const LOADING_MESSAGES = [
 ];
 
 export default function MealSuggestionsModal({ isVisible, onClose, onAddSelectedMeals, listId }: SuggestionModalProps) {
+    const { reduceMotion } = useGlassPreferences();
     const { selectedGroup } = useAuth();
     const [prefs, setPrefs] = useState<MealPreferences | null>(null);
     const [isLoadingPrefs, setIsLoadingPrefs] = useState(true);
@@ -369,7 +370,7 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
     };
 
     return (
-        <Modal animationType="slide" transparent visible={isVisible} onRequestClose={onClose}>
+        <Modal animationType={reduceMotion ? "none" : "slide"} transparent visible={isVisible} onRequestClose={onClose}>
             {/* Full-screen avoider around a bottom sheet with a composer in it —
                 see AddEditRecipeModal for why this has to wrap the sheet rather
                 than be the sheet. */}
@@ -379,13 +380,13 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
             >
                 <Pressable style={styles.backdrop} onPress={onClose} />
                 <View style={[styles.sheet, { paddingBottom: bottomPad }]}>
-                    <View style={styles.header}>
+                    <GlassSurface style={styles.header} intensity={70}>
                         <View style={{ width: 28 }} />
                         <Text style={styles.headerTitle}>Suggest Meals</Text>
-                        <TouchableOpacity onPress={onClose} hitSlop={10}>
-                            <Ionicons name="close-circle" size={28} color="#bbb" />
-                        </TouchableOpacity>
-                    </View>
+                        <GlassPressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close meal suggestions">
+                            <Ionicons name="close" size={21} color={ink} />
+                        </GlassPressable>
+                    </GlassSurface>
 
                     {/* What will actually be applied, and the one-tap way to drop
                         it for tonight only. */}
@@ -394,9 +395,9 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                             <Text style={styles.prefsBarLabel}>
                                 {hasSavedPrefs ? 'Applying' : 'No saved preferences'}
                             </Text>
-                            <TouchableOpacity onPress={handleEditPreferences} hitSlop={8}>
+                            <GlassPressable onPress={handleEditPreferences} hitSlop={8}>
                                 <Text style={styles.prefsBarEdit}>Edit saved</Text>
-                            </TouchableOpacity>
+                            </GlassPressable>
                         </View>
 
                         {isLoadingPrefs ? (
@@ -406,10 +407,12 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                 {(prefs?.dietaryNeeds ?? []).map(need => {
                                     const off = disabledNeeds.includes(need);
                                     return (
-                                        <TouchableOpacity
+                                        <GlassPressable
                                             key={need}
                                             style={[styles.prefChip, off && styles.prefChipOff]}
                                             onPress={() => toggleNeed(need)}
+                                            accessibilityState={{ selected: !off }}
+                                            accessibilityLabel={`${need} dietary preference`}
                                         >
                                             <Text style={[styles.prefChipText, off && styles.prefChipTextOff]}>{need}</Text>
                                             <Ionicons
@@ -418,13 +421,14 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                                 color={off ? '#aaa' : '#fff'}
                                                 style={{ marginLeft: 5 }}
                                             />
-                                        </TouchableOpacity>
+                                        </GlassPressable>
                                     );
                                 })}
                                 {!!prefs?.dislikedIngredients && (
-                                    <TouchableOpacity
+                                    <GlassPressable
                                         style={[styles.prefChip, dislikesOff && styles.prefChipOff]}
                                         onPress={() => setDislikesOff(v => !v)}
+                                        accessibilityState={{ selected: !dislikesOff }}
                                     >
                                         <Text
                                             style={[styles.prefChipText, dislikesOff && styles.prefChipTextOff]}
@@ -438,7 +442,7 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                             color={dislikesOff ? '#aaa' : '#fff'}
                                             style={{ marginLeft: 5 }}
                                         />
-                                    </TouchableOpacity>
+                                    </GlassPressable>
                                 )}
                                 {!hasSavedPrefs && (
                                     <Text style={styles.prefsEmpty}>Anything goes — just ask below.</Text>
@@ -464,11 +468,13 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                         // so nothing here ever overlaps it and the gesture had
                         // nothing to grab. 'on-drag' dismisses on the same swipe.
                         keyboardDismissMode="on-drag"
-                        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+                        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: !reduceMotion })}
                     >
                         {transcript.length === 0 && !isSuggesting && (
-                            <View style={[styles.bubble, styles.assistantBubble]}>
-                                <Text style={styles.bubbleText}>
+                            <View style={styles.welcome}>
+                                <View style={styles.welcomeIcon}><Ionicons name="sparkles-outline" size={28} color={primary} /></View>
+                                <Text style={styles.welcomeTitle}>What sounds good?</Text>
+                                <Text style={styles.welcomeText}>
                                     Tell me what you&apos;re after tonight, tap a few hints, or just
                                     hit send and I&apos;ll pick three.
                                 </Text>
@@ -482,10 +488,13 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                         {bubble.recipes.map(recipe => {
                                             const isSelected = !!selectedSuggestions[recipe.id];
                                             return (
-                                                <TouchableOpacity
+                                                <GlassPressable
                                                     key={recipe.id}
                                                     style={[styles.suggestionCard, isSelected && styles.suggestionCardSelected]}
                                                     onPress={() => toggleSuggestion(recipe.id)}
+                                                    accessibilityRole="checkbox"
+                                                    accessibilityState={{ checked: isSelected }}
+                                                    accessibilityLabel={`Select ${recipe.name}`}
                                                 >
                                                     <View style={[styles.checkbox, isSelected && styles.checkboxOn]}>
                                                         {isSelected && <Ionicons name="checkmark" size={15} color="#fff" />}
@@ -494,19 +503,19 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                                         <Text style={styles.suggestionName}>{recipe.name}</Text>
                                                         <Text style={styles.suggestionDescription}>{recipe.description}</Text>
                                                     </View>
-                                                </TouchableOpacity>
+                                                </GlassPressable>
                                             );
                                         })}
 
                                         {bubble.id === lastSuggestionId && !isSuggesting && (
-                                            <TouchableOpacity
+                                            <GlassPressable
                                                 style={styles.rerollButton}
                                                 onPress={reroll}
                                                 disabled={isLoadingPrefs}
                                             >
                                                 <Ionicons name="refresh" size={16} color={primary} />
                                                 <Text style={styles.rerollText}>Show 3 different options</Text>
-                                            </TouchableOpacity>
+                                            </GlassPressable>
                                         )}
                                     </View>
                                 );
@@ -546,13 +555,14 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                     {group.tags.map(tag => {
                                         const on = selectedHints.includes(tag);
                                         return (
-                                            <TouchableOpacity
+                                            <GlassPressable
                                                 key={tag}
                                                 style={[styles.hintChip, on && styles.hintChipOn]}
                                                 onPress={() => toggleHint(tag)}
+                                                accessibilityState={{ selected: on }}
                                             >
                                                 <Text style={[styles.hintChipText, on && styles.hintChipTextOn]}>{tag}</Text>
-                                            </TouchableOpacity>
+                                            </GlassPressable>
                                         );
                                     })}
                                 </ScrollView>
@@ -560,30 +570,32 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                         ))}
                     </View>
 
-                    <View style={styles.composer}>
+                    <GlassSurface style={styles.composer} intensity={65}>
                         <TextInput
                             style={styles.composerInput}
                             placeholder={transcript.length ? 'Ask for something different...' : 'Anything specific tonight?'}
-                            placeholderTextColor="#999"
+                            placeholderTextColor={inkMuted}
+                            accessibilityLabel="Describe the meals you would like"
                             value={input}
                             onChangeText={setInput}
                             multiline
                         />
-                        <TouchableOpacity
+                        <GlassPressable
                             style={[styles.sendButton, (isSuggesting || isLoadingPrefs) && styles.sendButtonDisabled]}
                             onPress={generate}
+                            accessibilityLabel="Generate meal suggestions"
                             disabled={isSuggesting || isLoadingPrefs}
                         >
                             <Ionicons name={transcript.length ? 'arrow-up' : 'sparkles'} size={20} color="#fff" />
-                        </TouchableOpacity>
-                    </View>
+                        </GlassPressable>
+                    </GlassSurface>
 
                     {selectedCount > 0 && (
-                        <TouchableOpacity style={styles.addButton} onPress={handleAddSelectedMeals}>
+                        <GlassPressable style={styles.addButton} onPress={handleAddSelectedMeals}>
                             <Text style={styles.addButtonText}>
                                 Add {selectedCount} meal{selectedCount === 1 ? '' : 's'} to the plan
                             </Text>
-                        </TouchableOpacity>
+                        </GlassPressable>
                     )}
                 </View>
             </KeyboardAvoidingView>
@@ -593,168 +605,56 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
 
 const styles = StyleSheet.create({
     overlay: { flex: 1, justifyContent: 'flex-end' },
-    backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-    sheet: {
-        backgroundColor: '#fff',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        // paddingBottom is set inline — it depends on the home indicator and on
-        // whether the keyboard is currently covering it.
-        maxHeight: '92%',
-        flexShrink: 1,
-    },
-
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#EFEFEF',
-    },
-    headerTitle: { fontSize: 17, fontWeight: '700', color: '#222' },
-
-    prefsBar: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, backgroundColor: '#FAFAFA' },
+    backdrop: { flex: 1, backgroundColor: 'rgba(15,37,28,0.32)' },
+    sheet: { backgroundColor: '#F5F5EF', borderTopLeftRadius: 34, borderTopRightRadius: 34, maxHeight: '94%', flexShrink: 1, overflow: 'hidden' },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 15, borderRadius: 0, borderWidth: 0 },
+    headerTitle: { fontSize: 19, fontWeight: '700', letterSpacing: -0.5, color: ink },
+    closeButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E5EDE3', alignItems: 'center', justifyContent: 'center' },
+    prefsBar: { paddingHorizontal: 22, paddingTop: 15, paddingBottom: 12, backgroundColor: '#EBF0E7' },
     prefsBarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    prefsBarLabel: { fontSize: 11, fontWeight: '700', color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 },
-    prefsBarEdit: { fontSize: 13, color: primary, fontWeight: '600' },
-    prefsBarNote: { fontSize: 11, color: '#999', marginTop: 6, fontStyle: 'italic' },
-    prefsEmpty: { fontSize: 14, color: '#999', marginTop: 4 },
-    chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
-
-    prefChip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: primary,
-        borderRadius: 16,
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        marginRight: 6,
-        marginBottom: 6,
-        maxWidth: '100%',
-        borderWidth: 1,
-        borderColor: primary,
-    },
-    prefChipOff: { backgroundColor: '#F0F0F0', borderColor: '#E0E0E0' },
-    prefChipText: { color: '#fff', fontSize: 13, fontWeight: '600', flexShrink: 1 },
-    prefChipTextOff: { color: '#aaa', textDecorationLine: 'line-through' },
-
+    prefsBarLabel: { fontSize: 9, fontWeight: '700', color: inkMuted, textTransform: 'uppercase', letterSpacing: 1.3 },
+    prefsBarEdit: { fontSize: 12, color: primary, fontWeight: '600' },
+    prefsBarNote: { fontSize: 11, lineHeight: 17, color: inkMuted, marginTop: 5 },
+    prefsEmpty: { fontSize: 13, color: inkMuted, marginTop: 4 },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 7 },
+    prefChip: { flexDirection: 'row', alignItems: 'center', backgroundColor: primary, borderRadius: 17, paddingVertical: 8, paddingHorizontal: 12, marginRight: 6, marginBottom: 6, maxWidth: '100%', borderWidth: 1, borderColor: primary },
+    prefChipOff: { backgroundColor: '#F5F5EF', borderColor: '#DCE3D8' },
+    prefChipText: { color: '#FFF', fontSize: 12, fontWeight: '600', flexShrink: 1 },
+    prefChipTextOff: { color: inkMuted, textDecorationLine: 'line-through' },
     transcript: { flexGrow: 0, flexShrink: 1 },
-    transcriptContent: { padding: 16, paddingBottom: 8 },
-
-    bubble: { borderRadius: 16, paddingVertical: 10, paddingHorizontal: 14, marginBottom: 10, maxWidth: '85%' },
-    assistantBubble: { backgroundColor: '#F2F2F4', alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
-    userBubble: { backgroundColor: primary, alignSelf: 'flex-end', borderBottomRightRadius: 4 },
-    bubbleText: { fontSize: 15, color: '#222', lineHeight: 21 },
-    userBubbleText: { color: '#fff' },
+    transcriptContent: { padding: 20, paddingBottom: 10 },
+    welcome: { paddingVertical: 12, alignItems: 'center' },
+    welcomeIcon: { width: 64, height: 64, borderRadius: 23, backgroundColor: '#E8D9C7', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+    welcomeTitle: { fontSize: 26, fontWeight: '700', letterSpacing: -0.9, color: ink, marginBottom: 9 },
+    welcomeText: { fontSize: 14, lineHeight: 22, color: inkMuted, textAlign: 'center', maxWidth: 290 },
+    bubble: { borderRadius: 22, paddingVertical: 13, paddingHorizontal: 17, marginBottom: 12, maxWidth: '90%' },
+    assistantBubble: { backgroundColor: '#E8EEE3', alignSelf: 'flex-start', borderBottomLeftRadius: 6 },
+    userBubble: { backgroundColor: primary, alignSelf: 'flex-end', borderBottomRightRadius: 6 },
+    bubbleText: { fontSize: 15, color: ink, lineHeight: 23 },
+    userBubbleText: { color: '#FFF' },
     loadingBubble: { flexDirection: 'row', alignItems: 'center' },
-    loadingText: { marginLeft: 10, fontSize: 15, color: '#666', fontStyle: 'italic' },
-
-    suggestionGroup: { marginBottom: 10 },
-    suggestionCard: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        padding: 14,
-        borderWidth: 1,
-        borderColor: '#E4E4E7',
-        borderRadius: 14,
-        marginBottom: 8,
-        backgroundColor: '#fff',
-    },
-    suggestionCardSelected: { borderColor: primary, backgroundColor: '#F4FAF8' },
-    rerollButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        alignSelf: 'flex-start',
-        paddingVertical: 8,
-        paddingHorizontal: 14,
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: '#E4E4E7',
-        backgroundColor: '#FAFAFA',
-        marginTop: 2,
-    },
-    rerollText: { color: primary, fontSize: 14, fontWeight: '600' },
-    checkbox: {
-        width: 22,
-        height: 22,
-        borderWidth: 1.5,
-        borderColor: '#CCC',
-        borderRadius: 6,
-        marginRight: 12,
-        marginTop: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
+    loadingText: { marginLeft: 10, fontSize: 14, color: inkMuted, flexShrink: 1 },
+    suggestionGroup: { marginBottom: 12 },
+    suggestionCard: { flexDirection: 'row', alignItems: 'flex-start', padding: 18, borderWidth: 1, borderColor: '#FFF', borderRadius: 25, marginBottom: 10, backgroundColor: 'rgba(255,255,255,0.9)' },
+    suggestionCardSelected: { borderColor: primary, backgroundColor: '#DCEDE2' },
+    rerollButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, alignSelf: 'flex-start', paddingVertical: 11, paddingHorizontal: 15, borderRadius: 21, backgroundColor: '#E6EDE1', marginTop: 3 },
+    rerollText: { color: primary, fontSize: 12, fontWeight: '600' },
+    checkbox: { width: 24, height: 24, borderWidth: 1.5, borderColor: '#C5D1C2', borderRadius: 12, marginRight: 12, marginTop: 1, alignItems: 'center', justifyContent: 'center' },
     checkboxOn: { backgroundColor: primary, borderColor: primary },
-    suggestionName: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-    suggestionDescription: { fontSize: 14, color: '#666', marginTop: 3, lineHeight: 19 },
-
-    hintsArea: { borderTopWidth: 1, borderTopColor: '#EFEFEF', paddingTop: 8 },
-    hintRow: { marginBottom: 6 },
-    hintRowLabel: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#AAA',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-        paddingHorizontal: 16,
-        marginBottom: 4,
-    },
-    hintRowContent: { paddingHorizontal: 16 },
-    hintChip: {
-        backgroundColor: '#F2F2F4',
-        borderRadius: 15,
-        paddingVertical: 6,
-        paddingHorizontal: 13,
-        marginRight: 6,
-        borderWidth: 1,
-        borderColor: '#EAEAEC',
-    },
-    hintChipOn: { backgroundColor: '#E4F1ED', borderColor: primary },
-    hintChipText: { fontSize: 13, color: '#555' },
+    suggestionName: { fontSize: 17, fontWeight: '700', letterSpacing: -0.5, color: ink },
+    suggestionDescription: { fontSize: 13, color: inkMuted, marginTop: 6, lineHeight: 20 },
+    hintsArea: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#DCE3D8', paddingTop: 13 },
+    hintRow: { marginBottom: 9 },
+    hintRowLabel: { fontSize: 9, fontWeight: '700', color: inkMuted, textTransform: 'uppercase', letterSpacing: 1.3, paddingHorizontal: 22, marginBottom: 6 },
+    hintRowContent: { paddingHorizontal: 20 },
+    hintChip: { backgroundColor: '#FFF', borderRadius: 18, paddingVertical: 8, paddingHorizontal: 13, marginRight: 6, borderWidth: 1, borderColor: '#FFF' },
+    hintChipOn: { backgroundColor: '#DCEDE2', borderColor: primary },
+    hintChipText: { fontSize: 12, color: inkMuted },
     hintChipTextOn: { color: primary, fontWeight: '700' },
-
-    composer: {
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-        paddingHorizontal: 16,
-        paddingTop: 10,
-    },
-    composerInput: {
-        flex: 1,
-        borderWidth: 1,
-        borderColor: '#E4E4E7',
-        borderRadius: 20,
-        paddingHorizontal: 14,
-        paddingTop: 10,
-        paddingBottom: 10,
-        fontSize: 15,
-        color: '#222',
-        maxHeight: 100,
-        backgroundColor: '#FAFAFA',
-    },
-    sendButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: primary,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginLeft: 8,
-    },
-    sendButtonDisabled: { backgroundColor: '#CCC' },
-
-    addButton: {
-        backgroundColor: primary,
-        marginHorizontal: 16,
-        marginTop: 10,
-        paddingVertical: 14,
-        borderRadius: 12,
-        alignItems: 'center',
-    },
-    addButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+    composer: { flexDirection: 'row', alignItems: 'flex-end', marginHorizontal: 16, marginTop: 3, padding: 7, borderRadius: 28 },
+    composerInput: { flex: 1, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 12, fontSize: 14, color: ink, maxHeight: 100 },
+    sendButton: { width: 43, height: 43, borderRadius: 22, backgroundColor: primary, alignItems: 'center', justifyContent: 'center', marginLeft: 7 },
+    sendButtonDisabled: { backgroundColor: '#BDCFBD' },
+    addButton: { backgroundColor: primary, marginHorizontal: 16, marginTop: 11, paddingVertical: 16, borderRadius: 25, alignItems: 'center' },
+    addButtonText: { color: '#FFF', fontSize: 15, fontWeight: '700' },
 });

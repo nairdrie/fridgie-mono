@@ -26,11 +26,12 @@
 
 import { Item, List, ListSummary } from '@/types/types';
 import { getList } from '@/utils/api';
-import { hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
+import { ink, inkFaint, inkMuted, primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GlassPressable, GlassSurface } from './ui/Glass';
 import React, { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 interface CarryOverBannerProps {
   groupId: string | undefined;
@@ -139,11 +140,11 @@ export default function CarryOverBanner({ groupId, currentList, allLists, onCarr
   const preview = pending.slice(0, 3).map((r) => (r.text ?? '').trim()).filter(Boolean).join(', ');
 
   return (
-    <View style={styles.banner}>
-      <Ionicons name="arrow-forward-circle-outline" size={20} color={primary} />
+    <GlassSurface style={styles.banner} intensity={32}>
+      <View style={styles.icon}><Ionicons name="arrow-forward" size={18} color={primary} /></View>
       <View style={styles.body}>
         <Text style={styles.title}>
-          {count} thing{count === 1 ? '' : 's'} you didn&apos;t get last week
+          {count} thing{count === 1 ? '' : 's'} to bring forward
         </Text>
         {!!preview && (
           <Text style={styles.preview} numberOfLines={1}>
@@ -151,15 +152,15 @@ export default function CarryOverBanner({ groupId, currentList, allLists, onCarr
           </Text>
         )}
       </View>
-      <Pressable
+      <GlassPressable
         style={styles.action}
         onPress={accept}
         accessibilityRole="button"
         accessibilityLabel={`Add ${count} items from last week to this list`}
       >
         <Text style={styles.actionText}>Add</Text>
-      </Pressable>
-      <Pressable
+      </GlassPressable>
+      <GlassPressable
         style={styles.dismiss}
         onPress={close}
         accessibilityRole="button"
@@ -167,8 +168,8 @@ export default function CarryOverBanner({ groupId, currentList, allLists, onCarr
         hitSlop={8}
       >
         <Ionicons name="close" size={18} color={inkFaint} />
-      </Pressable>
-    </View>
+      </GlassPressable>
+    </GlassSurface>
   );
 }
 
@@ -179,17 +180,19 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    marginHorizontal: 12,
-    marginTop: 8,
-    borderRadius: 12,
-    backgroundColor: surface,
+    marginHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 4,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.6)',
     borderWidth: 1,
-    borderColor: hairline,
+    borderColor: 'rgba(255,255,255,0.9)',
   },
   body: { flex: 1 },
-  title: { fontSize: 14, fontWeight: '600', color: ink },
+  icon: { width: 33, height: 33, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#DCEDE2' },
+  title: { fontSize: 13, fontWeight: '600', color: ink },
   preview: { fontSize: 12, color: inkMuted, marginTop: 2 },
-  action: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: primary },
+  action: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 17, backgroundColor: primary },
   actionText: { fontSize: 13, fontWeight: '700', color: '#fff' },
   dismiss: { paddingHorizontal: 2 },
 });

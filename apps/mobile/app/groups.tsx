@@ -1,3 +1,4 @@
+import { AmbientBackground, GlassPressable as TouchableOpacity, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
 import { useAuth } from '@/context/AuthContext';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Group, PendingInvitation, UserProfile } from '@/types/types';
@@ -26,7 +27,6 @@ import {
     StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
     View
 } from 'react-native';
 
@@ -251,12 +251,12 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
     };
 
     return (
-        <View style={styles.groupItemContainer}>
+        <GlassSurface style={[styles.groupItemContainer, isSelected && styles.selectedGroupContainer]}>
             <View style={styles.groupItem}>
                 <TouchableOpacity style={styles.groupSelectableArea} onPress={() => onSelect(group)}>
                     <Ionicons name={isSelected ? "checkmark-circle" : "ellipse-outline"} size={24} color={isSelected ? primary : "#ccc"} />
-                    <Text style={styles.groupName}>{group.name}</Text>
-                    {isSelected && <Text style={styles.selectedText}>(Selected)</Text>}
+                    <Text style={styles.groupName} numberOfLines={1}>{group.name}</Text>
+                    {isSelected && <Text style={styles.selectedText}>Active</Text>}
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.expandButton} onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); onToggleExpand(group); }}>
                     <Ionicons name={isExpanded ? "chevron-up-outline" : "chevron-down-outline"} size={24} color="#666" />
@@ -413,12 +413,13 @@ const GroupItem = ({ group, isSelected, isExpanded, onSelect, onToggleExpand, on
                     )}
                 </View>
             )}
-        </View>
+        </GlassSurface>
     );
 };
 
 
 export default function GroupsScreen() {
+    const { reduceMotion } = useGlassPreferences();
     const router = useRouter();
     const { groups, selectedGroup, selectGroup, refreshAuthUser } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -529,6 +530,7 @@ export default function GroupsScreen() {
     const modalKeyboard = useKeyboardAwareScroll({ enabled: isGroupModalVisible });
 
     return (
+        <AmbientBackground>
         <SafeAreaView style={styles.container}>
             {/* An expanded group carries its own name field and member search,
                 and the last group on a long page has nothing below it — so
@@ -537,22 +539,23 @@ export default function GroupsScreen() {
             <ScrollView
                 ref={pageKeyboard.scrollRef}
                 {...pageKeyboard.scrollProps}
-                contentContainerStyle={{ paddingBottom: pageKeyboard.keyboardSpace }}
+                contentContainerStyle={{ paddingBottom: Math.max(40, pageKeyboard.keyboardSpace) }}
                 keyboardShouldPersistTaps="handled"
             >
                 <View style={styles.groupsContainer}>
                     <View style={styles.sectionHeader}>
                         <View style={styles.headerLeft}>
                             <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                                <Ionicons name="chevron-back-outline" size={30} color="black" />
+                                <Ionicons name="chevron-back" size={22} color="#173F35" />
                             </TouchableOpacity>
-                            <Text style={styles.sectionTitle}>My Groups</Text>
+                            <View><Text style={styles.eyebrow}>BETTER TOGETHER</Text><Text style={styles.sectionTitle}>Your people</Text></View>
                         </View>
                         <TouchableOpacity style={styles.addButton} onPress={openCreateGroupModal}>
                             <Ionicons name="add" size={24} color="#fff" />
                         </TouchableOpacity>
                     </View>
                     
+                    <Text style={styles.pageSubtitle}>A shared kitchen, wherever you are. Pick a group to plan and shop together.</Text>
                     {groups.map(item => (
                         <GroupItem
                             key={item.id}
@@ -567,7 +570,8 @@ export default function GroupsScreen() {
 
                     {groups.length === 0 && (
                          <View style={styles.emptyContainer}>
-                            <Ionicons name="people-outline" size={40} color="#ccc" style={styles.emptyIcon} />
+                            <View style={styles.emptyIcon}><Ionicons name="people-outline" size={36} color={primary} /></View>
+                            <Text style={styles.emptyTitle}>Good food brings us together</Text>
                             <Text style={styles.emptySubtitle}>Create or join a group to start sharing lists.</Text>
                             <TouchableOpacity style={styles.primaryButton} onPress={openCreateGroupModal}>
                                 <Text style={styles.primaryButtonText}>Create Group</Text>
@@ -577,7 +581,7 @@ export default function GroupsScreen() {
                 </View>
             </ScrollView>
 
-            <Modal visible={isGroupModalVisible} animationType="slide">
+            <Modal visible={isGroupModalVisible} animationType={reduceMotion ? "none" : "slide"} presentationStyle="pageSheet" onRequestClose={() => setGroupModalVisible(false)}>
                 {/* The Create Group / Cancel row is pinned to the bottom, so
                     with the keyboard up — which it always is here, both fields
                     are typed into — it sat underneath it and the group could
@@ -596,7 +600,7 @@ export default function GroupsScreen() {
                         keyExtractor={(item) => item.uid}
                         ListHeaderComponent={
                             <>
-                                <Text style={styles.modalTitle}>Create New Group</Text>
+                                <Text style={styles.modalTitle}>Bring your people together</Text>
                                 <Text style={styles.inputLabel}>Group Name</Text>
                                 <TextInput
                                     style={styles.textInput}
@@ -661,72 +665,68 @@ export default function GroupsScreen() {
                 </KeyboardAvoidingView>
             </Modal>
         </SafeAreaView>
+        </AmbientBackground>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8f9fa', paddingTop: Constants.statusBarHeight },
-    groupsContainer: { paddingHorizontal: 16, marginBottom: 16 },
-    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-    headerLeft: { flexDirection: 'row', alignItems: 'center' },
-    sectionTitle: { fontSize: 22, fontWeight: 'bold' },
-    addButton: { backgroundColor: primary, width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
-    backButton: { paddingRight: 10 },
-    emptyContainer: { alignItems: 'center', paddingVertical: 40 },
-    emptyIcon: { marginBottom: 16 },
-    emptySubtitle: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20, paddingHorizontal: 20 },
-    primaryButton: { backgroundColor: primary, paddingVertical: 12, paddingHorizontal: 30, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
-    primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-    modalViewContainer: { flex: 1, backgroundColor: '#f8f9fa' },
-    modalScrollView: { padding: 16 },
-    modalTitle: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-    
-    // Shared styles for user items
-    userItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 10, borderRadius: 8, marginBottom: 8 },
-    userAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12, borderWidth:1,borderColor:'#ddd' },
+    container: { flex: 1, backgroundColor: 'transparent', paddingTop: Platform.OS === 'android' ? Constants.statusBarHeight : 0 },
+    groupsContainer: { paddingHorizontal: 22, paddingTop: 18, marginBottom: 16 },
+    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+    headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+    eyebrow: { fontSize: 9, fontWeight: '700', letterSpacing: 1.5, color: '#78857D', marginBottom: 6 },
+    sectionTitle: { fontSize: 30, fontWeight: '700', letterSpacing: -1.2, color: '#173F35' },
+    pageSubtitle: { fontSize: 14, lineHeight: 22, color: '#78857D', marginBottom: 26, paddingHorizontal: 2 },
+    addButton: { backgroundColor: primary, width: 44, height: 44, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+    backButton: { width: 38, height: 46, marginLeft: -8, marginRight: 5, alignItems: 'center', justifyContent: 'center' },
+    emptyContainer: { alignItems: 'center', paddingVertical: 46 },
+    emptyIcon: { marginBottom: 20, width: 82, height: 82, borderRadius: 29, backgroundColor: '#DCEDE2', alignItems: 'center', justifyContent: 'center' },
+    emptyTitle: { fontSize: 21, fontWeight: '700', letterSpacing: -0.6, color: '#173F35', textAlign: 'center', marginBottom: 9 },
+    emptySubtitle: { fontSize: 14, lineHeight: 21, color: '#78857D', textAlign: 'center', marginBottom: 24, paddingHorizontal: 20 },
+    primaryButton: { backgroundColor: primary, paddingVertical: 15, paddingHorizontal: 24, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+    primaryButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+    modalViewContainer: { flex: 1, backgroundColor: '#F5F5EF' },
+    modalScrollView: { padding: 24 },
+    modalTitle: { fontSize: 29, lineHeight: 34, fontWeight: '700', letterSpacing: -1, color: '#173F35', marginBottom: 24, marginTop: 18 },
+    userItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.8)', padding: 12, borderRadius: 19, marginBottom: 8 },
+    userAvatar: { width: 42, height: 42, borderRadius: 17, marginRight: 12, borderWidth: 2, borderColor: '#fff' },
     userInfo: { flex: 1 },
-    userName: { fontSize: 16, fontWeight: '500', marginRight:10 },
-    userContact: { fontSize: 14, color: '#666' },
-    inlineButton: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: primary, borderRadius: 15, marginLeft: 8 },
-    inlineButtonText: { color: '#fff', fontWeight: '500' },
-    stagedItem: { backgroundColor: '#eef5ff' },
-    pendingItem: { backgroundColor: '#fffbe6' },
-    
-    // Styles for Create/Edit Modals/Views
-    inputLabel: { fontSize: 14, fontWeight: '500', color: '#333', marginBottom: 8, marginTop: 10 },
-    textInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, fontSize: 16, marginBottom: 10 },
-    readOnlyInput: { backgroundColor: '#f0f0f0', color: '#666' },
-    inputHint: { fontSize: 12, color: '#666', lineHeight: 17, marginBottom: 10, marginTop: -4 },
-    stepperRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, marginBottom: 10, overflow: 'hidden' },
-    stepperButton: { paddingHorizontal: 18, paddingVertical: 12, alignItems: 'center', justifyContent: 'center' },
+    userName: { fontSize: 15, fontWeight: '600', marginRight: 10, color: '#173F35', flexShrink: 1 },
+    userContact: { fontSize: 12, color: '#78857D', marginTop: 4 },
+    inlineButton: { paddingHorizontal: 13, paddingVertical: 9, backgroundColor: primary, borderRadius: 14, marginLeft: 8 },
+    inlineButtonText: { color: '#fff', fontWeight: '600', fontSize: 12 },
+    stagedItem: { backgroundColor: '#E1ECE2' },
+    pendingItem: { backgroundColor: '#F4ECDD' },
+    inputLabel: { fontSize: 12, fontWeight: '600', color: '#476458', marginBottom: 9, marginTop: 16 },
+    textInput: { backgroundColor: 'rgba(255,255,255,0.8)', borderWidth: 1, borderColor: '#E2E8DE', borderRadius: 17, padding: 15, fontSize: 15, color: '#173F35', marginBottom: 10 },
+    readOnlyInput: { backgroundColor: '#EBEEE6', color: '#78857D' },
+    inputHint: { fontSize: 12, color: '#78857D', lineHeight: 19, marginBottom: 12, marginTop: -1 },
+    stepperRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.8)', borderWidth: 1, borderColor: '#E2E8DE', borderRadius: 18, marginBottom: 10, overflow: 'hidden' },
+    stepperButton: { paddingHorizontal: 20, paddingVertical: 15, alignItems: 'center', justifyContent: 'center' },
     stepperButtonDisabled: { opacity: 0.5 },
-    stepperValue: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
-    stepperValueText: { fontSize: 16, fontWeight: '600', color: '#333' },
-    stepperValueUnset: { fontSize: 16, color: '#999' },
-    modalFooter: { flexDirection: 'row', paddingVertical: 16, marginTop: 16, borderTopWidth: 1, borderTopColor: '#eee', backgroundColor: '#fff', paddingHorizontal: 8 },
-    modalButton: { flex: 1, marginHorizontal: 8, paddingVertical: 12, borderRadius: 25, alignItems: 'center' },
-    secondaryButton: { backgroundColor: '#e9ecef' },
-    secondaryButtonText: { color: '#495057', fontSize: 16, fontWeight: '600' },
-
-    // Styles for GroupItem
-    groupItemContainer: { backgroundColor: '#fff', borderRadius: 8, marginBottom: 10, borderColor: '#eee', borderWidth: 1, overflow: 'hidden' },
-    groupItem: { paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    groupSelectableArea: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 10 },
-    groupName: { fontSize: 16, marginLeft: 12 },
-    selectedText: { fontSize: 14, fontStyle: 'italic', color: primary, marginLeft: 8 },
-    expandButton: { padding: 5 },
-    
-    // Styles for Expanded View
-    expandedContent: { paddingHorizontal: 16, paddingBottom: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-    deleteSection: { paddingTop: 15, marginTop: 15, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-    deleteButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10 },
-    deleteButtonText: { color: '#c94444', fontWeight: '600', marginLeft: 8 },
+    stepperValue: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14 },
+    stepperValueText: { fontSize: 15, fontWeight: '600', color: '#173F35' },
+    stepperValueUnset: { fontSize: 15, color: '#8B988E' },
+    modalFooter: { flexDirection: 'row', paddingVertical: 16, marginTop: 16, borderTopWidth: 1, borderTopColor: '#E2E8DE', backgroundColor: 'rgba(255,255,255,0.8)', paddingHorizontal: 14 },
+    modalButton: { flex: 1, marginHorizontal: 6, paddingVertical: 15, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+    secondaryButton: { backgroundColor: '#E6EBE4' },
+    secondaryButtonText: { color: '#476458', fontSize: 15, fontWeight: '600' },
+    groupItemContainer: { borderRadius: 25, marginBottom: 13, overflow: 'hidden' },
+    selectedGroupContainer: { borderColor: '#BDDAC5', backgroundColor: 'rgba(220,237,226,0.7)' },
+    groupItem: { paddingVertical: 19, paddingHorizontal: 18, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    groupSelectableArea: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 6, minHeight: 30 },
+    groupName: { fontSize: 17, fontWeight: '600', letterSpacing: -0.3, color: '#173F35', marginLeft: 11, flex: 1 },
+    selectedText: { fontSize: 10, fontWeight: '600', color: primary, marginLeft: 8, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: '#E3EEE0', borderRadius: 9 },
+    expandButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+    expandedContent: { paddingHorizontal: 19, paddingBottom: 22, paddingTop: 4, borderTopWidth: 1, borderTopColor: '#E2E8DE' },
+    deleteSection: { paddingTop: 17, marginTop: 18, borderTopWidth: 1, borderTopColor: '#E2E8DE' },
+    deleteButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 12 },
+    deleteButtonText: { color: '#AE5341', fontWeight: '600', marginLeft: 8 },
     confirmationContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    confirmationText: { fontSize: 14, fontWeight: '500' },
-    confirmButton: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20 },
-    cancelButton: { backgroundColor: '#e9ecef' },
-    cancelButtonText: { fontWeight: '600' },
-    deleteConfirmButton: { backgroundColor: '#c94444', color: 'white', marginLeft: 8 },
-    deleteConfirmButtonText: { color: 'white' }
+    confirmationText: { fontSize: 13, fontWeight: '500', color: '#476458', flexShrink: 1 },
+    confirmButton: { paddingVertical: 11, paddingHorizontal: 14, borderRadius: 15 },
+    cancelButton: { backgroundColor: '#E6EBE4' },
+    cancelButtonText: { fontWeight: '600', color: '#476458' },
+    deleteConfirmButton: { backgroundColor: '#AE5341', color: 'white', marginLeft: 8 },
+    deleteConfirmButtonText: { color: 'white', fontWeight: '600' }
 });
-

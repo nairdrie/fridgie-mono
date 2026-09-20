@@ -5,10 +5,10 @@ import {
   Modal,
   Platform,
   ScrollView,
+  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View
 } from 'react-native';
 
@@ -39,7 +39,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
-import Logo from '../components/Logo';
+import { AmbientBackground, GlassPressable as TouchableOpacity, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
+import Animated, { FadeInDown, FadeInUp, ReduceMotion } from 'react-native-reanimated';
 
 
 type LoadingState = "google" | "apple" | "facebook" | "existing" | "email" | "password" | "";
@@ -65,6 +66,7 @@ const providerButtonLabel = (providerId: string) => `Continue with ${providerLab
 
 
 export default function LoginScreen() {
+    const { reduceMotion } = useGlassPreferences();
   const router = useRouter();
   const keyboard = useKeyboardAwareScroll();
 
@@ -90,8 +92,8 @@ export default function LoginScreen() {
 
     const CheckItem = ({ label, passed }: { label: string, passed: boolean }) => (
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-        <Text style={{ color: passed ? '#106b23ff' : '#555', marginRight: 8, fontSize: 16 }}>{passed ? '✓' : '○'}</Text>
-        <Text style={{ color: passed ? '#106b23ff' : '#555' }}>{label}</Text>
+        <Text style={{ color: passed ? '#23785E' : '#78857D', marginRight: 8, fontSize: 16 }}>{passed ? '✓' : '○'}</Text>
+        <Text style={{ color: passed ? '#23785E' : '#78857D' }}>{label}</Text>
       </View>
     );
 
@@ -185,6 +187,8 @@ export default function LoginScreen() {
         // If 'password' is a valid sign-in method for this email...
         if (methods.includes('password')) {
           setUiState("enterPassword");
+        } else if (Platform.OS === 'web') {
+          setError(`This account uses ${providerLabel(methods[0])}. Open the Fridgie app to continue with that sign-in method.`);
         } else if (methods.includes('google.com')) {
           // Google-linked account: skip the dead end and open the Google sheet for them.
           handedOff = true;
@@ -301,6 +305,8 @@ export default function LoginScreen() {
   };
 
   return (
+    <AmbientBackground>
+    <SafeAreaView style={{ flex: 1 }}>
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -312,14 +318,25 @@ export default function LoginScreen() {
         contentContainerStyle={{ flexGrow: 1, paddingBottom: keyboard.keyboardSpace }}
         keyboardShouldPersistTaps="handled"
       >
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <View
           style={styles.outerContainer}
         >
-          <View style={styles.logoContainer}>
-            <Logo variant="wide" style={styles.logo} />
-          </View>
-          <View style={styles.loginCard}>
+          <View style={styles.loginNavigation}><GlassSurface style={styles.navigationGlass}><TouchableOpacity style={styles.navigationButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={21} color="#173F35" /></TouchableOpacity></GlassSurface></View>
+          <Animated.View entering={FadeInDown.duration(650).reduceMotion(ReduceMotion.System)} style={styles.logoContainer}>
+            <View style={styles.brandRow}>
+              <View style={styles.brandMark}><Ionicons name="leaf" size={24} color={primary} /></View>
+              <Text style={styles.brandName}>fridgie</Text>
+            </View>
+            <Text style={styles.heroTitle}>Life tastes better{ '\n' }together.</Text>
+            <Text style={styles.heroSubtitle}>Your recipes, your people, your everyday.</Text>
+            <View style={styles.heroChips}>
+              <GlassSurface style={styles.heroChip}><Ionicons name="basket-outline" size={15} color={primary} /><Text style={styles.heroChipText}>Shop simply</Text></GlassSurface>
+              <GlassSurface style={styles.heroChip}><Ionicons name="restaurant-outline" size={15} color={primary} /><Text style={styles.heroChipText}>Eat well</Text></GlassSurface>
+            </View>
+          </Animated.View>
+          <Animated.View entering={FadeInUp.delay(120).duration(600).reduceMotion(ReduceMotion.System)} style={styles.cardWrapper}>
+          <GlassSurface style={styles.loginCard} intensity={60}>
             <View style={styles.loginCardUpper}>
               {uiState !== 'initial' && (
                 <TouchableOpacity onPress={() => {
@@ -333,17 +350,17 @@ export default function LoginScreen() {
               )}
               <Text style={styles.heading}>
                 {uiState === 'createPassword'
-                  ? 'Create an account'
+                  ? 'Make yourself at home'
                   : uiState === 'enterPassword'
-                    ? 'Login'
-                    : 'Login or create an account'}
+                    ? 'Welcome back'
+                    : 'Make room for good food'}
               </Text>
             </View>
 
             {uiState === 'initial' ? (
               <TextInput
                 style={styles.inputField}
-                placeholder="Enter your email address..."
+                placeholder="Your email address"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -361,7 +378,7 @@ export default function LoginScreen() {
                 onPress={handleEmailContinue}
                 disabled={loading === 'email'}
               >
-                {loading === 'email' ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue with Email</Text>}
+                {loading === 'email' ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue with email</Text>}
               </TouchableOpacity>
             )}
 
@@ -410,12 +427,12 @@ export default function LoginScreen() {
                   onPress={handleCreateAccount}
                   disabled={loading === 'password'}
                 >
-                  {loading === 'password' ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Create Account & Sign In</Text>}
+                  {loading === 'password' ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Create your account</Text>}
                 </TouchableOpacity>
               </>
             )}
 
-            {uiState === 'initial' && (
+            {uiState === 'initial' && Platform.OS !== 'web' && (
               <>
                 <View style={styles.separatorContainer}>
                   <View style={styles.separatorLine} />
@@ -440,7 +457,7 @@ export default function LoginScreen() {
                   <AppleAuthentication.AppleAuthenticationButton
                     buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
                     buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
-                    cornerRadius={30}
+                    cornerRadius={19}
                     style={[styles.appleButton, (loading !== '' && loading !== 'apple') && styles.disabledButton]}
                     onPress={handleAppleSignIn}
                   />
@@ -451,7 +468,7 @@ export default function LoginScreen() {
                   disabled={loading !== ''}
                 >
                   {loading === 'facebook' ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={primary} />
                   ) : (
                     <>
                       <Image source={require('../assets/f-logo.png')} style={{ width: 24, height: 24, marginRight: 10 }} />
@@ -463,11 +480,13 @@ export default function LoginScreen() {
             )}
 
             {error && <Text style={styles.error}>{error}</Text>}
-          </View>
+            <Text style={styles.footerNote}>A little more organized. A lot more delicious.</Text>
+          </GlassSurface>
+          </Animated.View>
         </View>
 
 
-        <Modal visible={showConflictModal} transparent={true} animationType="fade">
+        <Modal visible={showConflictModal} transparent={true} animationType={reduceMotion ? "none" : "fade"}>
           <View style={styles.modalContainer}>
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>Account Exists</Text>
@@ -491,113 +510,52 @@ export default function LoginScreen() {
         </Modal>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
+    </AmbientBackground>
   );
 }
 
-// --- Add the new styles to your existing StyleSheet ---
 const styles = StyleSheet.create({
-    outerContainer: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: '#0b2215',
-    justifyContent: 'flex-end', // changed from nothing -> ensures loginCard is pushed up
-  },
-  loginCard: {
-    backgroundColor: 'white', borderTopLeftRadius: 12, borderTopRightRadius: 12, padding: 24, width: '100%', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, elevation: 5
-  },
-  loginCardUpper: {
-    flexDirection: 'row', alignItems: 'center', marginBottom: 24,
-  },
-  heading: { fontSize: 24, fontWeight: '600', textAlign: 'center', flex: 1, },
-  primaryButton: { backgroundColor: primary, paddingVertical: 14, borderRadius: 32, alignItems: 'center', marginBottom: 16, justifyContent: 'center', height: 50 },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  appleButton: { height: 52, marginBottom: 16 },
-  disabledButton: { opacity: 0.6 },
-  error: { color: 'red', textAlign: 'center', marginTop: 12 },
-  modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.5)' },
-  modalContent: { backgroundColor: 'white', padding: 20, borderRadius: 10, width: '85%', maxWidth: 320, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10, elevation: 10 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
-  modalMessage: { textAlign: 'center', marginBottom: 20, fontSize: 16, lineHeight: 22 },
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
-  modalButton: { paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, minWidth: 100, alignItems: 'center' },
+  outerContainer: { flex: 1, alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 32 },
+  loginNavigation: { position: 'absolute', top: 22, left: 20, zIndex: 2 },
+  navigationGlass: { borderRadius: 20 },
+  navigationButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  logoContainer: { alignItems: 'center', width: '100%', paddingVertical: 24 },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 24 },
+  brandMark: { width: 40, height: 40, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(220,237,226,0.9)', borderWidth: 1, borderColor: '#FFFFFF' },
+  brandName: { fontSize: 28, letterSpacing: -1.4, fontWeight: '800', color: '#173F35' },
+  heroTitle: { fontSize: 39, lineHeight: 43, letterSpacing: -1.8, fontWeight: '700', color: '#173F35', textAlign: 'center' },
+  heroSubtitle: { marginTop: 12, fontSize: 14, color: '#78857D', textAlign: 'center', lineHeight: 21 },
+  heroChips: { flexDirection: 'row', gap: 8, marginTop: 20 },
+  heroChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 20 },
+  heroChipText: { color: '#476458', fontSize: 12, fontWeight: '600' },
+  cardWrapper: { width: '100%', maxWidth: 460 },
+  loginCard: { borderRadius: 30, padding: 24, width: '100%' },
+  loginCardUpper: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, minHeight: 32 },
+  heading: { fontSize: 21, fontWeight: '700', letterSpacing: -0.6, textAlign: 'center', flex: 1, color: '#173F35' },
+  primaryButton: { backgroundColor: primary, borderRadius: 19, alignItems: 'center', marginBottom: 14, justifyContent: 'center', minHeight: 54, paddingVertical: 14, paddingHorizontal: 14, shadowColor: '#173F35', shadowOffset: { width: 0, height: 6 }, shadowRadius: 12, shadowOpacity: 0.1 },
+  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
+  appleButton: { height: 52, marginBottom: 12 },
+  disabledButton: { opacity: 0.5 },
+  error: { color: '#AE5341', fontSize: 14, textAlign: 'center', marginTop: 12, lineHeight: 20 },
+  footerNote: { fontSize: 11, color: '#78857D', textAlign: 'center', marginTop: 6, lineHeight: 17 },
+  modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(23,63,53,0.24)' },
+  modalContent: { backgroundColor: '#F5F5EF', padding: 26, borderRadius: 30, width: '88%', maxWidth: 360, alignItems: 'center', shadowColor: '#173F35', shadowOpacity: 0.15, shadowRadius: 30, elevation: 10 },
+  modalTitle: { fontSize: 23, fontWeight: '700', letterSpacing: -0.6, marginBottom: 12, textAlign: 'center', color: '#173F35' },
+  modalMessage: { textAlign: 'center', marginBottom: 24, fontSize: 15, lineHeight: 23, color: '#78857D' },
+  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 12 },
+  modalButton: { flex: 1, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 18, alignItems: 'center', backgroundColor: '#E6EBE4' },
   modalConfirmButton: { backgroundColor: primary },
-  modalConfirmButtonText: { color: 'white', fontWeight: 'bold' },
-  logo: { padding: 20 },
-  googleButton: {
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 50,
-    borderRadius: 32,
-    paddingHorizontal: 10,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#505050ff'
-  },
-  googleButtonText: {
-    color: '#1F1F1F',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  inputField: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: '#333333',
-    borderRadius: 32,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-    fontSize: 16,
-    color: 'black'
-  },
-  separatorContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 8, marginBottom: 24 },
-  separatorLine: { flex: 1, height: 1, backgroundColor: '#ddd' },
-  separatorText: { marginHorizontal: 12, color: '#888' },
-  facebookButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 50,
-    borderRadius: 32,
-    paddingHorizontal: 10,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#505050'
-  },
-  facebookButtonText: {
-    color: '#1F1F1F',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  // --- New styles added below ---
-  backButton: {
-    // --- UPDATED: Positions the button without interfering with the title ---
-    position: 'absolute',
-    left: 0,
-    zIndex: 1,
-    padding: 4, // Makes it easier to tap
-  },
-  emailDisplay: {
-    fontSize: 16,
-    fontWeight: '500',
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 32,
-    marginBottom: 20,
-    textAlign: 'center',
-    color: '#333',
-  },
-  passwordChecksContainer: {
-    marginVertical: 4,
-    marginBottom: 16,
-    paddingLeft: 10,
-    alignSelf: 'flex-start'
-  },
-  logoContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'column',
-    flexGrow: 1
-  }
+  modalConfirmButtonText: { color: 'white', fontWeight: '700' },
+  googleButton: { backgroundColor: 'rgba(255,255,255,0.76)', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 19, paddingHorizontal: 10, marginBottom: 12, borderWidth: 1, borderColor: '#E4E9E0' },
+  googleButtonText: { color: '#173F35', fontSize: 15, fontWeight: '600' },
+  inputField: { height: 54, borderWidth: 1, borderColor: '#E2E8DE', borderRadius: 18, paddingHorizontal: 17, marginBottom: 14, fontSize: 16, color: '#173F35', backgroundColor: 'rgba(255,255,255,0.65)' },
+  separatorContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 2, marginBottom: 18 },
+  separatorLine: { flex: 1, height: 1, backgroundColor: '#E3E8DF' },
+  separatorText: { marginHorizontal: 14, color: '#99A399', fontSize: 12 },
+  facebookButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', height: 52, borderRadius: 19, paddingHorizontal: 10, marginBottom: 12, borderWidth: 1, borderColor: '#E4E9E0', backgroundColor: 'rgba(255,255,255,0.76)' },
+  facebookButtonText: { color: '#173F35', fontSize: 15, fontWeight: '600' },
+  backButton: { marginRight: 12, width: 32, height: 36, alignItems: 'center', justifyContent: 'center' },
+  emailDisplay: { fontSize: 15, fontWeight: '500', backgroundColor: '#EAF0E7', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 18, marginBottom: 20, textAlign: 'center', color: '#476458' },
+  passwordChecksContainer: { marginTop: 2, marginBottom: 16, paddingLeft: 10, alignSelf: 'flex-start' },
 });

@@ -1,12 +1,14 @@
+import { AmbientBackground, GlassPressable as TouchableOpacity, GlassSurface } from '@/components/ui/Glass';
+import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 // File: app/(main)/profile/[uid].tsx
 
 import Cookbook from '@/components/Cookbook';
 import { useAuth } from '@/context/AuthContext';
 import { Recipe, UserProfile as UserProfileType } from '@/types/types';
 import { followUser, getUserCookbook, getUserProfile, unfollowUser } from '@/utils/api';
-import { primary } from '@/utils/styles'; // Assuming you have a primary color exported
+import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useLocalSearchParams, useRouter } from 'expo-router'; // ✅ 1. Import useRouter
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar as ESB } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import {
@@ -15,14 +17,11 @@ import {
     Image,
     Platform,
     SafeAreaView,
-    ScrollView, StatusBar, // ✅ 2. Import ScrollView
+    ScrollView, StatusBar,
     StyleSheet,
     Text,
-    TouchableOpacity,
     View
 } from 'react-native';
-
-// TODO: is cookbook clicks broken?
 
 export default function OtherUserProfileScreen() {
     const { uid } = useLocalSearchParams<{ uid: string }>();
@@ -100,71 +99,61 @@ export default function OtherUserProfileScreen() {
     };
 
     if (loading) {
-        return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
+        return <View style={styles.centered}><ActivityIndicator size="large" color={primary} /></View>;
     }
 
     if (!viewedUser) {
-        return <SafeAreaView style={styles.centered}><Text>User not found.</Text></SafeAreaView>;
+        return <SafeAreaView style={styles.centered}><Text style={styles.notFoundTitle}>This kitchen is unavailable</Text><TouchableOpacity style={styles.followButton} onPress={() => router.back()}><Text style={styles.followButtonText}>Go back</Text></TouchableOpacity></SafeAreaView>;
     }
 
     return (
-        <>
+        <AmbientBackground>
             <ESB style="dark" />
-            {/* ✅ 4. SafeAreaView handles the top padding automatically */}
             <SafeAreaView style={styles.container}>
-                {/* ✅ 5. Your new custom header component */}
                 <View style={styles.customHeader}>
-                    <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                        <Ionicons name="chevron-back" size={28} color={primary} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>{viewedUser?.displayName || 'Profile'}</Text>
-                    <View style={styles.backButton} />{/* This is a spacer to keep the title centered */}
+                    <GlassSurface style={styles.backGlass}><TouchableOpacity style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Go back">
+                        <Ionicons name="chevron-back" size={22} color="#173F35" />
+                    </TouchableOpacity></GlassSurface>
+                    <Text style={styles.headerTitle}>{isOwnProfile ? 'Your kitchen' : 'A seat at the table'}</Text>
+                    <View style={styles.backButton} />
                 </View>
-
-                {/* ✅ 6. Wrap the content in a ScrollView so it scrolls under the header */}
-                <ScrollView>
-                    <View style={styles.profileContainer}>
-                        <TouchableOpacity style={styles.profileImageContainer} disabled={true}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+                    <Animated.View entering={FadeInDown.duration(500).reduceMotion(ReduceMotion.System)}>
+                    <GlassSurface style={styles.profileContainer} intensity={50}>
+                        <View style={styles.profileAccent} />
+                        <View style={styles.profileImageContainer}>
                             {viewedUser?.photoURL ? (
                                 <Image source={{ uri: viewedUser.photoURL }} style={styles.profileImage} />
                             ) : (
-                                <View style={[styles.profileImage, styles.placeholderImage]}>
-                                    <Ionicons name="person" size={60} color="#ccc" />
-                                </View>
+                                <View style={[styles.profileImage, styles.placeholderImage]}><Ionicons name="person" size={42} color="#789787" /></View>
                             )}
-                        </TouchableOpacity>
+                        </View>
+                        <Text style={styles.displayName}>{viewedUser.displayName || 'Fridgie cook'}</Text>
                         {viewedUser?.email && <Text style={styles.usernameText}>@{viewedUser.email.split('@')[0]}</Text>}
-                    </View>
-
-                     {!isOwnProfile && (
-                        <View style={styles.actionContainer}>
-                            <TouchableOpacity
-                                style={[styles.followButton, viewedUser.isFollowing && styles.followingButton]}
-                                onPress={handleFollowToggle}
-                            >
-                                <Text style={[styles.followButtonText, viewedUser.isFollowing && styles.followingButtonText]}>
-                                    {viewedUser.isFollowing ? 'Following' : 'Follow'}
-                                </Text>
-                            </TouchableOpacity>
+                        {!isOwnProfile && (
+                            <View style={styles.actionContainer}>
+                                <TouchableOpacity
+                                    style={[styles.followButton, viewedUser.isFollowing && styles.followingButton]}
+                                    onPress={handleFollowToggle}
+                                    accessibilityLabel={viewedUser.isFollowing ? `Unfollow ${viewedUser.displayName}` : `Follow ${viewedUser.displayName}`}
+                                    accessibilityState={{ selected: !!viewedUser.isFollowing }}
+                                >
+                                    <Ionicons name={viewedUser.isFollowing ? 'checkmark' : 'add'} size={18} color={viewedUser.isFollowing ? primary : '#FFFFFF'} />
+                                    <Text style={[styles.followButtonText, viewedUser.isFollowing && styles.followingButtonText]}>
+                                        {viewedUser.isFollowing ? 'Following' : 'Follow'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                        <View style={styles.statsContainer}>
+                            <View style={styles.statItem}><Text style={styles.statNumber}>{viewedUser.followingCount || 0}</Text><Text style={styles.statLabel}>Following</Text></View>
+                            <View style={[styles.statItem, styles.statDivider]}><Text style={styles.statNumber}>{viewedUser.followerCount || 0}</Text><Text style={styles.statLabel}>Followers</Text></View>
+                            <View style={styles.statItem}><Text style={styles.statNumber}>{cookbook.length || 0}</Text><Text style={styles.statLabel}>Recipes</Text></View>
                         </View>
-                    )}
-
-                     <View style={styles.statsContainer}>
-                        <View style={styles.statItem}>
-                            <Text style={styles.statNumber}>{viewedUser.followingCount || 0}</Text>
-                            <Text style={styles.statLabel}>Following</Text>
-                        </View>
-                        <View style={styles.statItem}>
-                            <Text style={styles.statNumber}>{viewedUser.followerCount || 0}</Text>
-                            <Text style={styles.statLabel}>Followers</Text>
-                        </View>
-                        <View style={styles.statItem}>
-                            <Text style={styles.statNumber}>{cookbook.length || 0}</Text>
-                            <Text style={styles.statLabel}>Recipes</Text>
-                        </View>
-                    </View>
-
+                    </GlassSurface>
+                    </Animated.View>
                     <View style={styles.feedContainer}>
+                        <View style={styles.cookbookHeader}><Text style={styles.cookbookTitle}>The cookbook</Text><Text style={styles.recipeCount}>{cookbook.length} recipes</Text></View>
                         <Cookbook
                             recipes={cookbook}
                             isLoading={isCookbookLoading}
@@ -174,119 +163,38 @@ export default function OtherUserProfileScreen() {
                     </View>
                 </ScrollView>
             </SafeAreaView>
-        </>
+        </AmbientBackground>
     );
 }
 
 const styles = StyleSheet.create({
-    // ✅ 7. Add new styles for your custom header
-    customHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 10,
-        paddingVertical: 12,
-        backgroundColor: '#f8f9fa', // Match container background
-    },
-    backButton: {
-        width: 40, // Provides a larger tap area
-        padding: 5,
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    // --- Other styles remain the same ---
-    centered: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    container: {
-        flex: 1,
-        backgroundColor: '#f8f9fa',
-        paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-    },
-    profileContainer: {
-        alignItems: 'center',
-        paddingTop: 12, // Reduced padding since header has its own
-        paddingBottom: 24,
-    },
-    profileImageContainer: {
-        marginBottom: 16,
-    },
-    profileImage: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        borderWidth: 3,
-        borderColor: '#fff',
-    },
-    placeholderImage: {
-        backgroundColor: '#e9ecef',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    displayName: {
-        fontSize: 24,
-        fontWeight: '800',
-        color: '#333',
-        marginBottom: 4,
-    },
-    usernameText: {
-        fontSize: 16,
-        color: '#6c757d',
-        marginBottom: 16,
-    },
-    statsContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        paddingVertical: 16,
-        marginHorizontal: 16,
-        borderTopWidth: 1,
-        borderBottomWidth: 1,
-        borderColor: '#e9ecef',
-    },
-    statItem: {
-        alignItems: 'center',
-    },
-    statNumber: {
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    statLabel: {
-        fontSize: 14,
-        color: '#6c757d',
-        marginTop: 4,
-    },
-    feedContainer: {
-        paddingHorizontal: 16,
-        // The flex: 1 is no longer needed here as ScrollView handles the layout
-        paddingTop: 16,
-        paddingBottom: 32, // Add padding at the bottom
-    },
-    actionContainer: {
-        paddingHorizontal: 16,
-        paddingBottom: 20,
-    },
-    followButton: {
-        backgroundColor: primary,
-        paddingVertical: 12,
-        borderRadius: 10,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    followButtonText: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: 'bold',
-    },
-    followingButton: {
-        backgroundColor: '#e9ecef',
-        borderWidth: 1,
-        borderColor: '#dee2e6',
-    },
-    followingButtonText: {
-        color: '#495057',
-    },
+    customHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 22, paddingTop: 14, paddingBottom: 22 },
+    backGlass: { borderRadius: 20 },
+    backButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+    headerTitle: { fontSize: 15, fontWeight: '600', letterSpacing: -0.2, color: '#173F35' },
+    centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F5EF', padding: 24 },
+    notFoundTitle: { fontSize: 23, fontWeight: '600', color: '#173F35', marginBottom: 24, textAlign: 'center' },
+    container: { flex: 1, backgroundColor: 'transparent', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
+    scrollContent: { paddingHorizontal: 22, paddingBottom: 40 },
+    profileContainer: { alignItems: 'center', paddingTop: 28, paddingBottom: 8, borderRadius: 30, overflow: 'hidden' },
+    profileAccent: { position: 'absolute', width: 280, height: 280, borderRadius: 140, backgroundColor: 'rgba(220,237,226,0.6)', top: -185, right: -90 },
+    profileImageContainer: { marginBottom: 14 },
+    profileImage: { width: 96, height: 96, borderRadius: 38, borderWidth: 3, borderColor: '#FFFFFF' },
+    placeholderImage: { backgroundColor: '#DCEDE2', justifyContent: 'center', alignItems: 'center' },
+    displayName: { fontSize: 28, fontWeight: '700', letterSpacing: -0.8, color: '#173F35', marginBottom: 4, paddingHorizontal: 20, textAlign: 'center' },
+    usernameText: { fontSize: 14, color: '#78857D', marginBottom: 14 },
+    statsContainer: { flexDirection: 'row', width: '100%', paddingVertical: 18, marginTop: 4 },
+    statItem: { flex: 1, alignItems: 'center' },
+    statDivider: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#E1E8DC' },
+    statNumber: { fontSize: 23, fontWeight: '700', letterSpacing: -0.6, color: '#173F35' },
+    statLabel: { fontSize: 11, color: '#78857D', marginTop: 5, fontWeight: '500' },
+    feedContainer: { paddingTop: 28 },
+    cookbookHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 },
+    cookbookTitle: { fontSize: 25, fontWeight: '700', letterSpacing: -0.8, color: '#173F35' },
+    recipeCount: { fontSize: 12, color: '#78857D' },
+    actionContainer: { alignSelf: 'stretch', paddingHorizontal: 24, paddingTop: 4, paddingBottom: 6 },
+    followButton: { backgroundColor: primary, paddingVertical: 13, paddingHorizontal: 24, borderRadius: 18, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
+    followButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+    followingButton: { backgroundColor: '#E3EEE0', borderWidth: 1, borderColor: '#CDE0CE' },
+    followingButtonText: { color: primary },
 });

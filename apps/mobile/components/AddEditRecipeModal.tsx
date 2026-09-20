@@ -1,10 +1,11 @@
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Ingredient, Item, Meal, Recipe } from '@/types/types';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary } from '@/utils/styles';
+import { GlassPressable, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import uuid from 'react-native-uuid';
 import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 import { useAuth } from '@/context/AuthContext';
@@ -23,6 +24,7 @@ const LAUNCH_STALLED_AFTER_MS = 6000;
 interface AddEditRecipeModalProps {
   isVisible: boolean;
   onClose: () => void;
+  onDismiss?: () => void;
   /**
    * The meal this recipe is being written for, when there is one. Null for a
    * recipe going straight to the cookbook: nothing is planned for a day and
@@ -44,12 +46,13 @@ interface AddEditRecipeModalProps {
   onRecipeSave: (updatedMeal: Meal | null, newItems: Item[], savedRecipe: Recipe) => void;
 }
 
-export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, recipeToEdit = null, onRecipeSave }: AddEditRecipeModalProps) {
+export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, mealForRecipe, recipeToEdit = null, onRecipeSave }: AddEditRecipeModalProps) {
   const { selectedGroup } = useAuth();
   // Every field on this form is inside the scroller below, and focus bubbles,
   // so the scroller hears all of them — including the ingredient and step rows,
   // which come and go as the recipe is written.
   const keyboard = useKeyboardAwareScroll({ enabled: isVisible });
+  const { reduceMotion } = useGlassPreferences();
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [importUrl, setImportUrl] = useState('');
   // Seeded from the meal's own title: someone who typed "Chicken Katsu" into
@@ -565,44 +568,33 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     if (isLoading) return <ActivityIndicator style={{ marginTop: 40 }} size="large" />;
     
     if (creationMode === 'initial') {
+      const options = [
+        { mode: 'generate', icon: 'sparkles-outline', title: 'Write me a recipe', description: mealForRecipe?.name?.trim() ? `A fresh recipe for ${mealForRecipe.name.trim()}, written for you.` : 'Name a dish. We’ll write the ingredients and steps.' },
+        { mode: 'link', icon: 'link-outline', title: 'Save from a link', description: 'Bring a favourite from the web or TikTok.' },
+        { mode: 'photo', icon: 'camera-outline', title: 'Scan a recipe', description: 'A cookbook page, a screenshot, a family favourite.' },
+        { mode: 'manual', icon: 'create-outline', title: 'Make it your own', description: 'Write your recipe, one delicious detail at a time.' },
+      ] as const;
       return (
-        <>
-          {/* Named by SOURCE rather than by mechanism. Both of the first two
-              are automatic imports, so calling one "Automatic Import" made the
-              photo option read like something else entirely. */}
-          {/* First, because the common path into this modal is a meal that
-              already has a name — at that point the fastest route to a recipe
-              is to write one, not to go hunting for a link to a dish they can
-              already name. Called "Write" rather than "Find": it is made up on
-              the spot, and the copy shouldn't imply we went and looked. */}
-          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('generate')}>
-            <Ionicons name="sparkles-outline" size={32} color={primary} />
-            <Text style={styles.selectionButtonTitle}>Write Me a Recipe</Text>
-            <Text style={styles.selectionButtonDescription}>
-              {mealForRecipe?.name?.trim()
-                ? `Ingredients and steps for ${mealForRecipe.name.trim()}, written for you.`
-                : 'Name a dish and get the ingredients and steps, written for you.'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('link')}>
-            <View style={styles.iconRow}><Ionicons name="globe-outline" size={32} color={primary} /><Ionicons name="logo-tiktok" size={32} color={primary} /></View>
-            <Text style={styles.selectionButtonTitle}>Import from Link</Text>
-            <Text style={styles.selectionButtonDescription}>Paste a link from a recipe website or TikTok.</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('photo')}>
-            <View style={styles.iconRow}><Ionicons name="camera-outline" size={32} color={primary} /><Ionicons name="document-text-outline" size={32} color={primary} /></View>
-            <Text style={styles.selectionButtonTitle}>Import from Photo</Text>
-            <Text style={styles.selectionButtonDescription}>Snap a cookbook page, recipe card, or handwritten note.</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.selectionButton} onPress={() => setCreationMode('manual')}>
-            <Ionicons name="create-outline" size={32} color={primary} />
-            <Text style={styles.selectionButtonTitle}>Enter Manually</Text>
-            <Text style={styles.selectionButtonDescription}>Type the recipe in yourself, step-by-step.</Text>
-          </TouchableOpacity>
-        </>
+        <View>
+          <View style={styles.creationIntro}>
+            <Text style={styles.creationEyebrow}>GOOD FOOD STARTS HERE</Text>
+            <Text style={styles.creationTitle}>A recipe worth keeping.</Text>
+            <Text style={styles.creationSubtitle}>However you find it, make a little room in your cookbook.</Text>
+          </View>
+          {options.map(option => (
+            <GlassPressable key={option.mode} style={styles.creationOption} onPress={() => setCreationMode(option.mode)} accessibilityLabel={option.title}>
+              <View style={[styles.creationIcon, option.mode === 'generate' && styles.creationIconFeatured]}><Ionicons name={option.icon} size={25} color={primary} /></View>
+              <View style={styles.creationCopy}>
+                <Text style={styles.creationOptionTitle}>{option.title}</Text>
+                <Text style={styles.creationOptionDescription}>{option.description}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={17} color={inkMuted} />
+            </GlassPressable>
+          ))}
+        </View>
       );
     }
-    
+
     if (creationMode === 'generate') {
       if (isImporting) {
         return (
@@ -622,13 +614,13 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             onChangeText={setGenerateTitle}
             multiline
           />
-          <TouchableOpacity
+          <GlassPressable
             style={[styles.primaryButton, !generateTitle.trim() && styles.disabledButton]}
             onPress={handleGenerateRecipe}
             disabled={!generateTitle.trim()}
           >
             <Text style={styles.primaryButtonText}>Write Recipe</Text>
-          </TouchableOpacity>
+          </GlassPressable>
           <Text style={styles.photoHint}>
             Written fresh, so check it over before you save — you can edit every
             ingredient and step.
@@ -648,7 +640,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       }
       return (
         <>
-          <TouchableOpacity
+          <GlassPressable
             style={[styles.selectionButton, isPickerBusy && styles.selectionButtonBusy]}
             onPress={() => handleImportFromPhoto('camera')}
             disabled={isPickerBusy}
@@ -656,8 +648,8 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             <Ionicons name="camera-outline" size={32} color={primary} />
             <Text style={styles.selectionButtonTitle}>Take a Photo</Text>
             <Text style={styles.selectionButtonDescription}>Lay the page flat in good light and fill the frame.</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </GlassPressable>
+          <GlassPressable
             style={[styles.selectionButton, isPickerBusy && styles.selectionButtonBusy]}
             onPress={() => handleImportFromPhoto('library')}
             disabled={isPickerBusy}
@@ -665,7 +657,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
             <Ionicons name="images-outline" size={32} color={primary} />
             <Text style={styles.selectionButtonTitle}>Choose an Image</Text>
             <Text style={styles.selectionButtonDescription}>Pick a photo or screenshot you already have.</Text>
-          </TouchableOpacity>
+          </GlassPressable>
           <Text style={styles.photoHint}>
             You&apos;ll get a chance to check everything before it&apos;s saved.
           </Text>
@@ -686,9 +678,9 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       return (
         <View style={styles.formSectionContainer}>
           <TextInput style={styles.formInput} placeholder="Paste a recipe link..." placeholderTextColor={inkFaint} value={importUrl} onChangeText={setImportUrl} autoCapitalize="none" keyboardType="url" />
-          <TouchableOpacity style={styles.primaryButton} onPress={handleImportRecipe}>
+          <GlassPressable style={styles.primaryButton} onPress={handleImportRecipe}>
             <Text style={styles.primaryButtonText}>Import</Text>
-          </TouchableOpacity>
+          </GlassPressable>
         </View>
       );
     }
@@ -697,8 +689,8 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       return (
         <>
             <View style={styles.formSectionContainer}>
-              {editingRecipe.photoURL ? ( <TouchableOpacity onPress={handlePickImage}><Image source={{ uri: editingRecipe.photoURL }} style={styles.recipeImage} /><View style={styles.imageEditIcon}><Ionicons name="pencil" size={18} color="#fff" /></View></TouchableOpacity>
-              ) : ( <TouchableOpacity style={[styles.recipeImage, styles.addImageButton]} onPress={handlePickImage}><Ionicons name="camera-outline" size={24} color={primary} /><Text style={styles.addImageButtonText}>Add Photo</Text></TouchableOpacity> )}
+              {editingRecipe.photoURL ? ( <GlassPressable onPress={handlePickImage}><Image source={{ uri: editingRecipe.photoURL }} style={styles.recipeImage} /><View style={styles.imageEditIcon}><Ionicons name="pencil" size={18} color="#fff" /></View></GlassPressable>
+              ) : ( <GlassPressable style={[styles.recipeImage, styles.addImageButton]} onPress={handlePickImage}><Ionicons name="camera-outline" size={24} color={primary} /><Text style={styles.addImageButtonText}>Add Photo</Text></GlassPressable> )}
             </View>
             <View style={styles.formSectionContainer}>
               <TextInput style={styles.recipeNameInput} placeholder="Recipe Name" placeholderTextColor={inkFaint} value={editingRecipe.name} onChangeText={(val) => handleRecipeFieldChange('name', val)} multiline />
@@ -724,9 +716,9 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                 </View>
               </View>
               {editingRecipe.ingredients.map((ing, index) => (
-              <View key={`ing-${index}`} style={styles.formRow}><TextInput style={[styles.formInput, styles.quantityInput]} placeholder="1 cup" placeholderTextColor={inkFaint} value={ing.quantity} onChangeText={(val) => handleIngredientChange(index, 'quantity', val)} /><TextInput style={[styles.formInput, styles.nameInput]} placeholder="Flour" placeholderTextColor={inkFaint} value={ing.name} onChangeText={(val) => handleIngredientChange(index, 'name', val)} /><TouchableOpacity onPress={() => removeIngredientField(index)} style={styles.deleteRowButton}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity></View>
+              <View key={`ing-${index}`} style={styles.formRow}><TextInput style={[styles.formInput, styles.quantityInput]} placeholder="1 cup" placeholderTextColor={inkFaint} value={ing.quantity} onChangeText={(val) => handleIngredientChange(index, 'quantity', val)} /><TextInput style={[styles.formInput, styles.nameInput]} placeholder="Flour" placeholderTextColor={inkFaint} value={ing.name} onChangeText={(val) => handleIngredientChange(index, 'name', val)} /><GlassPressable onPress={() => removeIngredientField(index)} style={styles.deleteRowButton}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></GlassPressable></View>
               ))}
-              <TouchableOpacity style={styles.addFieldButton} onPress={addIngredientField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Ingredient</Text></TouchableOpacity>
+              <GlassPressable style={styles.addFieldButton} onPress={addIngredientField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Ingredient</Text></GlassPressable>
             </View>
             <View style={styles.formSectionContainer}>
               <Text style={styles.formSectionTitle}>Instructions</Text>
@@ -736,10 +728,10 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
                     several lines keeps its number pinned to the first one. */}
                 <View style={styles.stepBadge}><Text style={styles.stepNumber}>{index + 1}</Text></View>
                 <TextInput style={[styles.formInput, styles.nameInput]} placeholder="Mix the things..." placeholderTextColor={inkFaint} value={inst} onChangeText={(val) => handleInstructionChange(index, val)} multiline />
-                <TouchableOpacity onPress={() => removeInstructionField(index)} style={[styles.deleteRowButton, styles.stepDeleteButton]}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></TouchableOpacity>
+                <GlassPressable onPress={() => removeInstructionField(index)} style={[styles.deleteRowButton, styles.stepDeleteButton]}><Ionicons name="remove-circle-outline" size={24} color="#EF4444" /></GlassPressable>
               </View>
               ))}
-              <TouchableOpacity style={styles.addFieldButton} onPress={addInstructionField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Step</Text></TouchableOpacity>
+              <GlassPressable style={styles.addFieldButton} onPress={addInstructionField}><Ionicons name="add" size={20} color={primary} /><Text style={styles.addFieldButtonText}>Add Step</Text></GlassPressable>
             </View>
             </>
       );
@@ -754,9 +746,10 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
     // from behind one is where the launch gets stuck. iOS presents fine over
     // its own modal and keeps the sheet up.
     <Modal
-      animationType="slide"
+      animationType={reduceMotion ? "none" : "slide"}
       visible={isVisible && !(Platform.OS === 'android' && isPickerBusy)}
       onRequestClose={onClose}
+      onDismiss={onDismiss}
       transparent={true}
     >
       {/* The avoider has to be the FULL-SCREEN element, not the sheet. Wrapped
@@ -771,18 +764,18 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
       >
         <SafeAreaView style={styles.modalSafeArea}>
             <View style={styles.modalContentContainer}>
-              <View style={styles.modalHeader}>
+              <GlassSurface style={styles.modalHeader} intensity={70}>
                 {/* Header content remains the same */}
                 {creationMode !== 'initial' && !isEditingExisting ? (
-                  <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-                    <Ionicons name="chevron-back" size={28} color="#aaa" />
-                  </TouchableOpacity>
+                  <GlassPressable onPress={handleBackPress} style={styles.backButton} accessibilityLabel="Back to recipe options">
+                    <Ionicons name="chevron-back" size={21} color={ink} />
+                  </GlassPressable>
                 ) : <View style={styles.backButton} /> }
                 <Text style={styles.modalTitle}>{isEditingExisting ? 'Edit' : 'Add'} Recipe</Text>
-                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                  <Ionicons name="close-circle" size={28} color="#aaa" />
-                </TouchableOpacity>
-              </View>
+                <GlassPressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close recipe editor">
+                  <Ionicons name="close" size={21} color={ink} />
+                </GlassPressable>
+              </GlassSurface>
               
               {/* No fixed height. `height: height * 0.7` was measured against the
                   whole screen, so with the keyboard up the sheet was taller
@@ -806,12 +799,12 @@ export default function AddEditRecipeModal({ isVisible, onClose, mealForRecipe, 
 
               {/* ✅ 4. Hide footer during initial selection and while importing */}
               {!isImporting && (creationMode === 'manual') && (
-                <View style={styles.modalFooter}>
-                  <TouchableOpacity style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Cancel</Text></TouchableOpacity>
-                  <TouchableOpacity style={[styles.primaryButton, isSaveDisabled && styles.disabledButton]} onPress={handleSaveRecipe} disabled={isSaveDisabled}>
+                <GlassSurface style={styles.modalFooter} intensity={70}>
+                  <GlassPressable style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Cancel</Text></GlassPressable>
+                  <GlassPressable style={[styles.primaryButton, isSaveDisabled && styles.disabledButton]} onPress={handleSaveRecipe} disabled={isSaveDisabled}>
                     <Text style={styles.primaryButtonText}>Save Recipe</Text>
-                  </TouchableOpacity>
-                </View>
+                  </GlassPressable>
+                </GlassSurface>
               )}
             </View>
         </SafeAreaView>
@@ -824,7 +817,7 @@ const styles = StyleSheet.create({
   // Align the overlay content to the bottom
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: 'rgba(15,37,28,0.32)',
     justifyContent: 'flex-end',
   },
   // React Native defaults flexShrink to 0, so without these three the sheet
@@ -832,6 +825,7 @@ const styles = StyleSheet.create({
   // keyboard takes half of it.
   modalSafeArea: {
     width: '100%',
+    maxHeight: '94%',
     flexShrink: 1,
   },
   modalScrollView: {
@@ -840,9 +834,9 @@ const styles = StyleSheet.create({
   },
   modalScrollViewContent: { paddingTop: 16 },
   modalContentContainer: {
-    backgroundColor: '#F7F7F7',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: '#F5F5EF',
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
     overflow: 'hidden',
     flexShrink: 1,
   },
@@ -852,28 +846,28 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1, 
-    borderBottomColor: '#EFEFEF',
-    backgroundColor: '#FFFFFF',
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: 'rgba(255,255,255,0.5)',
   },
-  modalTitle: { fontSize: 22, fontWeight: 'bold', textAlign: 'center'},
-  backButton: { width: 30, alignItems: 'flex-start' },
-  closeButton: { width: 30, alignItems: 'flex-end' },
-  formSectionContainer: { backgroundColor: '#FFFFFF', borderRadius: 12, margin: 16, padding: 16, marginTop: 0, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  formSectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted, marginBottom: 14 },
+  modalTitle: { fontSize: 19, fontWeight: '700', letterSpacing: -0.6, color: ink, textAlign: 'center'},
+  backButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  closeButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5EDE3' },
+  formSectionContainer: { backgroundColor: 'rgba(255,255,255,0.78)', borderRadius: 25, margin: 18, padding: 18, marginTop: 0, borderWidth: 1, borderColor: '#FFF' },
+  formSectionTitle: { fontSize: 19, fontWeight: '700', letterSpacing: -0.5, color: ink, marginBottom: 17 },
   // The heading keeps its own marginBottom, so the row aligns on the text
   // baseline rather than on the box.
   sectionTitleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   servingsField: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -6 },
   servingsLabel: { fontSize: 13, fontWeight: '700', letterSpacing: 1.1, textTransform: 'uppercase', color: inkMuted },
   servingsInput: { minWidth: 44, textAlign: 'center', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8, backgroundColor: accentSoft, color: ink, fontSize: 15, fontWeight: '700' },
-  formInput: { color: ink, borderWidth: 1, borderColor: hairline, borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 12 },
+  formInput: { color: ink, borderWidth: 1, borderColor: hairline, borderRadius: 16, padding: 13, fontSize: 15, marginBottom: 12, backgroundColor: '#F8FAF4' },
   recipeNameInput: { fontSize: 24, fontWeight: '700', letterSpacing: -0.4, marginBottom: 8, borderBottomWidth: 1, borderColor: hairline, paddingBottom: 8, color: ink },
   descriptionInput: { minHeight: 80, textAlignVertical: 'top' },
   formRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   quantityInput: { flex: 0.3, marginRight: 8 },
   nameInput: { flex: 1 },
-  photoHint: { textAlign: 'center', color: inkMuted, fontSize: 14, marginTop: 8, paddingHorizontal: 12 },
+  photoHint: { textAlign: 'center', color: inkMuted, fontSize: 13, lineHeight: 21, marginTop: 14, paddingHorizontal: 12, marginBottom: 12 },
   stepFormRow: { alignItems: 'flex-start' },
   stepBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center', marginRight: 10, marginTop: 6 },
   stepNumber: { fontSize: 13, fontWeight: '700', color: primary },
@@ -881,27 +875,27 @@ const styles = StyleSheet.create({
   deleteRowButton: { padding: 4, marginLeft: 8 },
   addFieldButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingVertical: 8 },
   addFieldButtonText: { color: primary, fontSize: 16, fontWeight: '600', marginLeft: 4 },
-  modalFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderTopWidth: 1, borderTopColor: '#EFEFEF', backgroundColor: '#FFFFFF' },
-  primaryButton: { backgroundColor: primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 50 },
+  modalFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 8, margin: 12, borderRadius: 30 },
+  primaryButton: { backgroundColor: primary, paddingVertical: 15, borderRadius: 23, alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 50 },
   primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  secondaryButton: { backgroundColor: '#EFEFEF', paddingVertical: 14, borderRadius: 12, alignItems: 'center', flex: 1, marginRight: 10 },
-  secondaryButtonText: { color: '#333', fontSize: 16, fontWeight: 'bold' },
+  secondaryButton: { backgroundColor: '#E5EDE3', paddingVertical: 15, borderRadius: 23, alignItems: 'center', flex: 1, marginRight: 10 },
+  secondaryButtonText: { color: ink, fontSize: 16, fontWeight: 'bold' },
   disabledButton: { opacity: 0.6 },
-  recipeImage: { width: '100%', aspectRatio: 16 / 9, borderRadius: 10, backgroundColor: '#f0f0f0', resizeMode: 'cover' },
-  addImageButton: { justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#e0e0e0', borderStyle: 'dashed' },
+  recipeImage: { width: '100%', aspectRatio: 16 / 9, borderRadius: 23, backgroundColor: '#E5EDE3', resizeMode: 'cover' },
+  addImageButton: { justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: hairline, borderStyle: 'dashed' },
   addImageButtonText: { marginTop: 8, color: primary, fontWeight: '600' },
   imageEditIcon: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.5)', padding: 8, borderRadius: 16 },
   selectionButton: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 24,
+    borderRadius: 27,
+    padding: 25,
     margin: 16,
     marginTop: 0,
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#000',
+    shadowColor: primary,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.04,
     shadowRadius: 5,
     elevation: 3,
   },
@@ -909,8 +903,18 @@ const styles = StyleSheet.create({
   // in that second reads as a button that didn't work.
   selectionButtonBusy: { opacity: 0.5 },
   selectionButtonTitle: { fontSize: 20, fontWeight: 'bold', color: primary, marginTop: 12, marginBottom: 6 },
-  selectionButtonDescription: { fontSize: 14, color: '#666', textAlign: 'center' },
+  selectionButtonDescription: { fontSize: 14, lineHeight: 21, color: inkMuted, textAlign: 'center' },
   iconRow: { flexDirection: 'row', gap: 16 },
+  creationIntro: { paddingHorizontal: 24, paddingTop: 7, paddingBottom: 24 },
+  creationEyebrow: { fontSize: 9, fontWeight: '700', letterSpacing: 1.8, color: inkMuted, marginBottom: 8 },
+  creationTitle: { fontSize: 30, lineHeight: 35, fontWeight: '700', letterSpacing: -1.2, color: ink },
+  creationSubtitle: { fontSize: 14, lineHeight: 22, color: inkMuted, marginTop: 10 },
+  creationOption: { flexDirection: 'row', alignItems: 'center', gap: 13, backgroundColor: 'rgba(255,255,255,0.85)', borderWidth: 1, borderColor: '#FFF', borderRadius: 26, padding: 17, marginHorizontal: 18, marginBottom: 12 },
+  creationIcon: { width: 48, height: 48, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E5EDE3' },
+  creationIconFeatured: { backgroundColor: '#EEDACE' },
+  creationCopy: { flex: 1 },
+  creationOptionTitle: { fontSize: 16, fontWeight: '700', color: ink, letterSpacing: -0.4 },
+  creationOptionDescription: { fontSize: 12, lineHeight: 18, color: inkMuted, marginTop: 4 },
   // ✅ 5. New styles for the loading screen
   loadingContainer: {
     justifyContent: 'center',
@@ -921,7 +925,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 20,
     fontSize: 18,
-    color: '#666',
+    color: inkMuted,
     fontWeight: '600',
     textAlign: 'center',
   },

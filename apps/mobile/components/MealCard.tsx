@@ -1,16 +1,17 @@
 import { Item, Meal } from "@/types/types";
 import { mealPlaceholders } from "@/utils/mealPlaceholders";
 import { parseQuantityAndText } from "@/utils/quantity";
-import { nextListRank, rankAfter, safeParseRank } from "@/utils/rank";
-import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from "@/utils/styles";
+import { nextListRank, rankAfter } from "@/utils/rank";
+import { accentSoft, hairline, ink, inkFaint, inkMuted, primary } from "@/utils/styles";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LexoRank } from "lexorank";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, LayoutAnimation, Pressable, SafeAreaView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Keyboard, LayoutAnimation, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as Haptics from 'expo-haptics';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import Modal from 'react-native-modal';
-import Animated, { FadeInLeft, FadeOutLeft, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { FadeInLeft, FadeOutLeft, ReduceMotion, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { GlassPressable, useGlassPreferences } from "./ui/Glass";
 import uuid from 'react-native-uuid';
 
 const DAYS: Meal['dayOfWeek'][] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -53,6 +54,10 @@ function MealCard({
     onOpenQuantityEditor
 }: MealCardProps) {
     const hasRecipe = !!meal.recipeId;
+    const { reduceMotion } = useGlassPreferences();
+    const animateLayout = () => {
+        if (!reduceMotion) LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    };
 
     const [isDaySelectorVisible, setIsDaySelectorVisible] = useState(false);
     const [isMealNameEditing, setIsMealNameEditing] = useState(false);
@@ -72,8 +77,8 @@ function MealCard({
     }));
 
     useEffect(() => {
-        daySelectorProgress.value = withTiming(isDaySelectorVisible ? 1 : 0, { duration: 300 });
-    }, [isDaySelectorVisible]);
+        daySelectorProgress.value = reduceMotion ? (isDaySelectorVisible ? 1 : 0) : withSpring(isDaySelectorVisible ? 1 : 0, { damping: 23, stiffness: 220, reduceMotion: ReduceMotion.System });
+    }, [isDaySelectorVisible, daySelectorProgress, reduceMotion]);
 
     useEffect(() => {
         if (isMealNameEditing) {
@@ -88,17 +93,12 @@ function MealCard({
         return mealPlaceholders[Math.abs(hash) % mealPlaceholders.length];
     }, [meal.id]);
     
-    const mealNameDisplay = useMemo(() => {
-        if (!meal.name || meal.name.length <= 32) {
-            return meal.name;
-        }
-        return `${meal.name.substring(0, 32)}...`;
-    }, [meal.name]);
-
     const ingredients = useMemo(
         () => allItems.filter(i => i.mealId === meal.id).sort((a, b) => (a.mealOrder && b.mealOrder) ? a.mealOrder.localeCompare(b.mealOrder) : 0),
         [allItems, meal.id]
     );
+
+    const ingredientCount = ingredients.filter(item => item.text?.trim()).length;
 
     const assignRef = useCallback((id: string) => (ref: TextInput | null) => {
         inputRefs.current[id] = ref;
@@ -124,13 +124,13 @@ function MealCard({
     const handleDaySelect = (day: Meal['dayOfWeek']) => {
         const newDay = meal.dayOfWeek === day ? undefined : day;
         onUpdateMeal(meal.id, { dayOfWeek: newDay });
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        animateLayout();
         setIsDaySelectorVisible(false);
         markDirty();
     };
 
     const toggleDaySelector = () => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        animateLayout();
         setIsDaySelectorVisible(prev => !prev);
     };
 
@@ -143,6 +143,7 @@ function MealCard({
     };
 
     const handleToggleCheck = (id: string) => {
+        Haptics.selectionAsync().catch(() => {});
         setAllItems(prev => prev.map(item => (item.id === id ? { ...item, checked: !item.checked } : item)));
         markDirty();
     };
@@ -212,27 +213,28 @@ function MealCard({
                     swipe that started anywhere near it became a reorder instead
                     of scrolling the meal plan. */}
                 <Pressable
-                    onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); drag(); }}
+                    onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); drag(); }}
                     style={styles.dragHandle}
                     hitSlop={20}
                     disabled={isActive}
                 >
                     <Text style={styles.dragIcon}>≡</Text>
                 </Pressable>
-                <TouchableOpacity style={styles.checkbox} onPress={() => handleToggleCheck(item.id)}>
-                    {item.checked && <Text>✓</Text>}
-                </TouchableOpacity>
+                <GlassPressable haptic={false} hitSlop={10} style={[styles.checkbox, item.checked && styles.checkboxChecked]} onPress={() => handleToggleCheck(item.id)} accessibilityRole="checkbox" accessibilityState={{ checked: item.checked }} accessibilityLabel={`Mark ${item.text || "ingredient"} ${item.checked ? "not bought" : "bought"}`}>
+                    {item.checked && <Ionicons name="checkmark" size={15} color="#fff" />}
+                </GlassPressable>
                 { item.quantity && (
-                    <TouchableOpacity onPress={() => onOpenQuantityEditor(item)}>
+                    <GlassPressable onPress={() => onOpenQuantityEditor(item)} accessibilityLabel={`Edit quantity for ${item.text || "ingredient"}`}>
                         <View style={[styles.quantityLabel, item.checked && styles.quantityChecked]}>
                             <Text style={[item.checked && styles.quantityTextChecked]}>{item.quantity}</Text>
                         </View>
-                    </TouchableOpacity>
+                    </GlassPressable>
                 )}
                 <TextInput
                     ref={assignRef(item.id)}
                     value={item.text}
                     style={[styles.editInput, item.checked && styles.checked]}
+                    accessibilityLabel="Ingredient name"
                     onChangeText={text => handleUpdateIngredientText(item.id, text)}
                     onFocus={() => setEditingId(item.id)}
                     onKeyPress={({ nativeEvent }) => {
@@ -257,9 +259,9 @@ function MealCard({
                 {isEditing && (
                     // onPressIn: the input's onBlur clears editingId and unmounts
                     // this button before a regular onPress can fire.
-                    <TouchableOpacity onPressIn={() => handleDeleteIngredient(item.id)} style={styles.clearButton} hitSlop={8}>
+                    <GlassPressable onPressIn={() => handleDeleteIngredient(item.id)} onPress={() => handleDeleteIngredient(item.id)} style={styles.clearButton} hitSlop={8} accessibilityLabel={`Delete ${item.text || "ingredient"}`}>
                         <Text style={styles.clearText}>✕</Text>
-                    </TouchableOpacity>
+                    </GlassPressable>
                 )}
             </View>
         );
@@ -286,12 +288,12 @@ function MealCard({
     }, []);
 
     const handleDeletePress = () => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        animateLayout();
         setIsConfirmingDelete(true);
     };
 
     const handleCancelDelete = () => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        animateLayout();
         setIsConfirmingDelete(false);
     };
 
@@ -308,12 +310,12 @@ function MealCard({
                     Remove {meal.name ? `"${meal.name}"` : 'this meal'} from meal plan?
                 </Text>
                 <View style={styles.confirmationButtons}>
-                    <TouchableOpacity style={[styles.confirmationButton, styles.cancelButton]} onPress={handleCancelDelete}>
+                    <GlassPressable style={[styles.confirmationButton, styles.cancelButton]} onPress={handleCancelDelete}>
                         <Text style={styles.cancelButtonText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.confirmationButton, styles.confirmButton]} onPress={handleConfirmDelete}>
+                    </GlassPressable>
+                    <GlassPressable style={[styles.confirmationButton, styles.confirmButton]} onPress={handleConfirmDelete}>
                         <Text style={styles.confirmButtonText}>Remove</Text>
-                    </TouchableOpacity>
+                    </GlassPressable>
                 </View>
             </View>
         );
@@ -323,47 +325,35 @@ function MealCard({
         <View style={styles.mealCard}>
             <View>
                 <View style={styles.mealCardUpper}>
-                    <View style={styles.dayPickerContainer}>
-                        <TouchableOpacity onPress={toggleDaySelector} style={styles.dayPickerCollapsed}>
-                            <Ionicons name="calendar-outline" size={18} color={primary} />
-                            {meal.dayOfWeek && !isDaySelectorVisible && (
-                                <Text style={styles.selectedDayText}>{meal.dayOfWeek}</Text>
-                            )}
-                            {!meal.dayOfWeek && !isDaySelectorVisible && (
-                                <Text style={styles.selectedDayText}>Select Day</Text>
-                            )}
-                        </TouchableOpacity>
-
-                        {isDaySelectorVisible && (
-                            <Animated.View style={[styles.daySelectorContainer, daySelectorAnimatedStyle]}>
-                                {DAYS.map((day) => (
-                                    <TouchableOpacity
-                                        key={day}
-                                        style={[styles.dayButton, meal.dayOfWeek === day && styles.dayButtonActive]}
-                                        onPress={() => handleDaySelect(day)}
-                                    >
-                                        <Text style={[styles.dayText, meal.dayOfWeek === day && styles.dayTextActive]}>
-                                            {day?.charAt(0)}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </Animated.View>
-                        )}
-                    </View>
-                    <TouchableOpacity
+                    <GlassPressable onPress={toggleDaySelector} style={styles.dayPickerCollapsed} accessibilityLabel={`Choose a day for this meal, ${meal.dayOfWeek || "any day"}`} accessibilityState={{ expanded: isDaySelectorVisible }}>
+                        <Ionicons name="calendar-outline" size={14} color={primary} />
+                        <Text style={styles.selectedDayText}>{meal.dayOfWeek || 'Any day'}</Text>
+                        <Ionicons name="chevron-down" size={11} color={primary} />
+                    </GlassPressable>
+                    <Text style={styles.ingredientCount}>{ingredientCount} ingredient{ingredientCount === 1 ? '' : 's'}</Text>
+                    <GlassPressable
                         onPress={() => setIsMenuVisible(true)}
                         style={styles.deleteButton}
                         hitSlop={10}
                         accessibilityLabel="Meal options"
                     >
-                        <Ionicons name="ellipsis-horizontal" size={20} color="#8a8a8a" />
-                    </TouchableOpacity>
+                        <Ionicons name="ellipsis-horizontal" size={20} color={inkMuted} />
+                    </GlassPressable>
                 </View>
+                {isDaySelectorVisible && (
+                    <Animated.View style={[styles.daySelectorContainer, daySelectorAnimatedStyle]}>
+                        {DAYS.map((day) => (
+                            <GlassPressable key={day} hitSlop={5} style={[styles.dayButton, meal.dayOfWeek === day && styles.dayButtonActive]} onPress={() => handleDaySelect(day)} accessibilityLabel={day} accessibilityState={{ selected: meal.dayOfWeek === day }}>
+                                <Text style={[styles.dayText, meal.dayOfWeek === day && styles.dayTextActive]}>{day?.slice(0, 2)}</Text>
+                            </GlassPressable>
+                        ))}
+                    </Animated.View>
+                )}
                 <View>
                     <View style={styles.mealHeaderUpper}>
-                        <TouchableOpacity onPress={() => onToggleCollapse(meal.id)} style={styles.collapseButton}>
-                            <Text style={styles.collapseIcon}>{isCollapsed ? '▶' : '▼'}</Text>
-                        </TouchableOpacity>
+                        <GlassPressable onPress={() => { animateLayout(); onToggleCollapse(meal.id); }} style={styles.collapseButton} accessibilityLabel={isCollapsed ? "Show ingredients" : "Hide ingredients"} accessibilityState={{ expanded: !isCollapsed }}>
+                            <Ionicons name={isCollapsed ? "chevron-forward" : "chevron-down"} size={17} color={primary} />
+                        </GlassPressable>
                         {/* An unnamed meal stays a live text field with its
                             placeholder — that's the fastest path for a brand new
                             meal. Once it HAS a name, tapping it collapses like
@@ -378,44 +368,45 @@ function MealCard({
                                         assignRef(meal.id)(ref);
                                     }}
                                     style={styles.mealName}
+                                    accessibilityLabel="Meal name"
                                     value={meal.name}
                                     onChangeText={(text) => onUpdateMeal(meal.id, { name: text })}
                                     placeholder={placeholder}
-                                    placeholderTextColor={'grey'}
+                                    placeholderTextColor={inkFaint}
                                     onFocus={() => setIsMealNameEditing(true)}
                                     onBlur={() => setIsMealNameEditing(false)}
                                 />
                             ) : (
                                 <View style={styles.mealNameRow}>
-                                    <TouchableOpacity
-                                        onPress={() => onToggleCollapse(meal.id)}
+                                    <GlassPressable
+                                        onPress={() => { animateLayout(); onToggleCollapse(meal.id); }}
                                         style={styles.mealNameTap}
                                     >
-                                        <Text style={styles.mealName}>{mealNameDisplay}</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
+                                        <Text style={styles.mealName}>{meal.name}</Text>
+                                    </GlassPressable>
+                                    <GlassPressable
                                         onPress={() => setIsMealNameEditing(true)}
                                         style={styles.editNameButton}
                                         hitSlop={12}
                                         accessibilityLabel="Rename meal"
                                     >
-                                        <Ionicons name="pencil" size={15} color="#9a9a9a" />
-                                    </TouchableOpacity>
+                                        <Ionicons name="pencil" size={15} color={inkFaint} />
+                                    </GlassPressable>
                                 </View>
                             )}
                         </View>
                     </View>
                     {hasRecipe ? (
                         <View style={styles.mealHeaderLower}>
-                            <TouchableOpacity style={styles.recipeIndicator} onPress={() => onViewRecipe(meal)}>
+                            <GlassPressable style={styles.recipeIndicator} onPress={() => onViewRecipe(meal)}>
                                 <Ionicons name="book-outline" size={16} color={primary} />
                                 <Text style={styles.recipeIndicatorText}>View Recipe</Text>
-                            </TouchableOpacity>
+                            </GlassPressable>
                             {/* Icon-only until you press it: the filled/outline
                                 bookmark already says whether it's saved, so the
                                 permanent label was just noise. The confirmation
                                 text animates in on press and clears itself. */}
-                            <TouchableOpacity style={styles.recipeIndicator} onPress={handleToggleCookbook}>
+                            <GlassPressable style={styles.recipeIndicator} onPress={handleToggleCookbook} accessibilityLabel={meal.addedToCookbook ? "Remove from cookbook" : "Save to cookbook"} accessibilityState={{ selected: !!meal.addedToCookbook }}>
                                 <Ionicons
                                     name={meal.addedToCookbook ? 'bookmark' : 'bookmark-outline'}
                                     size={16}
@@ -423,21 +414,21 @@ function MealCard({
                                 />
                                 {cookbookFeedback && (
                                     <Animated.Text
-                                        entering={FadeInLeft.duration(180)}
-                                        exiting={FadeOutLeft.duration(180)}
+                                        entering={FadeInLeft.duration(180).reduceMotion(ReduceMotion.System)}
+                                        exiting={FadeOutLeft.duration(180).reduceMotion(ReduceMotion.System)}
                                         style={styles.recipeIndicatorText}
                                     >
                                         {cookbookFeedback}
                                     </Animated.Text>
                                 )}
-                            </TouchableOpacity>
+                            </GlassPressable>
                         </View>
                     ) : (
                         <View style={styles.mealHeaderLower}>
-                            <TouchableOpacity style={styles.recipeIndicator} onPress={() => onAddRecipe(meal)}>
+                            <GlassPressable style={styles.recipeIndicator} onPress={() => onAddRecipe(meal)}>
                                 <Ionicons name="add" size={16} color={primary} />
                                 <Text style={styles.recipeIndicatorText}>Add Recipe</Text>
-                            </TouchableOpacity>
+                            </GlassPressable>
                         </View>
                     )}
                 </View>
@@ -470,11 +461,11 @@ function MealCard({
                         windowSize={10}
                     />
                     {ingredients.length === 0 && (
-                        <TouchableOpacity
+                        <GlassPressable
                             style={styles.addFirstIngredientButton}
                             onPress={() => handleAddIngredient(-1)}>
                             <Text style={styles.addIngredientText}>+ Add Ingredient</Text>
-                        </TouchableOpacity>
+                        </GlassPressable>
                     )}
                 </View>
             )}
@@ -489,7 +480,9 @@ function MealCard({
                     onBackButtonPress={() => setIsMenuVisible(false)}
                     swipeDirection="down"
                     onSwipeComplete={() => setIsMenuVisible(false)}
-                    backdropOpacity={0.4}
+                    backdropOpacity={0.25}
+                    animationInTiming={reduceMotion ? 0 : 300}
+                    animationOutTiming={reduceMotion ? 0 : 250}
                     style={styles.menuModal}
                     useNativeDriverForBackdrop
                 >
@@ -501,13 +494,13 @@ function MealCard({
                             {meal.name || 'Untitled meal'}
                         </Text>
 
-                        <TouchableOpacity
+                        <GlassPressable
                             style={styles.menuRow}
                             onPress={() => { setIsMenuVisible(false); handleDeletePress(); }}
                         >
                             <Ionicons name="close-circle-outline" size={22} color="#db6767ff" />
                             <Text style={[styles.menuRowText, styles.menuRowDanger]}>Remove from Meal Plan</Text>
-                        </TouchableOpacity>
+                        </GlassPressable>
                     </SafeAreaView>
                 </Modal>
             )}
@@ -521,42 +514,44 @@ const styles = StyleSheet.create({
     mealNameTap: { flexShrink: 1 },
     editNameButton: { padding: 2 },
     menuModal: { justifyContent: 'flex-end', margin: 0 },
-    menuSheet: { backgroundColor: '#f8f9fa', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 8 },
+    menuSheet: { backgroundColor: '#F5F5EF', borderTopLeftRadius: 32, borderTopRightRadius: 32, paddingBottom: 20 },
     menuGrabberContainer: { alignItems: 'center', paddingTop: 12 },
     menuGrabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#d0d0d0' },
     menuTitle: { fontSize: 16, fontWeight: '600', color: inkMuted, textAlign: 'center', marginTop: 12, marginBottom: 8, paddingHorizontal: 24 },
     menuRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 24 },
     menuRowText: { fontSize: 17, fontWeight: '500', color: ink },
     menuRowDanger: { color: '#db6767ff' },
-    // Flat fill instead of a drop shadow: these stack several deep in a plan,
-    // and the shadows used to pile up into visible bands between them.
-    mealCard: { backgroundColor: surface, padding: 14, borderRadius: 14, marginBottom: 10 },
-    mealHeaderUpper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    mealCard: { backgroundColor: 'rgba(255,255,255,0.86)', padding: 18, borderRadius: 28, marginBottom: 15, borderWidth: 1, borderColor: 'rgba(255,255,255,0.96)', shadowColor: '#173F35', shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.035, shadowRadius: 12, elevation: 1 },
+    mealHeaderUpper: { marginTop: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     mealHeaderLower: {
         flexDirection: 'row',
-        marginLeft: 35
+        marginLeft: 31,
+        flexWrap: 'wrap',
+        rowGap: 8
     },
-    collapseButton: { padding: 5 },
+    collapseButton: { padding: 4, alignSelf: 'flex-start', marginTop: 4 },
     collapseIcon: { fontSize: 16 },
-    mealNameContainer: { flex: 1, marginHorizontal: 10 },
-    mealName: { fontWeight: '600', fontSize: 18, color: ink, letterSpacing: -0.2 },
+    mealNameContainer: { flex: 1, marginLeft: 6 },
+    mealName: { fontWeight: '700', fontSize: 22, lineHeight: 28, color: ink, letterSpacing: -0.65 },
     placeholderText: { color: inkFaint, fontWeight: 'normal' },
-    deleteButton: { padding: 5 },
+    deleteButton: { padding: 6, borderRadius: 16, backgroundColor: 'rgba(23,63,53,0.035)' },
+    ingredientCount: { flex: 1, textAlign: 'right', marginRight: 12, color: inkMuted, fontSize: 11, fontWeight: '500' },
     settingsIcon: { fontSize: 20 },
     ingredientListContainer: { paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline, marginTop: 10 },
     daySelectorContainer: {
         flexDirection: 'row',
         justifyContent: 'space-around',
         alignItems: 'center',
-        paddingHorizontal: 20,
+        paddingTop: 12,
+        overflow: 'hidden',
     },
     dayButton: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+        width: 33,
+        height: 33,
+        borderRadius: 17,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: hairline,
+        backgroundColor: accentSoft,
         marginHorizontal: 2
     },
     dayButtonActive: {
@@ -607,18 +602,19 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontWeight: '600',
     },
-    itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
-    dragHandle: { width: 30, alignItems: 'center', justifyContent: 'center' },
+    itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 9, minHeight: 46 },
+    dragHandle: { width: 20, alignItems: 'center', justifyContent: 'center' },
     dragIcon: { fontSize: 18, color: inkFaint },
-    checkbox: { width: 24, height: 24, marginHorizontal: 10, borderWidth: 1.5, borderColor: '#cfd4cb', borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
+    checkbox: { width: 23, height: 23, marginLeft: 6, marginRight: 10, borderWidth: 1.5, borderColor: '#C5D2C8', borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    checkboxChecked: { backgroundColor: primary, borderColor: primary },
     editInput: { fontSize: 16, flex: 1, paddingVertical: 2, color: ink },
     checked: { textDecorationLine: 'line-through', color: inkFaint },
     quantityChecked: { backgroundColor: '#eeeeee' },
     quantityTextChecked: { textDecorationLine: 'line-through', color: inkFaint },
     clearButton: { paddingHorizontal: 8 },
     clearText: { fontSize: 16, color: inkFaint },
-    addFirstIngredientButton: { paddingVertical: 5, paddingLeft: 40 },
-    addIngredientText: { color: primary, fontSize: 16 },
+    addFirstIngredientButton: { paddingVertical: 9, paddingLeft: 30 },
+    addIngredientText: { color: primary, fontSize: 14, fontWeight: '600' },
     mealCardUpper: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -637,19 +633,24 @@ const styles = StyleSheet.create({
     },
     dayPickerCollapsed: {
         flexDirection: 'row',
-        alignItems: 'center'
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: accentSoft,
+        borderRadius: 18,
+        paddingVertical: 7,
+        paddingHorizontal: 10,
     },
     selectedDayText: {
-        marginLeft: 8,
-        fontSize: 16,
+        fontSize: 12,
+        fontWeight: '600',
         color: primary,
     },
     recipeIndicator: {
         width: 'auto',
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 4,
-        paddingHorizontal: 8,
+        paddingVertical: 7,
+        paddingHorizontal: 10,
         backgroundColor: accentSoft,
         borderRadius: 999,
         marginRight: 8,
@@ -661,10 +662,10 @@ const styles = StyleSheet.create({
         fontSize: 12,
     },
     quantityLabel: {
-        backgroundColor: '#e9ece6',
+        backgroundColor: accentSoft,
         paddingHorizontal: 8,
         paddingVertical: 2,
-        borderRadius: 6,
+        borderRadius: 8,
         marginHorizontal: 3
     },
 });

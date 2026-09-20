@@ -1,10 +1,11 @@
 import { useAuth } from '@/context/AuthContext';
 import { defaultAvatars } from '@/utils/defaultAvatars';
-import { primary } from '@/utils/styles';
+import { canvas, ink, inkMuted, primary } from '@/utils/styles';
+import { GlassPressable as TouchableOpacity, GlassSurface } from './ui/Glass';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { FlatList, Image, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { FlatList, Image, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import Modal from 'react-native-modal';
 
 // A client-side staleness threshold used to live here but was never wired up.
@@ -14,7 +15,7 @@ import Modal from 'react-native-modal';
 // flicker on slow networks.
 
 export default function GroupIndicator() {
-    const { selectedGroup, serverTimeOffset, user } = useAuth();
+    const { selectedGroup, user } = useAuth();
     const [isModalVisible, setModalVisible] = useState(false);
     const router = useRouter();
 
@@ -28,7 +29,7 @@ export default function GroupIndicator() {
     }
 
     // Sort members to show the current user first, then alphabetically
-    const sortedMembers = selectedGroup.members.sort((a, b) => {
+    const sortedMembers = [...selectedGroup.members].sort((a, b) => {
         if (a.uid === user?.uid) return -1;
         if (b.uid === user?.uid) return 1;
         return (a.displayName || '').localeCompare(b.displayName || '');
@@ -36,12 +37,12 @@ export default function GroupIndicator() {
 
     return (
         <>
-            <TouchableOpacity style={styles.container} onPress={() => setModalVisible(true)}>
-                {sortedMembers.slice(0, 5).map((member, index) => (
+            <TouchableOpacity accessibilityLabel={`View ${selectedGroup.name} members`} style={styles.container} onPress={() => setModalVisible(true)}>
+                {sortedMembers.slice(0, 3).map((member, index) => (
                     <Image
                         key={member.uid}
                         source={{ uri: member.photoURL || defaultAvatars[0] }}
-                        style={[styles.photo, member.online ? styles.onlinePhoto: styles.offlinePhoto, { marginLeft: index > 0 ? -16 : 0, zIndex: 100 - index }]}
+                        style={[styles.photo, member.online ? styles.onlinePhoto: styles.offlinePhoto, { marginLeft: index > 0 ? -12 : 0, zIndex: 100 - index }]}
                     />
                 ))}
             </TouchableOpacity>
@@ -54,7 +55,7 @@ export default function GroupIndicator() {
                 onSwipeComplete={() => setModalVisible(false)}
                 style={styles.modal}
             >
-                <SafeAreaView style={styles.sheet}>
+                <GlassSurface intensity={80} style={styles.sheet}><SafeAreaView>
                     {/* Grabber Handle */}
                     <View style={styles.grabberContainer}>
                         <View style={styles.grabber} />
@@ -90,7 +91,7 @@ export default function GroupIndicator() {
                             <Text style={styles.secondaryButtonText}>Switch or Manage Groups</Text>
                         </TouchableOpacity>
                     </View>
-                </SafeAreaView>
+                </SafeAreaView></GlassSurface>
             </Modal>
         </>
     );
@@ -101,30 +102,30 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'flex-end',
-        height: 50, // Set fixed height
+        height: 40,
     },
     photo: {
-        width: 45,
-        height: 45,
+        width: 35,
+        height: 35,
         borderRadius: 25,
         borderWidth: 2,
         borderColor: '#fff',
     },
     onlinePhoto: {
-        borderColor: '#038523ff', // Green
+        borderColor: '#FFFFFF',
     },
     offlinePhoto: {
-        borderColor: '#c0c0c0ff', // Gray
-        filter: 'grayscale(60%)',
+        borderColor: '#FFFFFF',
+        opacity: 0.72,
     },
     modal: {
         justifyContent: 'flex-end',
         margin: 0,
     },
     sheet: {
-        backgroundColor: '#f8f9fa',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
+        backgroundColor: canvas,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
         maxHeight: '70%',
     },
     grabberContainer: {
@@ -139,7 +140,9 @@ const styles = StyleSheet.create({
     },
     sheetTitle: {
         fontSize: 22,
-        fontWeight: 'bold',
+        fontWeight: '700',
+        color: ink,
+        letterSpacing: -0.6,
         textAlign: 'center',
         marginVertical: 16,
     },
@@ -151,7 +154,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         backgroundColor: '#fff',
         padding: 12,
-        borderRadius: 8,
+        borderRadius: 20,
         marginBottom: 8,
     },
     memberAvatar: {
@@ -186,6 +189,7 @@ const styles = StyleSheet.create({
     },
     statusText: {
         fontSize: 14,
+        color: inkMuted,
     },
     onlineText: {
         color: primary,
@@ -202,8 +206,8 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'transparent',
-        borderColor: primary,
+        backgroundColor: 'rgba(220,237,226,0.7)',
+        borderColor: '#fff',
         borderWidth: 1,
         paddingVertical: 12,
         borderRadius: 25,
