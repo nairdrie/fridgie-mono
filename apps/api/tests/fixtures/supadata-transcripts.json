@@ -1,0 +1,11 @@
+{
+  "immediate": { "content": "Drain 1 can chickpeas. Toss with 2 tbsp lemon juice and serve.", "lang": "en", "availableLangs": ["en"] },
+  "chunks": { "content": [{ "text": "Drain 1 can chickpeas.", "offset": 0, "duration": 1500, "lang": "en" }, { "text": "Toss with 2 tbsp lemon juice.", "offset": 1500, "duration": 2000, "lang": "en" }], "lang": "en" },
+  "accepted": { "jobId": "fixture-job-123" },
+  "queued": { "status": "queued" },
+  "active": { "status": "active" },
+  "completed": { "status": "completed", "content": "Drain 1 can chickpeas. Toss with 2 tbsp lemon juice and serve.", "lang": "en", "availableLangs": ["en"] },
+  "failed": { "status": "failed", "error": { "error": "internal-error", "message": "Sensitive upstream diagnostic must not leave the adapter" } },
+  "empty": { "content": [], "lang": "en", "availableLangs": [] },
+  "lyrics": { "content": "Strawberry dreams, sugar skies, dancing through the lemon sunrise.", "lang": "en" }
+}

@@ -1,5 +1,5 @@
 // api/recipe/index.ts
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { invalidateSearchIndex } from '@/utils/searchIndex';
 import { fs } from '@/utils/firebase' // Use Firestore admin
 import { FieldValue } from 'firebase-admin/firestore'
@@ -120,7 +120,8 @@ function countImport(details: Record<string, any>): void {
  *   `forkedFromId` pointing at the root recipe, and the response carries the
  *   new id (callers must adopt it, e.g. update meal.recipeId)
  */
-route.post('/', async (c) => {
+export function createRecipeSaveHandler(database: typeof fs = fs) {
+ return async (c: Context) => {
   const uid = c.get('uid')
   // Ownership/lineage fields are server-managed — never trust them from the body.
   // authorName/authorUid/lastAte are DERIVED per-request from createdBy and must
@@ -134,21 +135,27 @@ route.post('/', async (c) => {
     authorName: _an,
     authorUid: _au,
     lastAte: _la,
+    contentOrigin: _co,
+    curatedCreatorUid: _cc,
+    publishedAt: _pa,
+    imageKind: _ik,
+    imageAttribution: _ia,
     ...recipeDetails
   } = await c.req.json()
 
   if (!id) {
     const data = { ...toStored(recipeDetails, true), createdBy: uid, createdAt: new Date() }
-    const docRef = await fs.collection('recipes').add(data)
+    const docRef = await database.collection('recipes').add(data)
     countImport(data)
     invalidateSearchIndex()  // new recipe -> searchable now, not in <=5 min
     return c.json({ id: docRef.id, ...data }, 201)
   }
 
-  const docRef = fs.collection('recipes').doc(id)
+  const docRef = database.collection('recipes').doc(id)
   const recipeDoc = await docRef.get()
 
   if (!recipeDoc.exists) {
+    if (String(id).startsWith('curated-')) return c.json({ error: 'That recipe identifier is reserved.' }, 400)
     const data = { ...toStored(recipeDetails, true), createdBy: uid, createdAt: new Date() }
     await docRef.set(data)
     countImport(data)
@@ -169,16 +176,27 @@ route.post('/', async (c) => {
       createdBy: uid,
       createdAt: new Date(),
       forkedFromId: rootId,
+      ...(['ai-curated', 'ai-adapted'].includes(existing.contentOrigin) ? { contentOrigin: 'ai-adapted' as const } : {}),
     }
-    const forkRef = await fs.collection('recipes').add(forkData)
+    if ('photoURL' in recipeDetails && recipeDetails.photoURL !== existing.photoURL) {
+      delete forkData.imageKind
+      delete forkData.imageAttribution
+    }
+    const forkRef = await database.collection('recipes').add(forkData)
     invalidateSearchIndex()
     return c.json({ id: forkRef.id, ...forkData }, 201)
   }
 
   const update = toStored(recipeDetails, false)
-  await docRef.update({ ...update, updatedAt: new Date() })
+  const replacedImage = 'photoURL' in recipeDetails && recipeDetails.photoURL !== existing.photoURL
+  await docRef.update({ ...update, updatedAt: new Date(), ...(replacedImage ? { imageKind: FieldValue.delete(), imageAttribution: FieldValue.delete() } : {}) })
   invalidateSearchIndex()
-  return c.json({ id, ...existing, ...update })
-})
+  const response = { id, ...existing, ...update }
+  if (replacedImage) { delete response.imageKind; delete response.imageAttribution }
+  return c.json(response)
+ }
+}
+
+route.post('/', createRecipeSaveHandler())
 
 export default route

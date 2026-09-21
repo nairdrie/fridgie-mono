@@ -1,6 +1,5 @@
 import React from 'react';
 import ConnectionError from '@/components/ConnectionError';
-import ListHeader from '@/components/ListHeader';
 import GlassTabBar from '@/components/ui/GlassTabBar';
 import { useAuth } from '@/context/AuthContext';
 import { useLists } from '@/context/ListContext';
@@ -23,7 +22,7 @@ export default function TabLayout() {
 
   return (
     <Tabs tabBar={props => <GlassTabBar {...props} />} screenOptions={{ tabBarActiveTintColor: primary, sceneStyle: { backgroundColor: canvas }, animation: reduceMotion ? 'none' : 'fade' }}>
-      <Tabs.Screen name="list" options={{ title: 'Plan', header: () => <ListHeader /> }} />
+      <Tabs.Screen name="list" options={{ title: 'Plan', headerShown: false }} />
       <Tabs.Screen name="explore" options={{ title: 'Discover', headerShown: false }} />
       <Tabs.Screen
         name="profile"

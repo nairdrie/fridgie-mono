@@ -6,6 +6,8 @@ import { FieldPath } from 'firebase-admin/firestore';
 import type { Recipe } from '@/utils/types';
 import { hiddenRecipeIds } from '@/utils/moderation';
 import { sourceDocId } from '@/utils/recipeSource';
+import { publishedDiscovery } from '@/utils/discoveryRead';
+import { curatedProfileFields } from '@/utils/publicProfiles';
 
 interface Creator {
     uid: string;
@@ -105,6 +107,7 @@ route.get('/', async (c) => {
         // fetched candidates rather than in the query — see OVERFETCH.
         const hidden = await hiddenRecipeIds(c.get('uid') as string);
         const visible = showable(hidden);
+        const editorial = await publishedDiscovery(hidden).catch(() => null);
 
         // --- 1. Fetch Trending Recipes (e.g., most liked) ---
         const trendingSnapshot = await fs.collection('recipes')
@@ -206,6 +209,7 @@ route.get('/', async (c) => {
                     photoURL: authUser?.photoURL || null,
                     followerCount: userData.followerCount || 0,
                     recipeCount: userData.recipeCount || 0,
+                    ...curatedProfileFields(userData),
                     featuredRecipe: fullFeaturedRecipe
                 };
             });
@@ -221,7 +225,8 @@ route.get('/', async (c) => {
         const exploreData = {
             trending: trendingWithCounts,
             newest: newestWithCounts,
-            featuredCreators
+            featuredCreators,
+            ...(editorial ?? {}),
         };
 
         return c.json(exploreData);

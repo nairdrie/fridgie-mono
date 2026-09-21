@@ -22,10 +22,14 @@ route.get('/', async (c) => {
   }
 
   const recipeData = recipeDoc.data()
+  if (recipeData?.visibility === 'private' && recipeData?.createdBy !== c.get('uid')) {
+    return c.json({ error: 'Recipe not found' }, 404)
+  }
 
-  const author = await adminAuth.getUser(recipeData?.createdBy);
+  const author = typeof recipeData?.createdBy === 'string'
+    ? await adminAuth.getUser(recipeData.createdBy).catch(() => null) : null;
 
-  return c.json({ id: recipeDoc.id, ...recipeData, authorName: author.displayName, authorUid: author.uid })
+  return c.json({ id: recipeDoc.id, ...recipeData, authorName: author?.displayName ?? null, authorUid: author?.uid ?? recipeData?.createdBy ?? null })
 })
 
 export default route

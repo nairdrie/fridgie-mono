@@ -4,6 +4,7 @@ import AddEditRecipeModal from '@/components/AddEditRecipeModal';
 import CarryOverBanner from '@/components/CarryOverBanner';
 import GroceryListView, { type GroceryListHandle } from '@/components/GroceryListView'; // Import the new component
 import MealPlanView from '@/components/MealPlanView';
+import ListHeader from '@/components/ListHeader';
 import AddFromCookbookModal from '@/components/AddFromCookbookModal';
 import MealSuggestionsModal from '@/components/MealSuggestionsModal';
 import SyncStatus from '@/components/SyncStatus';
@@ -73,9 +74,16 @@ export default function HomeScreen() {
     const { reduceMotion } = useGlassPreferences();
     const { selectedList, isLoading, selectedGroup, selectedView, allLists } = useLists();
     const { user } = useAuth();
-    
     const [meals, setMealsRaw] = useState<Meal[]>([]);
     const [items, setItemsRaw] = useState<Item[]>([]);
+    const hasActiveContent = selectedView === ListView.MealPlan ? meals.length > 0 : items.length > 0;
+    const headerScrollOffset = useSharedValue(0);
+    const handleListScroll = useCallback((offset: number) => {
+        headerScrollOffset.value = Math.max(0, offset);
+    }, [headerScrollOffset]);
+    useEffect(() => {
+        headerScrollOffset.value = 0;
+    }, [selectedView, selectedList?.id, hasActiveContent, headerScrollOffset]);
 
     /**
      * Every local edit goes through here so the rows it touched carry an
@@ -138,7 +146,7 @@ export default function HomeScreen() {
     const [isFabMenuOpen, setIsFabMenuOpen] = useState(false);
     const fabAnimation = useSharedValue(0);
     // Empty states already provide their own add actions.
-    const showFab = !isKeyboardVisible && (selectedView === ListView.MealPlan ? meals.length > 0 : items.length > 0);
+    const showFab = !isKeyboardVisible && hasActiveContent;
 
     useEffect(() => {
         setIsFabMenuOpen(false);
@@ -1040,13 +1048,14 @@ export default function HomeScreen() {
     }, [meals, isInCookbook]);
 
     if (isLoading || (selectedList && isListLoading)) {
-        return <AmbientBackground style={styles.loadingContainer}><ActivityIndicator color={primary} /><Text style={styles.loadingText}>Getting your week ready…</Text></AmbientBackground>;
+        return <AmbientBackground><ListHeader scrollOffset={headerScrollOffset} /><View style={styles.loadingContainer}><ActivityIndicator color={primary} /><Text style={styles.loadingText}>Getting your week ready…</Text></View></AmbientBackground>;
     }
 
     return (
         <>
         {isFocused && <StatusBar style="dark" />}
         <AmbientBackground>
+            <ListHeader scrollOffset={headerScrollOffset} />
             {/* No keyboardVerticalOffset. That prop corrects for a gap between
                 this view's bottom edge and the keyboard's top, and there is
                 none — the tab bar below is covered by the keyboard, not pushed
@@ -1073,6 +1082,7 @@ export default function HomeScreen() {
                 )}
                 { selectedView === ListView.GroceryList ? (
                     <GroceryListView
+                        onScrollOffsetChange={handleListScroll}
                         items={items}
                         meals={meals}
                         setItems={setItems}
@@ -1088,6 +1098,7 @@ export default function HomeScreen() {
                     />
                 ) : (
                     <MealPlanView
+                        onScrollOffsetChange={handleListScroll}
                         meals={mealsWithCookbookStatus}
                         items={items}
                         setAllItems={setItems}
@@ -1204,7 +1215,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    loadingContainer: { alignItems: 'center', justifyContent: 'center', gap: 13 },
+    loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 13 },
     loadingText: { fontSize: 14, color: inkMuted },
     backdrop: {
         ...StyleSheet.absoluteFillObject,

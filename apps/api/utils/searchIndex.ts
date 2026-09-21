@@ -13,8 +13,10 @@
 
 import MiniSearch from 'minisearch';
 import { adminAuth, fs } from './firebase';
+import { curatedProfileFields } from './publicProfiles';
+import type { UserProfile, Recipe } from './types';
 
-export interface RecipeHit {
+export interface RecipeHit extends Pick<Recipe, 'contentOrigin' | 'curatedCreatorUid' | 'publishedAt' | 'category' | 'totalMinutes' | 'servings' | 'imageKind' | 'imageAttribution'> {
   id: string;
   name: string;
   description: string;
@@ -22,7 +24,7 @@ export interface RecipeHit {
   tags: string[];
 }
 
-export interface UserHit {
+export interface UserHit extends Pick<UserProfile, 'profileKind' | 'handle' | 'bio' | 'specialty' | 'accent'> {
   /** Named objectID for the client's UserSearchResult, inherited from Algolia. */
   objectID: string;
   displayName: string;
@@ -61,7 +63,7 @@ async function loadRecipes() {
   // instructions are deliberately not fetched — they are the bulk of a recipe
   // document and nobody searches for a numbered step.
   const snap = await fs.collection('recipes')
-    .select('name', 'description', 'tags', 'photoURL', 'ingredients', 'visibility')
+    .select('name', 'description', 'tags', 'photoURL', 'ingredients', 'visibility', 'contentOrigin', 'curatedCreatorUid', 'publishedAt', 'category', 'totalMinutes', 'servings', 'imageKind', 'imageAttribution')
     .get();
 
   return snap.docs.filter((d) => {
@@ -80,6 +82,13 @@ async function loadRecipes() {
       description: String(data.description ?? ''),
       photoURL: data.photoURL ?? null,
       tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+      ...(['ai-curated', 'ai-adapted'].includes(data.contentOrigin) ? { contentOrigin: data.contentOrigin, curatedCreatorUid: data.curatedCreatorUid } : {}),
+      ...(data.publishedAt ? { publishedAt: data.publishedAt } : {}),
+      ...(data.category ? { category: data.category } : {}),
+      ...(Number.isFinite(data.totalMinutes) ? { totalMinutes: data.totalMinutes } : {}),
+      ...(Number.isFinite(data.servings) ? { servings: data.servings } : {}),
+      ...(data.imageKind ? { imageKind: data.imageKind } : {}),
+      ...(data.imageAttribution ? { imageAttribution: data.imageAttribution } : {}),
       // Indexed but never returned: it makes "chicken" or "chickpeas" find the
       // dishes that use them, which Algolia never did because the backfill
       // script only sent name/description/tags.
@@ -90,18 +99,22 @@ async function loadRecipes() {
 
 async function loadUsers(): Promise<UserHit[]> {
   const users: UserHit[] = [];
+  const curatedDocs = await fs.collection('users').where('profileKind', '==', 'curated').get();
+  const curated = new Map(curatedDocs.docs.filter(doc => Number(doc.data().recipeCount) > 0).map(doc => [doc.id, doc.data()]));
   let pageToken: string | undefined;
   do {
     const page = await adminAuth.listUsers(1000, pageToken);
     for (const u of page.users) {
       // Anonymous accounts have no email and no display name worth searching —
       // the same filter the old backfill script applied.
-      if (!u.email) continue;
+      const editorial = curated.get(u.uid);
+      if (!u.email && !editorial) continue;
       users.push({
         objectID: u.uid,
         displayName: u.displayName ?? '',
         photoURL: u.photoURL ?? null,
-        email: u.email,
+        email: u.email ?? '',
+        ...curatedProfileFields(editorial),
       });
     }
     pageToken = page.pageToken;
@@ -122,7 +135,7 @@ async function build(): Promise<Built> {
   recipeIndex.addAll(recipes);
 
   const userIndex = new MiniSearch<UserHit>({
-    fields: ['displayName', 'email'],
+    fields: ['displayName', 'email', 'handle', 'specialty'],
     storeFields: ['objectID'],
     idField: 'objectID',
     searchOptions: { boost: { displayName: 3, email: 1 } },

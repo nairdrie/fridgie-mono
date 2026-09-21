@@ -25,7 +25,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { updateEmail, updateProfile, User } from 'firebase/auth';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -213,7 +213,8 @@ const ProfileHeader = ({
     openNotifications, 
     setSettingsModalVisible,
     followerCount,
-    followingCount
+    followingCount,
+    onOpenConnections,
  }: {
     authUser: User, 
     cookbook: Recipe[], 
@@ -222,6 +223,7 @@ const ProfileHeader = ({
     setSettingsModalVisible: any,
     followerCount: number,
     followingCount: number,
+    onOpenConnections: (kind: 'followers' | 'following') => void,
 }) => (
     <Animated.View entering={FadeInDown.duration(550).reduceMotion(ReduceMotion.System)}>
         <View style={styles.pageHeading}>
@@ -248,8 +250,8 @@ const ProfileHeader = ({
             <Text style={styles.displayName}>{authUser?.displayName || 'Fridgie User'}</Text>
             {authUser?.email && <Text style={styles.usernameText}>@{authUser.email.split('@')[0]}</Text>}
             <View style={styles.statsContainer}>
-                <View style={styles.statItem}><Text style={styles.statNumber}>{followingCount || 0}</Text><Text style={styles.statLabel}>Following</Text></View>
-                <View style={[styles.statItem, styles.statDivider]}><Text style={styles.statNumber}>{followerCount || 0}</Text><Text style={styles.statLabel}>Followers</Text></View>
+                <TouchableOpacity style={styles.statItem} onPress={() => onOpenConnections('following')} accessibilityLabel={`View ${followingCount || 0} people you follow`}><Text style={styles.statNumber}>{followingCount || 0}</Text><Text style={styles.statLabel}>Following</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.statItem, styles.statDivider]} onPress={() => onOpenConnections('followers')} accessibilityLabel={`View your ${followerCount || 0} followers`}><Text style={styles.statNumber}>{followerCount || 0}</Text><Text style={styles.statLabel}>Followers</Text></TouchableOpacity>
                 <View style={styles.statItem}><Text style={styles.statNumber}>{cookbook.length || 0}</Text><Text style={styles.statLabel}>Recipes</Text></View>
             </View>
         </GlassSurface>
@@ -287,9 +289,11 @@ export default function UserProfile() {
     
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [cookbook, setCookbook] = useState<Recipe[]>([]);
-    const [isCookbookLoading, setIsCookbookLoading] = useState(true);
-
     const [isDataLoading, setIsDataLoading] = useState(true);
+    const profileRequestVersion = useRef(0);
+    const loadedProfileUid = useRef<string | null>(null);
+    const profileUid = authUser?.uid;
+    const isAnonymous = authUser?.isAnonymous;
 
     const [isMealPlanModalVisible, setIsMealPlanModalVisible] = useState(false);
     const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
@@ -336,46 +340,56 @@ export default function UserProfile() {
         }, [])
     );
 
-    const fetchProfileData = useCallback(async () => {
-        if (!authUser || authUser.isAnonymous) {
+    const fetchProfileData = useCallback(async (options?: { refresh?: boolean; quiet?: boolean }) => {
+        const requestVersion = ++profileRequestVersion.current;
+        if (!profileUid || isAnonymous) {
+            loadedProfileUid.current = null;
+            setProfileData(null);
+            setCookbook([]);
             setIsDataLoading(false);
+            setIsRefreshing(false);
             return;
-        };
-        
-        try {
-            // Fetch profile info and cookbook in parallel for speed
-            const [userProfile, userCookbook] = await Promise.all([
-                getUserProfile(authUser.uid),
-                getUserCookbook(authUser.uid)
-            ]);
+        }
 
-            setProfileData(userProfile as any);
+        const isInitialLoad = loadedProfileUid.current !== profileUid;
+        if (isInitialLoad) {
+            setIsDataLoading(true);
+            setProfileData(null);
+            setCookbook([]);
+        }
+        if (options?.refresh) setIsRefreshing(true);
+
+        try {
+            const [userProfile, userCookbook] = await Promise.all([
+                getUserProfile(profileUid),
+                getUserCookbook(profileUid),
+            ]);
+            // Blurring, changing accounts, or a newer refresh invalidates this
+            // response so returning from a connections screen cannot show old counts.
+            if (requestVersion !== profileRequestVersion.current) return;
+            loadedProfileUid.current = profileUid;
+            setProfileData(userProfile as { followerCount: number; followingCount: number });
             setCookbook(userCookbook);
         } catch (error) {
-            console.error("Failed to fetch profile data:", error);
-            Alert.alert("Error", "Could not load your profile information.");
+            if (requestVersion !== profileRequestVersion.current) return;
+            console.error('Failed to fetch profile data:', error);
+            if (isInitialLoad || !options?.quiet) {
+                Alert.alert('Error', 'Could not load your profile information.');
+            }
+        } finally {
+            if (requestVersion === profileRequestVersion.current) {
+                setIsDataLoading(false);
+                setIsRefreshing(false);
+            }
         }
-    }, [authUser]);
+    }, [profileUid, isAnonymous]);
 
-    const loadData = useCallback(async (isRefresh = false) => {
-        if (isRefresh) {
-            setIsRefreshing(true);
-        } else {
-            setIsDataLoading(true);
-        }
-        
-        await fetchProfileData();
+    const loadData = useCallback((isRefresh = false) => fetchProfileData({ refresh: isRefresh }), [fetchProfileData]);
 
-        if (isRefresh) {
-            setIsRefreshing(false);
-        } else {
-            setIsDataLoading(false);
-        }
-    }, [fetchProfileData]);
-
-    useEffect(() => {
-        loadData();
-    }, [loadData]);
+    useFocusEffect(useCallback(() => {
+        void fetchProfileData({ quiet: true });
+        return () => { profileRequestVersion.current += 1; };
+    }, [fetchProfileData]));
 
     const filter = useCookbookFilter(cookbook);
 
@@ -415,19 +429,20 @@ export default function UserProfile() {
      */
     const handleRecipeSaved = async (_meal: Meal | null, _items: Item[], savedRecipe: Recipe) => {
         const previousId = recipeToEdit?.id;
-        closeRecipeEditor();
         try {
             if (previousId && previousId !== savedRecipe.id) {
-                await removeRecipe(previousId);
+                // Keep the original on the shelf until its reviewed copy is filed.
                 await addRecipe(savedRecipe.id);
+                await removeRecipe(previousId);
             } else if (!previousId) {
                 await addRecipe(savedRecipe.id);
             }
         } catch (error) {
             console.error('Failed to update the cookbook after saving a recipe', error);
-            Alert.alert('Saved, but not filed', "The recipe was saved but couldn't be added to your cookbook. Pull to refresh and try again.");
+            // The editor keeps its saved server ID and offers a filing retry.
+            throw error;
         }
-        fetchProfileData();
+        void fetchProfileData();
     };
 
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -480,7 +495,7 @@ export default function UserProfile() {
         setEditPhotoModalVisible(true);
     };
     
-    if (isDataLoading && cookbook.length == 0) {
+    if (isDataLoading && cookbook.length === 0) {
         return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
     }
     
@@ -547,6 +562,7 @@ export default function UserProfile() {
                             setSettingsModalVisible={setSettingsModalVisible}
                             followingCount={profileData?.followingCount || 0}
                             followerCount={profileData?.followerCount || 0}
+                            onOpenConnections={(kind) => router.push({ pathname: '/profile/connections', params: { uid: authUser.uid, kind } })}
                         />
                     }
                     refreshControl={

@@ -4,12 +4,13 @@ import { accentSoft, hairline, ink, inkFaint, inkMuted, primary } from '@/utils/
 import { GlassPressable, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import uuid from 'react-native-uuid';
 import { generateRecipeFromTitle, getRecipe, importRecipeFromPhoto, importRecipeFromUrl, saveRecipe, uploadRecipePhoto } from '../utils/api';
 import { useAuth } from '@/context/AuthContext';
 import { parseServings, scaleIngredients, servingsScale } from '@/utils/servings';
+import { createRecipeImportGuard, parseRecipeImportInput, recipeImportProblem, recipeSourceLabel, type RecipeImportProblem } from '@/utils/recipeImport';
 
 /** Long enough for the sheet's slide-out to finish, short enough not to read as a stall. */
 const SHEET_DISMISS_MS = 260;
@@ -43,10 +44,16 @@ interface AddEditRecipeModalProps {
    * `savedRecipe` is what the server stored, and its id is NOT necessarily the
    * one that went in: saving someone else's recipe forks it.
    */
-  onRecipeSave: (updatedMeal: Meal | null, newItems: Item[], savedRecipe: Recipe) => void;
+  onRecipeSave: (updatedMeal: Meal | null, newItems: Item[], savedRecipe: Recipe) => void | Promise<void>;
+  /** Raw link/share text. A stable ID identifies one OS share across auth/renders. */
+  initialImportUrl?: string;
+  initialImportRequestId?: string;
 }
 
-export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, mealForRecipe, recipeToEdit = null, onRecipeSave }: AddEditRecipeModalProps) {
+export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, mealForRecipe, recipeToEdit = null, onRecipeSave, initialImportUrl, initialImportRequestId }: AddEditRecipeModalProps) {
+  const contextKey = recipeToEdit ? `recipe:${recipeToEdit.id}` : mealForRecipe ? `meal:${mealForRecipe.id}:${mealForRecipe.recipeId ?? ''}` : 'cookbook';
+  const renderedContext = useRef(contextKey);
+  renderedContext.current = contextKey;
   const { selectedGroup } = useAuth();
   // Every field on this form is inside the scroller below, and focus bubbles,
   // so the scroller hears all of them — including the ingredient and step rows,
@@ -66,7 +73,31 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
   const [importSource, setImportSource] = useState<'link' | 'photo' | 'generate'>('link');
   const [isLoading, setIsLoading] = useState(false);
   const [creationMode, setCreationMode] = useState<'initial' | 'link' | 'photo' | 'generate' | 'manual'>('initial');
-  const [isSaveDisabled, setIsSaveDisabled] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [importProblem, setImportProblem] = useState<RecipeImportProblem | null>(null);
+  const [saveProblem, setSaveProblem] = useState<string | null>(null);
+  const [isReviewingImport, setIsReviewingImport] = useState(false);
+  const [pendingShare, setPendingShare] = useState<{ id: string; text: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ title: string; message: string; label: string; confirm: () => void } | null>(null);
+  const guard = useRef(createRecipeImportGuard());
+  const operation = useRef<'load' | 'import' | 'picker' | 'save' | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const initializedSession = useRef<string | null>(null);
+  const visible = useRef(isVisible);
+  visible.current = isVisible;
+  const draft = useRef<Recipe | null>(editingRecipe);
+  draft.current = editingRecipe;
+  const dirty = useRef(false);
+  const hasWork = useRef(false);
+  const savedDraft = useRef<{ draft: Recipe; saved: Recipe } | null>(null);
+  const callbacks = useRef({ onClose, onRecipeSave });
+  callbacks.current = { onClose, onRecipeSave };
+  const isCurrent = useCallback((request: number) => mounted.current && visible.current
+    && initializedSession.current === `open:${renderedContext.current}` && guard.current.isCurrent(request), []);
+  const isSaveDisabled = creationMode !== 'manual' || !editingRecipe?.name?.trim() || isSaving || isLoading || isImporting || isPickerBusy;
+  const parsedImport = useMemo(() => parseRecipeImportInput(importUrl), [importUrl]);
+  const isSocialImport = 'platform' in parsedImport && parsedImport.platform !== 'web';
 
   // ✅ 1. State for the animated loading message
   const [importingMessage, setImportingMessage] = useState('Fetching your recipe...');
@@ -90,17 +121,8 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
     ...(selectedGroup?.householdSize ? { servings: selectedGroup.householdSize } : {}),
   });
   
-  useEffect(() => {
-    // Enable the save button only if the user is in the manual editing
-    // mode and the recipe has a name.
-    if (creationMode === 'manual' && editingRecipe?.name?.trim()) {
-      setIsSaveDisabled(false);
-    } else {
-      // Otherwise, keep it disabled.
-      setIsSaveDisabled(true);
-    }
-    // Rerun this logic whenever the recipe data or the creation mode changes.
-  }, [editingRecipe, creationMode]);
+  const inputs = useRef({ mealForRecipe, recipeToEdit, createBlankRecipe });
+  inputs.current = { mealForRecipe, recipeToEdit, createBlankRecipe };
 
   // ✅ 2. useEffect to cycle through loading messages
   useEffect(() => {
@@ -122,6 +144,11 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
               'Writing the method...',
               'Almost there...'
             ]
+          : isSocialImport
+          ? [
+              'Reading this video...',
+              'Still working on this video...'
+            ]
           : [
               'Fetching your recipe...',
               'Analyzing ingredients...',
@@ -137,7 +164,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
               messageIndex = messages.length - 1;
             }
             setImportingMessage(messages[messageIndex]);
-        }, 3000); // Change message every 3 seconds
+        }, importSource === 'link' && isSocialImport ? 20_000 : 3000);
     }
 
     // Cleanup function to clear the interval
@@ -146,81 +173,171 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
             clearInterval(interval);
         }
     };
-  }, [isImporting, importSource]);
+  }, [isImporting, importSource, isSocialImport]);
 
   useEffect(() => {
+    const session = `${isVisible ? 'open' : 'closed'}:${contextKey}`;
+    if (initializedSession.current === session) return;
+    initializedSession.current = session;
+    const request = guard.current.begin();
+    operation.current = null;
+    dirty.current = false;
+    hasWork.current = false;
+    savedDraft.current = null;
+    setIsImporting(false);
+    setIsPickerBusy(false);
+    setIsSaving(false);
+    setImportProblem(null);
+    setSaveProblem(null);
+    setIsReviewingImport(false);
+    setPendingShare(null);
+    setConfirmation(null);
     if (!isVisible) {
+      draft.current = null;
       setEditingRecipe(null);
       return;
     }
-
-    const setupRecipe = async () => {
-      setIsLoading(true);
-      setImportUrl('');
-      setGenerateTitle(mealForRecipe?.name || '');
-
-      // Handed a recipe outright — the cookbook's Edit already has it.
-      if (recipeToEdit) {
-        setCreationMode('manual');
-        setEditingRecipe(recipeToEdit);
-      } else if (mealForRecipe?.recipeId) {
-        setCreationMode('manual');
-        try {
-          const existingRecipe = await getRecipe(mealForRecipe.recipeId);
-          setEditingRecipe(existingRecipe);
-        } catch (e) {
-          console.error("Failed to fetch recipe for editing", e);
-          Alert.alert("Error", "Could not load the recipe to edit.");
-          onClose();
-        }
-      } else {
-        // No meal and no recipe: a blank one, headed for the cookbook.
-        setCreationMode('initial');
-        setEditingRecipe(createBlankRecipe());
-      }
+    const { mealForRecipe: meal, recipeToEdit: recipe, createBlankRecipe: blank } = inputs.current;
+    setImportUrl('');
+    setGenerateTitle(meal?.name || '');
+    if (recipe) {
+      hasWork.current = true;
+      draft.current = recipe;
+      setEditingRecipe(recipe);
+      setCreationMode('manual');
       setIsLoading(false);
-    };
+    } else if (meal?.recipeId) {
+      operation.current = 'load';
+      hasWork.current = true;
+      setIsLoading(true);
+      setCreationMode('manual');
+      void getRecipe(meal.recipeId).then(existing => {
+        if (!isCurrent(request)) return;
+        draft.current = existing;
+        setEditingRecipe(existing);
+      }).catch(error => {
+        if (!isCurrent(request)) return;
+        console.error('Failed to fetch recipe for editing', error);
+        Alert.alert('Error', 'Could not load the recipe to edit.');
+        callbacks.current.onClose();
+      }).finally(() => {
+        if (isCurrent(request)) { operation.current = null; setIsLoading(false); }
+      });
+    } else {
+      const fresh = blank();
+      draft.current = fresh;
+      setEditingRecipe(fresh);
+      setCreationMode('initial');
+      setIsLoading(false);
+    }
+    // Recipe identity, rather than incoming object identity, preserves typed edits.
+  }, [isVisible, contextKey, isCurrent]);
 
-    setupRecipe();
-  }, [isVisible, mealForRecipe, recipeToEdit]);
-
-  const handleImportRecipe = async () => {
-    if (!importUrl) return;
+  const startLinkImport = useCallback(async (text: string) => {
+    if (operation.current || !visible.current) return;
+    const input = parseRecipeImportInput(text);
+    setImportProblem(null);
+    if ('error' in input) {
+      setImportProblem({ title: 'Check this link', message: input.error, retryable: false });
+      return;
+    }
     Keyboard.dismiss();
+    const request = guard.current.begin();
+    const draftId = draft.current?.id ?? inputs.current.createBlankRecipe().id;
+    operation.current = 'import';
+    hasWork.current = true;
+    setImportUrl(input.url);
+    setCreationMode('link');
     setImportSource('link');
     setIsImporting(true);
     try {
-      const importedRecipe = await importRecipeFromUrl(importUrl);
-      // On successful import, go to the manual editing mode with the imported data
-      setEditingRecipe(prev => ({ ...importedRecipe, id: prev!.id }));
+      const imported = await importRecipeFromUrl(input.url);
+      if (!isCurrent(request)) return;
+      const next = { ...imported, id: draftId, sourceUrl: imported.sourceUrl || input.url };
+      draft.current = next;
+      dirty.current = true;
+      savedDraft.current = null;
+      setEditingRecipe(next);
+      setIsReviewingImport(true);
       setCreationMode('manual');
-    } catch (error: any) {
-      console.error("Failed to import recipe", error);
-      // The importer names its failures now, and they want different advice:
-      // a page with no recipe on it is the user's link to fix, a video we
-      // couldn't open is not.
-      const code = typeof error?.message === 'string' ? error.message : '';
-      const [title, body] =
-        code.includes('RECIPE_NOT_FOUND')
-          ? ['No recipe found', "That page doesn't seem to have a recipe on it. Try a different link."]
-        : code.includes('VIDEO_UNAVAILABLE')
-          ? ["Couldn't read that video", 'It may be private, deleted, or unavailable in your region.']
-        : code.includes('FETCH_FAILED')
-          ? ["Couldn't open that link", "The site didn't respond. Check the link, or try again in a moment."]
-        : code.includes('NO_CONTENT')
-          ? ['Nothing to read there', "That page didn't have any recipe text on it. Try the recipe's own page."]
-        : ['Import failed', "Couldn't get the recipe from that URL. Please try a different link."];
-
-      // A screenshot always works, and on a cooking video it is the *best*
-      // input we have — the ingredient overlay a video puts on screen is
-      // exactly what the photo importer is good at reading.
-      Alert.alert(title, body, [
-        { text: 'Back', style: 'cancel' },
-        { text: 'Use a screenshot', onPress: () => setCreationMode('photo') },
-      ]);
+      keyboard.scrollRef.current?.scrollTo?.({ y: 0, animated: false });
+    } catch (error) {
+      if (!isCurrent(request)) return;
+      console.error('Failed to import recipe', error);
+      setImportProblem(recipeImportProblem(error));
     } finally {
-      setIsImporting(false);
+      if (isCurrent(request)) { operation.current = null; setIsImporting(false); }
     }
+  }, [isCurrent, keyboard.scrollRef]);
+
+  const beginSharedImport = useCallback((share: { id: string; text: string }) => {
+    guard.current.invalidate();
+    operation.current = null;
+    const fresh = inputs.current.createBlankRecipe();
+    draft.current = fresh;
+    dirty.current = false;
+    hasWork.current = false;
+    savedDraft.current = null;
+    setEditingRecipe(fresh);
+    setPendingShare(null);
+    setSaveProblem(null);
+    setIsReviewingImport(false);
+    setIsLoading(false);
+    setIsPickerBusy(false);
+    setIsImporting(false);
+    setImportUrl(share.text);
+    setCreationMode('link');
+    void startLinkImport(share.text);
+  }, [startLinkImport]);
+
+  useEffect(() => {
+    if (!isVisible || !initialImportUrl) return;
+    const share = { id: initialImportRequestId || `url:${initialImportUrl}`, text: initialImportUrl };
+    if (!guard.current.consumeShare(share.id)) {
+      // A login interruption or a parent reopening the same request keeps the
+      // link available without automatically extracting that request twice.
+      if (!hasWork.current && !dirty.current && !operation.current) {
+        setImportUrl(share.text);
+        setCreationMode('link');
+      }
+      return;
+    }
+    if (hasWork.current || dirty.current || operation.current) setPendingShare(share);
+    else beginSharedImport(share);
+  }, [isVisible, initialImportUrl, initialImportRequestId, beginSharedImport]);
+
+  const handleImportRecipe = () => { void startLinkImport(importUrl); };
+
+  const stopImport = () => {
+    guard.current.invalidate();
+    operation.current = null;
+    setIsImporting(false);
+    setIsPickerBusy(false);
+  };
+
+  const closeNow = () => {
+    guard.current.invalidate();
+    operation.current = null;
+    dirty.current = false;
+    setIsSaving(false);
+    setIsImporting(false);
+    setIsPickerBusy(false);
+    setConfirmation(null);
+    callbacks.current.onClose();
+  };
+
+  const requestClose = () => {
+    if (operation.current === 'save') return;
+    if (!dirty.current) { closeNow(); return; }
+    Keyboard.dismiss();
+    setConfirmation({ title: 'Leave this draft?', message: 'Your unsaved changes will be discarded.', label: 'Discard draft', confirm: closeNow });
+  };
+
+  const reviewPendingShare = () => {
+    if (!pendingShare || operation.current === 'save') return;
+    const share = pendingShare;
+    Keyboard.dismiss();
+    setConfirmation({ title: 'Start the shared recipe?', message: 'This will replace the draft you have open.', label: 'Use shared link', confirm: () => beginSharedImport(share) });
   };
 
   /**
@@ -302,12 +419,14 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
    * why "Choose an Image" always worked while this didn't.
    */
   const openRecipePhotoPicker = async (
-    source: 'camera' | 'library'
+    source: 'camera' | 'library',
+    request: number
   ): Promise<ImagePicker.ImagePickerResult | null> => {
     if (source === 'camera') {
       // A plain read. It never reaches Activity.requestPermissions, so unlike a
       // request it cannot be the thing that gets stuck.
       let permission = await ImagePicker.getCameraPermissionsAsync();
+      if (!isCurrent(request)) return null;
 
       // Who does the asking is the whole point: iOS won't open the camera
       // without the permission already in hand, so it is asked for here.
@@ -315,6 +434,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
       // strands the request — so there, don't.
       if (!permission.granted && permission.canAskAgain && Platform.OS !== 'android') {
         permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!isCurrent(request)) return null;
       }
 
       // Turned down for good. The OS has stopped offering to ask, so launching
@@ -354,6 +474,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
       ? ImagePicker.launchCameraAsync(options)
       : ImagePicker.launchImageLibraryAsync(options)));
 
+    if (!isCurrent(request)) return null;
     if ('ok' in outcome) return outcome.ok;
 
     if ('stalled' in outcome) {
@@ -380,7 +501,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
     // difference between "allow it next time" and "go to Settings".
     if (failure.includes('USER_REJECTED_PERMISSIONS')) {
       const permission = await ImagePicker.getCameraPermissionsAsync().catch(() => null);
-      cameraDenied(permission?.canAskAgain ?? false);
+      if (isCurrent(request)) cameraDenied(permission?.canAskAgain ?? false);
       return null;
     }
 
@@ -408,51 +529,51 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
    * handwriting produces a first draft, not an answer.
    */
   const handleImportFromPhoto = async (source: 'camera' | 'library') => {
-    // The camera takes a moment to come up, and a second tap in that moment
-    // asks for a second one. It also gives the tap something to show for
-    // itself, which is what "nothing happens" was really reporting.
-    if (isPickerBusy) return;
+    if (operation.current || !visible.current) return;
+    const request = guard.current.begin();
+    const draftId = draft.current?.id ?? createBlankRecipe().id;
+    operation.current = 'picker';
+    hasWork.current = true;
     setIsPickerBusy(true);
-    let result: ImagePicker.ImagePickerResult | null;
     try {
-      // On Android this sheet is a Dialog sitting over the activity, and the
-      // camera permission is what gets stuck behind it. `isPickerBusy` takes
-      // the sheet off the screen; this waits for it to actually go before the
-      // OS is asked for anything.
       if (Platform.OS === 'android') await new Promise(resolve => setTimeout(resolve, SHEET_DISMISS_MS));
-      result = await openRecipePhotoPicker(source);
-    } finally {
+      if (!isCurrent(request)) return;
+      const result = await openRecipePhotoPicker(source, request);
+      if (!isCurrent(request) || !result || result.canceled) return;
       setIsPickerBusy(false);
-    }
-
-    if (!result || result.canceled) return;
-    const asset = result.assets?.[0];
-    if (!asset?.base64) {
-      Alert.alert('Error', "Couldn't read that image. Please try again.");
-      return;
-    }
-
-    setImportSource('photo');
-    setIsImporting(true);
-    try {
+      const asset = result.assets?.[0];
+      if (!asset?.base64) {
+        Alert.alert('Error', "Couldn't read that image. Please try again.");
+        return;
+      }
+      operation.current = 'import';
+      setImportSource('photo');
+      setIsImporting(true);
       const mime = asset.mimeType?.startsWith('image/') ? asset.mimeType : 'image/jpeg';
       const imported = await importRecipeFromPhoto(`data:${mime};base64,${asset.base64}`);
-      setEditingRecipe(prev => ({ ...imported, id: prev!.id }));
+      if (!isCurrent(request)) return;
+      const next = { ...imported, id: draftId };
+      draft.current = next;
+      dirty.current = true;
+      savedDraft.current = null;
+      setEditingRecipe(next);
+      setIsReviewingImport(true);
       setCreationMode('manual');
     } catch (error: any) {
+      if (!isCurrent(request)) return;
       console.error('Failed to import recipe from photo', error);
       const notARecipe = typeof error?.message === 'string' && error.message.includes('RECIPE_NOT_FOUND');
-      Alert.alert(
-        notARecipe ? 'No recipe found' : 'Import failed',
-        notARecipe
-          ? "That photo doesn't look like a recipe. Try a clearer shot of the page."
-          : "Couldn't read the recipe from that photo. Try again with more light, or enter it manually."
-      );
+      Alert.alert(notARecipe ? 'No recipe found' : 'Import failed', notARecipe
+        ? "That photo doesn't look like a recipe. Try a clearer shot of the page."
+        : "Couldn't read that image. Try again with more light, or enter it manually.");
     } finally {
-      setIsImporting(false);
+      if (isCurrent(request)) {
+        operation.current = null;
+        setIsPickerBusy(false);
+        setIsImporting(false);
+      }
     }
   };
-
 
   /**
    * Writes a recipe from the dish name alone. Lands in the same manual editor
@@ -462,107 +583,154 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
    */
   const handleGenerateRecipe = async () => {
     const title = generateTitle.trim();
-    if (!title) return;
+    if (!title || operation.current || !visible.current) return;
     Keyboard.dismiss();
+    const request = guard.current.begin();
+    const draftId = draft.current?.id ?? createBlankRecipe().id;
+    operation.current = 'import';
+    hasWork.current = true;
     setImportSource('generate');
     setIsImporting(true);
     try {
-      // Written for this household from the start. There is no source document
-      // to be faithful to here, so the quantities can simply be the right ones
-      // rather than four portions scaled down on their way to the list.
       const generated = await generateRecipeFromTitle(title, selectedGroup?.householdSize);
-      setEditingRecipe(prev => ({ ...generated, id: prev!.id }));
+      if (!isCurrent(request)) return;
+      const next = { ...generated, id: draftId };
+      draft.current = next;
+      dirty.current = true;
+      savedDraft.current = null;
+      setEditingRecipe(next);
+      setIsReviewingImport(true);
       setCreationMode('manual');
     } catch (error: any) {
+      if (!isCurrent(request)) return;
       console.error('Failed to generate recipe', error);
       const notFood = typeof error?.message === 'string' && error.message.includes('RECIPE_NOT_FOUND');
-      Alert.alert(
-        notFood ? "That doesn't sound like a dish" : 'Could not write that recipe',
-        notFood
-          ? "We couldn't tell what to cook from that. Try naming a dish, like \"chicken katsu curry\"."
-          : 'Something went wrong writing that recipe. Please try again.'
-      );
+      Alert.alert(notFood ? "That doesn't sound like a dish" : 'Could not write that recipe', notFood
+        ? 'Try naming a dish, like “chicken katsu curry”.'
+        : 'Something went wrong writing that recipe. Please try again.');
     } finally {
-      setIsImporting(false);
+      if (isCurrent(request)) { operation.current = null; setIsImporting(false); }
     }
+  };
+
+  const resetToOptions = () => {
+    stopImport();
+    const fresh = createBlankRecipe();
+    draft.current = fresh;
+    dirty.current = false;
+    hasWork.current = false;
+    savedDraft.current = null;
+    setCreationMode('initial');
+    setEditingRecipe(fresh);
+    setIsReviewingImport(false);
+    setSaveProblem(null);
+    setImportProblem(null);
+    setImportUrl('');
+    setGenerateTitle(mealForRecipe?.name || '');
   };
 
   const handleBackPress = () => {
-    // Go back to the initial selection from any other state
-    if (creationMode !== 'initial') {
-      // Leaving the photo step with a launch still marked in flight would come
-      // back to two dead buttons, which is the failure this was added to make
-      // visible rather than one to reproduce.
-      setIsPickerBusy(false);
-      setCreationMode('initial');
-      // Reset to a blank slate in case of a bad import
-      setEditingRecipe(createBlankRecipe());
-      setImportUrl('');
-      setGenerateTitle(mealForRecipe?.name || '');
-    }
+    if (operation.current === 'save') return;
+    if (!dirty.current) { resetToOptions(); return; }
+    Keyboard.dismiss();
+    setConfirmation({ title: 'Start another way?', message: 'Your current draft will be discarded.', label: 'Discard draft', confirm: resetToOptions });
   };
 
   const handleSaveRecipe = async () => {
-    if (!editingRecipe) return;
-    if(editingRecipe.photoURL && !editingRecipe.photoURL.startsWith('http')) {
-      try {
-        editingRecipe.photoURL = await uploadRecipePhoto(editingRecipe.photoURL, editingRecipe.id);
-      } catch(e) { console.error("Failed to upload photo", e); Alert.alert("Error", "Could not upload photo."); return; }
-    }
+    const recipeDraft = draft.current;
+    if (!recipeDraft?.name?.trim() || operation.current) return;
+    const request = guard.current.begin();
+    operation.current = 'save';
+    setIsSaving(true);
+    setSaveProblem(null);
+    let recipeWasSaved = false;
     try {
-      const recipeToSave = { ...editingRecipe, ingredients: (editingRecipe.ingredients || []).filter(i => (i.name ?? '').trim() !== ''), instructions: (editingRecipe.instructions || []).filter(i => (i ?? '').trim() !== '') };
-      const savedRecipe = await saveRecipe(recipeToSave);
-      // A cookbook recipe has no meal to point back at and nothing to shop for.
-      const updatedMeal = mealForRecipe
-        ? { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name }
-        : null;
-      // The one moment scaling is applied: a recipe's ingredients becoming rows
-      // on a shopping list. The recipe itself was saved above, unscaled and
-      // unchanged — see packages/shared/servings.ts for why that matters.
+      let savedRecipe: Recipe;
+      if (savedDraft.current?.draft === recipeDraft) {
+        savedRecipe = savedDraft.current.saved;
+      } else {
+        let photoURL = recipeDraft.photoURL;
+        if (photoURL && !photoURL.startsWith('http')) photoURL = await uploadRecipePhoto(photoURL, recipeDraft.id);
+        if (!isCurrent(request)) return;
+        const recipeToSave = {
+          ...recipeDraft,
+          ...(photoURL ? { photoURL } : {}),
+          ingredients: (recipeDraft.ingredients || []).filter(i => (i.name ?? '').trim() !== ''),
+          instructions: (recipeDraft.instructions || []).filter(i => (i ?? '').trim() !== ''),
+        };
+        savedRecipe = await saveRecipe(recipeToSave);
+      }
+      recipeWasSaved = true;
+      if (!isCurrent(request)) return;
+      // Retain the server ID (including forks), so retrying a failed cookbook
+      // filing does not create another recipe or discard the user's review.
+      draft.current = savedRecipe;
+      setEditingRecipe(savedRecipe);
+      savedDraft.current = { draft: savedRecipe, saved: savedRecipe };
+      const updatedMeal = mealForRecipe ? { ...mealForRecipe, recipeId: savedRecipe.id, name: savedRecipe.name } : null;
       const scale = servingsScale(savedRecipe.servings, selectedGroup?.householdSize);
       const newItemsForRecipe = mealForRecipe
         ? scaleIngredients(savedRecipe.ingredients, scale).map(ing => ({ id: uuid.v4() as string, text: ing.name.trim(), quantity: (ing.quantity ?? '').trim(), checked: false, listOrder: 'NEEDS-RANK', isSection: false, mealId: mealForRecipe.id }))
         : [];
-      // Recorded on the meal so the cooking view shows the amounts the shop was
-      // actually done against, even if the household size changes later.
       if (updatedMeal && scale !== 1) updatedMeal.scale = scale;
-      onRecipeSave(updatedMeal, newItemsForRecipe, savedRecipe);
-      onClose();
-    } catch (error) { console.error("Failed to save recipe", error); Alert.alert("Error", "Could not save recipe."); }
-  };
-
-  const handlePickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission needed', 'Sorry, we need camera roll permissions to add a photo.'); return; }
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 9], quality: 0.7 });
-      if (!result.canceled && result.assets[0].uri) { handleRecipeFieldChange('photoURL', result.assets[0].uri); }
+      await callbacks.current.onRecipeSave(updatedMeal, newItemsForRecipe, savedRecipe);
+      if (!isCurrent(request)) return;
+      dirty.current = false;
+      closeNow();
     } catch (error) {
-      console.error('Failed to open the image picker', error);
-      Alert.alert("Couldn't open your photos", 'Please try again.');
+      if (!isCurrent(request)) return;
+      console.error('Failed to save recipe', error);
+      setSaveProblem(recipeWasSaved
+        ? 'Your recipe is saved, but we couldn’t finish adding it. Try saving again; your reviewed recipe is still here.'
+        : 'We couldn’t save this recipe. Check your connection and try again. Your draft is still here.');
+    } finally {
+      if (isCurrent(request)) { operation.current = null; setIsSaving(false); }
     }
   };
 
-  const handleRecipeFieldChange = (field: keyof Recipe, value: string) => setEditingRecipe(p => p ? { ...p, [field]: value } : null);
-  /**
-   * Servings is a number on the contract, and the field it comes from is a
-   * keyboard. An unreadable or empty box clears it rather than storing 0 —
-   * absent means "don't scale", and a 0 would be a division by nothing.
-   */
-  const handleServingsChange = (value: string) => setEditingRecipe(p => {
-    if (!p) return null;
-    const next = { ...p };
+  const handlePickImage = async () => {
+    if (operation.current) return;
+    const request = guard.current.begin();
+    operation.current = 'picker';
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [16, 9], quality: 0.7 });
+      if (isCurrent(request) && !result.canceled && result.assets[0]?.uri) handleRecipeFieldChange('photoURL', result.assets[0].uri);
+    } catch (error) {
+      if (!isCurrent(request)) return;
+      console.error('Failed to open the image picker', error);
+      Alert.alert("Couldn't open your photos", 'Please try again.');
+    } finally {
+      if (isCurrent(request)) operation.current = null;
+    }
+  };
+
+  const updateDraft = (change: (previous: Recipe) => Recipe) => {
+    dirty.current = true;
+    hasWork.current = true;
+    savedDraft.current = null;
+    setSaveProblem(null);
+    setEditingRecipe(previous => {
+      if (!previous) return null;
+      const next = change(previous);
+      draft.current = next;
+      return next;
+    });
+  };
+
+  const handleRecipeFieldChange = (field: keyof Recipe, value: string) => updateDraft(previous => ({ ...previous, [field]: value }));
+  const handleServingsChange = (value: string) => updateDraft(previous => {
+    const next = { ...previous };
     const parsed = parseServings(value);
     if (parsed) next.servings = parsed;
     else delete next.servings;
     return next;
   });
-  const handleIngredientChange = (index: number, field: keyof Ingredient, value: string) => setEditingRecipe(p => { if (!p) return null; const ni = [...p.ingredients]; ni[index] = { ...ni[index], [field]: value }; return { ...p, ingredients: ni }; });
-  const addIngredientField = () => setEditingRecipe(p => p ? { ...p, ingredients: [...p.ingredients, { name: '', quantity: '' }] } : null);
-  const removeIngredientField = (index: number) => setEditingRecipe(p => p ? { ...p, ingredients: p.ingredients.filter((_, i) => i !== index) } : null);
-  const handleInstructionChange = (index: number, value: string) => setEditingRecipe(p => { if (!p) return null; const ni = [...p.instructions]; ni[index] = value; return { ...p, instructions: ni }; });
-  const addInstructionField = () => setEditingRecipe(p => p ? { ...p, instructions: [...p.instructions, ''] } : null);
-  const removeInstructionField = (index: number) => setEditingRecipe(p => p ? { ...p, instructions: p.instructions.filter((_, i) => i !== index) } : null);
+  const handleIngredientChange = (index: number, field: keyof Ingredient, value: string) => updateDraft(previous => ({ ...previous, ingredients: previous.ingredients.map((ingredient, row) => row === index ? { ...ingredient, [field]: value } : ingredient) }));
+  const addIngredientField = () => updateDraft(previous => ({ ...previous, ingredients: [...previous.ingredients, { name: '', quantity: '' }] }));
+  const removeIngredientField = (index: number) => updateDraft(previous => ({ ...previous, ingredients: previous.ingredients.filter((_, row) => row !== index) }));
+  const handleInstructionChange = (index: number, value: string) => updateDraft(previous => ({ ...previous, instructions: previous.instructions.map((instruction, row) => row === index ? value : instruction) }));
+  const addInstructionField = () => updateDraft(previous => ({ ...previous, instructions: [...previous.instructions, ''] }));
+  const removeInstructionField = (index: number) => updateDraft(previous => ({ ...previous, instructions: previous.instructions.filter((_, row) => row !== index) }));
 
   const renderContent = () => {
     if (isLoading) return <ActivityIndicator style={{ marginTop: 40 }} size="large" />;
@@ -570,7 +738,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
     if (creationMode === 'initial') {
       const options = [
         { mode: 'generate', icon: 'sparkles-outline', title: 'Write me a recipe', description: mealForRecipe?.name?.trim() ? `A fresh recipe for ${mealForRecipe.name.trim()}, written for you.` : 'Name a dish. We’ll write the ingredients and steps.' },
-        { mode: 'link', icon: 'link-outline', title: 'Save from a link', description: 'Bring a favourite from the web or TikTok.' },
+        { mode: 'link', icon: 'link-outline', title: 'Save from a link', description: 'A recipe page, a TikTok, an Instagram favourite.' },
         { mode: 'photo', icon: 'camera-outline', title: 'Scan a recipe', description: 'A cookbook page, a screenshot, a family favourite.' },
         { mode: 'manual', icon: 'create-outline', title: 'Make it your own', description: 'Write your recipe, one delicious detail at a time.' },
       ] as const;
@@ -582,7 +750,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
             <Text style={styles.creationSubtitle}>However you find it, make a little room in your cookbook.</Text>
           </View>
           {options.map(option => (
-            <GlassPressable key={option.mode} style={styles.creationOption} onPress={() => setCreationMode(option.mode)} accessibilityLabel={option.title}>
+            <GlassPressable key={option.mode} style={styles.creationOption} onPress={() => { hasWork.current = true; setCreationMode(option.mode); }} accessibilityLabel={option.title}>
               <View style={[styles.creationIcon, option.mode === 'generate' && styles.creationIconFeatured]}><Ionicons name={option.icon} size={25} color={primary} /></View>
               <View style={styles.creationCopy}>
                 <Text style={styles.creationOptionTitle}>{option.title}</Text>
@@ -600,7 +768,9 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
         return (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={primary} />
-            <Text style={styles.loadingText}>{importingMessage}</Text>
+            <Text style={styles.loadingText} accessibilityLiveRegion="polite">{importingMessage}</Text>
+            <Text style={styles.loadingHint}>This can take a minute. You’ll review everything before saving.</Text>
+            <GlassPressable style={styles.textButton} onPress={stopImport}><Text style={styles.textButtonText}>Cancel import</Text></GlassPressable>
           </View>
         );
       }
@@ -611,7 +781,7 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
             placeholder="e.g. chicken katsu curry"
             placeholderTextColor={inkFaint}
             value={generateTitle}
-            onChangeText={setGenerateTitle}
+            onChangeText={value => { hasWork.current = true; setGenerateTitle(value); }}
             multiline
           />
           <GlassPressable
@@ -634,7 +804,9 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
         return (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={primary} />
-            <Text style={styles.loadingText}>{importingMessage}</Text>
+            <Text style={styles.loadingText} accessibilityLiveRegion="polite">{importingMessage}</Text>
+            <Text style={styles.loadingHint}>This can take a minute. You’ll review everything before saving.</Text>
+            <GlassPressable style={styles.textButton} onPress={stopImport}><Text style={styles.textButtonText}>Cancel import</Text></GlassPressable>
           </View>
         );
       }
@@ -671,23 +843,46 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
         return (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={primary} />
-            <Text style={styles.loadingText}>{importingMessage}</Text>
+            <Text style={styles.loadingText} accessibilityLiveRegion="polite">{importingMessage}</Text>
+            <Text style={styles.loadingHint}>{isSocialImport
+              ? 'Reading a video’s speech can take a couple of minutes. Keep this screen open; you’ll review everything before saving.'
+              : 'This can take a minute. You’ll review everything before saving.'}</Text>
+            <GlassPressable style={styles.textButton} onPress={stopImport}><Text style={styles.textButtonText}>Cancel import</Text></GlassPressable>
           </View>
         );
       }
       return (
         <View style={styles.formSectionContainer}>
-          <TextInput style={styles.formInput} placeholder="Paste a recipe link..." placeholderTextColor={inkFaint} value={importUrl} onChangeText={setImportUrl} autoCapitalize="none" keyboardType="url" />
-          <GlassPressable style={styles.primaryButton} onPress={handleImportRecipe}>
-            <Text style={styles.primaryButtonText}>Import</Text>
+          <View style={styles.linkTitleRow}><View style={styles.linkIcon}><Ionicons name="link-outline" size={24} color={primary} /></View><View style={styles.creationCopy}><Text style={styles.linkTitle}>Keep a delicious find</Text><Text style={styles.linkSubtitle}>TikTok · Instagram · Recipe websites</Text></View></View>
+          <Text style={styles.linkDescription}>Copy the link from a public post or recipe page and paste it here. Shared captions with a link work too.</Text>
+          <TextInput
+            style={[styles.formInput, styles.linkInput]}
+            placeholder="Paste a link or shared post…"
+            placeholderTextColor={inkFaint}
+            value={importUrl}
+            onChangeText={value => { hasWork.current = true; setImportUrl(value); setImportProblem(null); }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            multiline
+            accessibilityLabel="Recipe link or shared post"
+          />
+          {'url' in parsedImport && <View style={styles.linkPreview}><Ionicons name="checkmark-circle" size={16} color={primary} /><Text style={styles.linkPreviewText} numberOfLines={2}>{recipeSourceLabel(parsedImport.url)} · {new URL(parsedImport.url).pathname}</Text></View>}
+          {importProblem && <View style={styles.problemCard} accessibilityLiveRegion="polite"><Text style={styles.problemTitle}>{importProblem.title}</Text><Text style={styles.problemText}>{importProblem.message}</Text></View>}
+          <GlassPressable style={[styles.primaryButton, !importUrl.trim() && styles.disabledButton]} onPress={handleImportRecipe} disabled={!importUrl.trim()}>
+            <Text style={styles.primaryButtonText}>{importProblem?.retryable ? 'Try again' : 'Find the recipe'}</Text>
           </GlassPressable>
+          {importProblem && <GlassPressable style={styles.textButton} onPress={() => { setImportProblem(null); setCreationMode('photo'); }}><Ionicons name="images-outline" size={17} color={primary} /><Text style={styles.textButtonText}>Use a screenshot instead</Text></GlassPressable>}
+          <Text style={styles.photoHint}>We’ll bring over the ingredients and steps. Check them, make any edits, then save to your cookbook.</Text>
         </View>
       );
     }
-    
+
     if (creationMode === 'manual' && editingRecipe) {
       return (
         <>
+            {isReviewingImport && <View style={styles.reviewBanner}><Ionicons name="checkmark-circle-outline" size={23} color={primary} /><View style={styles.creationCopy}><Text style={styles.reviewTitle}>Ready for your review</Text><Text style={styles.reviewText}>Check the ingredients, quantities, and steps before saving.{editingRecipe.sourceUrl ? ` From ${recipeSourceLabel(editingRecipe.sourceUrl)}${editingRecipe.sourceAuthor ? ` · ${editingRecipe.sourceAuthor}` : ''}.` : ''}</Text></View></View>}
+            {saveProblem && <View style={[styles.problemCard, { marginHorizontal: 18 }]} accessibilityLiveRegion="polite"><Text style={styles.problemTitle}>Your draft is still here</Text><Text style={styles.problemText}>{saveProblem}</Text></View>}
             <View style={styles.formSectionContainer}>
               {editingRecipe.photoURL ? ( <GlassPressable onPress={handlePickImage}><Image source={{ uri: editingRecipe.photoURL }} style={styles.recipeImage} /><View style={styles.imageEditIcon}><Ionicons name="pencil" size={18} color="#fff" /></View></GlassPressable>
               ) : ( <GlassPressable style={[styles.recipeImage, styles.addImageButton]} onPress={handlePickImage}><Ionicons name="camera-outline" size={24} color={primary} /><Text style={styles.addImageButtonText}>Add Photo</Text></GlassPressable> )}
@@ -748,8 +943,8 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
     <Modal
       animationType={reduceMotion ? "none" : "slide"}
       visible={isVisible && !(Platform.OS === 'android' && isPickerBusy)}
-      onRequestClose={onClose}
-      onDismiss={onDismiss}
+      onRequestClose={() => confirmation ? setConfirmation(null) : requestClose()}
+      onDismiss={() => { if (!visible.current) onDismiss?.(); }}
       transparent={true}
     >
       {/* The avoider has to be the FULL-SCREEN element, not the sheet. Wrapped
@@ -767,12 +962,12 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
               <GlassSurface style={styles.modalHeader} intensity={70}>
                 {/* Header content remains the same */}
                 {creationMode !== 'initial' && !isEditingExisting ? (
-                  <GlassPressable onPress={handleBackPress} style={styles.backButton} accessibilityLabel="Back to recipe options">
+                  <GlassPressable onPress={handleBackPress} disabled={isSaving} style={styles.backButton} accessibilityLabel="Back to recipe options">
                     <Ionicons name="chevron-back" size={21} color={ink} />
                   </GlassPressable>
                 ) : <View style={styles.backButton} /> }
-                <Text style={styles.modalTitle}>{isEditingExisting ? 'Edit' : 'Add'} Recipe</Text>
-                <GlassPressable onPress={onClose} style={styles.closeButton} accessibilityLabel="Close recipe editor">
+                <Text style={styles.modalTitle}>{isReviewingImport ? 'Review' : isEditingExisting ? 'Edit' : 'Add'} Recipe</Text>
+                <GlassPressable onPress={requestClose} disabled={isSaving} style={styles.closeButton} accessibilityLabel="Close recipe editor">
                   <Ionicons name="close" size={21} color={ink} />
                 </GlassPressable>
               </GlassSurface>
@@ -794,20 +989,32 @@ export default function AddEditRecipeModal({ isVisible, onClose, onDismiss, meal
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
               >
-                {renderContent()}
+                {pendingShare && <View style={styles.pendingShare}><Ionicons name="link-outline" size={21} color={primary} /><View style={styles.creationCopy}><Text style={styles.reviewTitle}>A shared link is waiting</Text><Text style={styles.reviewText}>Your current draft is safe.</Text></View><GlassPressable style={styles.pendingShareButton} onPress={reviewPendingShare} disabled={isSaving}><Text style={styles.textButtonText}>Review</Text></GlassPressable></View>}
+                <View pointerEvents={isSaving ? 'none' : 'auto'}>{renderContent()}</View>
               </ScrollView>
 
               {/* ✅ 4. Hide footer during initial selection and while importing */}
               {!isImporting && (creationMode === 'manual') && (
                 <GlassSurface style={styles.modalFooter} intensity={70}>
-                  <GlassPressable style={styles.secondaryButton} onPress={onClose}><Text style={styles.secondaryButtonText}>Cancel</Text></GlassPressable>
+                  <GlassPressable style={styles.secondaryButton} onPress={requestClose} disabled={isSaving}><Text style={styles.secondaryButtonText}>Cancel</Text></GlassPressable>
                   <GlassPressable style={[styles.primaryButton, isSaveDisabled && styles.disabledButton]} onPress={handleSaveRecipe} disabled={isSaveDisabled}>
-                    <Text style={styles.primaryButtonText}>Save Recipe</Text>
+                    {isSaving ? <ActivityIndicator color="#FFFFFF" accessibilityLabel="Saving recipe" /> : <Text style={styles.primaryButtonText}>{isEditingExisting ? 'Save changes' : mealForRecipe ? 'Save recipe' : 'Save to cookbook'}</Text>}
                   </GlassPressable>
                 </GlassSurface>
               )}
             </View>
         </SafeAreaView>
+        {confirmation && <View style={styles.confirmOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setConfirmation(null)} accessibilityLabel="Keep editing" />
+          <GlassSurface style={styles.confirmCard} intensity={80} accessibilityViewIsModal>
+            <Text style={styles.confirmTitle}>{confirmation.title}</Text>
+            <Text style={styles.confirmMessage}>{confirmation.message}</Text>
+            <View style={styles.confirmActions}>
+              <GlassPressable style={styles.confirmCancel} onPress={() => setConfirmation(null)}><Text style={styles.textButtonText}>Keep editing</Text></GlassPressable>
+              <GlassPressable style={styles.confirmDiscard} onPress={() => { const action = confirmation.confirm; setConfirmation(null); action(); }}><Text style={styles.confirmDiscardText}>{confirmation.label}</Text></GlassPressable>
+            </View>
+          </GlassSurface>
+        </View>}
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -915,7 +1122,34 @@ const styles = StyleSheet.create({
   creationCopy: { flex: 1 },
   creationOptionTitle: { fontSize: 16, fontWeight: '700', color: ink, letterSpacing: -0.4 },
   creationOptionDescription: { fontSize: 12, lineHeight: 18, color: inkMuted, marginTop: 4 },
-  // ✅ 5. New styles for the loading screen
+  confirmOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,37,28,0.35)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  confirmCard: { width: '100%', maxWidth: 370, padding: 24, borderRadius: 28, backgroundColor: 'rgba(248,250,243,0.96)' },
+  confirmTitle: { fontSize: 23, fontWeight: '700', color: ink, letterSpacing: -0.6 },
+  confirmMessage: { fontSize: 14, lineHeight: 22, color: inkMuted, marginTop: 12 },
+  confirmActions: { flexDirection: 'row', gap: 10, marginTop: 24 },
+  confirmCancel: { flex: 1, minHeight: 46, borderRadius: 18, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  confirmDiscard: { flex: 1, minHeight: 46, borderRadius: 18, backgroundColor: '#A54F42', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
+  confirmDiscardText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  linkTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 15 },
+  linkIcon: { width: 46, height: 46, borderRadius: 17, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center' },
+  linkTitle: { fontSize: 19, fontWeight: '700', color: ink, letterSpacing: -0.5 },
+  linkSubtitle: { fontSize: 11, color: inkMuted, marginTop: 5 },
+  linkDescription: { color: inkMuted, fontSize: 13, lineHeight: 20, marginBottom: 17 },
+  linkInput: { minHeight: 100, textAlignVertical: 'top' },
+  linkPreview: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 16 },
+  linkPreviewText: { flex: 1, fontSize: 12, color: primary, lineHeight: 18 },
+  problemCard: { padding: 15, borderRadius: 18, backgroundColor: '#F5E8DF', marginBottom: 15 },
+  problemTitle: { fontSize: 14, fontWeight: '700', color: ink, marginBottom: 6 },
+  problemText: { fontSize: 13, lineHeight: 20, color: inkMuted },
+  textButton: { minHeight: 44, paddingHorizontal: 8, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7 },
+  textButtonText: { fontSize: 13, fontWeight: '600', color: primary },
+  loadingHint: { fontSize: 13, lineHeight: 20, color: inkMuted, textAlign: 'center', marginTop: 12, marginBottom: 9 },
+  reviewBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, marginHorizontal: 18, marginBottom: 16, padding: 16, borderRadius: 21, backgroundColor: '#E2EDDF' },
+  reviewTitle: { fontSize: 14, fontWeight: '600', color: ink, marginBottom: 4 },
+  reviewText: { fontSize: 12, lineHeight: 19, color: inkMuted },
+  pendingShare: { flexDirection: 'row', gap: 10, alignItems: 'center', marginHorizontal: 18, marginBottom: 15, padding: 14, borderRadius: 20, borderWidth: 1, borderColor: '#CEDFC9', backgroundColor: '#E8F0E4' },
+  pendingShareButton: { paddingHorizontal: 9, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  // The loading stage stays cancellable; extracted content always opens for review.
   loadingContainer: {
     justifyContent: 'center',
     alignItems: 'center',

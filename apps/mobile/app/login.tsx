@@ -1,3 +1,4 @@
+import { BrandWordmark } from '@/components/ui/Brand';
 import {
   ActivityIndicator,
   Image,
@@ -325,8 +326,7 @@ export default function LoginScreen() {
           <View style={styles.loginNavigation}><GlassSurface style={styles.navigationGlass}><TouchableOpacity style={styles.navigationButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="chevron-back" size={21} color="#173F35" /></TouchableOpacity></GlassSurface></View>
           <Animated.View entering={FadeInDown.duration(650).reduceMotion(ReduceMotion.System)} style={styles.logoContainer}>
             <View style={styles.brandRow}>
-              <View style={styles.brandMark}><Ionicons name="leaf" size={24} color={primary} /></View>
-              <Text style={styles.brandName}>fridgie</Text>
+              <BrandWordmark height={32} />
             </View>
             <Text style={styles.heroTitle}>Life tastes better{ '\n' }together.</Text>
             <Text style={styles.heroSubtitle}>Your recipes, your people, your everyday.</Text>
@@ -521,9 +521,7 @@ const styles = StyleSheet.create({
   navigationGlass: { borderRadius: 20 },
   navigationButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   logoContainer: { alignItems: 'center', width: '100%', paddingVertical: 24 },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 24 },
-  brandMark: { width: 40, height: 40, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(220,237,226,0.9)', borderWidth: 1, borderColor: '#FFFFFF' },
-  brandName: { fontSize: 28, letterSpacing: -1.4, fontWeight: '800', color: '#173F35' },
+  brandRow: { flexDirection: 'row', alignItems: 'center', minHeight: 40, marginBottom: 24 },
   heroTitle: { fontSize: 39, lineHeight: 43, letterSpacing: -1.8, fontWeight: '700', color: '#173F35', textAlign: 'center' },
   heroSubtitle: { marginTop: 12, fontSize: 14, color: '#78857D', textAlign: 'center', lineHeight: 21 },
   heroChips: { flexDirection: 'row', gap: 8, marginTop: 20 },

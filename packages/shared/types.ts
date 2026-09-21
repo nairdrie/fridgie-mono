@@ -160,6 +160,28 @@ export interface UserProfile {
   followerCount?: number;
   followingCount?: number;
   isFollowing?: boolean;
+  /** Explicitly identifies Fridgie's fictional editorial kitchens. */
+  profileKind?: 'community' | 'curated';
+  handle?: string;
+  bio?: string;
+  specialty?: string;
+  accent?: ExploreAccent;
+  recipeCount?: number;
+}
+
+export type ConnectionKind = 'followers' | 'following';
+
+/** Public profile fields and the requesting user's relationship to this person. */
+export interface UserConnection {
+  uid: string;
+  displayName: string | null;
+  photoURL: string | null;
+  isFollowing: boolean;
+}
+
+export interface UserConnectionsPage {
+  users: UserConnection[];
+  nextCursor: string | null;
 }
 
 /**
@@ -265,6 +287,13 @@ export interface Recipe {
   /** Set by the server; used to decide whether editing forks the recipe. */
   createdBy?: string;
   forkedFromId?: string;
+  /** Server-managed provenance; curated recipes have no invented source URL. */
+  contentOrigin?: 'ai-curated' | 'ai-adapted';
+  curatedCreatorUid?: string;
+  publishedAt?: string;
+  totalMinutes?: number;
+  imageKind?: 'ai-generated' | 'illustrative-stock';
+  imageAttribution?: { label: string; url: string };
 
   /**
    * Where this recipe came from, when it came from somewhere public.
@@ -310,6 +339,36 @@ export interface Recipe {
   addedAt?: string;
 }
 
+export type ExploreAccent = 'sage' | 'peach' | 'lemon';
+export interface ExploreEdition {
+  id: string;
+  title: string;
+  subtitle: string;
+  publishedAt: string;
+  nextRefreshAt?: string;
+}
+export interface ExploreCreator extends UserProfile {
+  displayName: string;
+  followerCount: number;
+  recipeCount: number;
+  featuredRecipe?: { id: string; name: string; photoURL: string };
+}
+export interface ExploreCollection {
+  id: string;
+  title: string;
+  subtitle?: string;
+  accent: ExploreAccent;
+  recipes: Recipe[];
+}
+export interface ExploreContent {
+  edition?: ExploreEdition;
+  heroRecipe?: Recipe;
+  collections?: ExploreCollection[];
+  trending?: Recipe[];
+  newest?: Recipe[];
+  featuredCreators?: ExploreCreator[];
+}
+
 /** The raw invitation document as stored. */
 export interface GroupInvitation {
   createdAt: string;
@@ -338,6 +397,11 @@ export interface UserSearchResult {
   email: string;
   followerCount?: number;
   recipeCount?: number;
+  profileKind?: 'community' | 'curated';
+  handle?: string;
+  bio?: string;
+  specialty?: string;
+  accent?: ExploreAccent;
 }
 
 /** Body accepted by POST /api/list/:id. */

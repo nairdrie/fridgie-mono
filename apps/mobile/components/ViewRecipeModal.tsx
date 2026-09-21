@@ -1,3 +1,4 @@
+import { recipeSourceLabel } from '@/utils/recipeImport';
 // components/ViewRecipeModal.tsx
 //
 // SERVINGS, AND WHY THEY ARE ADJUSTABLE HERE
@@ -83,18 +84,6 @@ const REPORT_OPTIONS: { reason: ReportReason; label: string }[] = [
     { reason: 'dangerous', label: 'Unsafe to cook' },
     { reason: 'other', label: 'Something else' },
 ];
-
-/** How a source URL is described once it is on screen. */
-const sourceLabel = (sourceUrl?: string): string => {
-    if (!sourceUrl) return 'the web';
-    try {
-        const host = new URL(sourceUrl).hostname.toLowerCase().replace(/^www\./, '');
-        if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) return 'TikTok';
-        return host;
-    } catch {
-        return 'the web';
-    }
-};
 
 export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeId, onEdit, onCookbookUpdate, scale = 1, inMealPlan = false }: ViewRecipeModalProps) {
     const insets = useSafeAreaInsets();
@@ -294,7 +283,7 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
     /**
      * Open the original.
      *
-     * Explore shows recipes imported from TikToks and recipe blogs, and the
+     * Explore shows recipes imported from TikTok, Instagram, and recipe blogs, and the
      * structured version on this screen is a reading of the original, not a
      * replacement for it. Anyone deciding whether to trust the quantities
      * should be one tap from the video they came out of.
@@ -520,6 +509,14 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
                                                 { recipe.authorName &&
                                                   <Text style={styles.recipeAuthor}>by <Text style={styles.recipeAuthorName}>{recipe.authorName}</Text></Text>
                                                 }
+                                                {(recipe.contentOrigin === 'ai-curated' || recipe.contentOrigin === 'ai-adapted') && <View style={styles.aiCredit}>
+                                                    <Ionicons name="sparkles-outline" size={16} color={primary} />
+                                                    <View style={{ flex: 1 }}><Text style={styles.aiCreditTitle}>{recipe.contentOrigin === 'ai-adapted' ? 'Adapted from an AI recipe' : 'Fridgie-curated · AI recipe'}</Text><Text style={styles.aiCreditText}>{recipe.contentOrigin === 'ai-adapted' ? 'This version was edited from an AI-created recipe. Check the ingredients and steps before cooking.' : 'Created with AI for Fridgie’s fictional kitchens. Check the ingredients and steps before cooking.'}</Text></View>
+                                                </View>}
+                                                {!!recipe.photoURL && recipe.imageKind && <View style={styles.imageCredit}>
+                                                    <Text style={styles.imageCreditText}>{recipe.imageKind === 'ai-generated' ? 'AI-generated recipe image' : 'Illustrative photo; your dish may look different.'}</Text>
+                                                    {recipe.imageAttribution && /^https?:\/\//i.test(recipe.imageAttribution.url) && <GlassPressable style={styles.imageCreditLink} accessibilityRole="link" accessibilityLabel={`Open image credit: ${recipe.imageAttribution.label}`} onPress={() => { void Linking.openURL(recipe.imageAttribution!.url).catch(() => Alert.alert('Couldn’t open the credit', 'Try again when your connection is ready.')); }}><Text style={styles.imageCreditLinkText}>{recipe.imageAttribution.label}</Text><Ionicons name="open-outline" size={11} color={primary} /></GlassPressable>}
+                                                </View>}
 
                                                 {/* Where it actually came from, which is not the same as who saved
                                                     it. Everything below the title is this app's reading of a video
@@ -530,11 +527,11 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
                                                         style={styles.sourceRow}
                                                         onPress={handleOpenSource}
                                                         accessibilityRole="link"
-                                                        accessibilityLabel={`Open the original on ${sourceLabel(recipe.sourceUrl)}`}
+                                                        accessibilityLabel={`Open the original on ${recipeSourceLabel(recipe.sourceUrl)}`}
                                                     >
                                                         <Ionicons name="link-outline" size={14} color={inkMuted} />
                                                         <Text style={styles.sourceText} numberOfLines={1}>
-                                                            From {sourceLabel(recipe.sourceUrl)}
+                                                            From {recipeSourceLabel(recipe.sourceUrl)}
                                                             {recipe.sourceAuthor ? ` · ${recipe.sourceAuthor}` : ''}
                                                         </Text>
                                                         <Ionicons name="open-outline" size={13} color={primary} />
@@ -863,6 +860,13 @@ const styles = StyleSheet.create({
     recipeTitle: { fontSize: 31, lineHeight: 36, fontWeight: '700', letterSpacing: -1.2, color: ink, flex: 1, marginRight: 15 },
     recipeAuthor: { fontSize: 13, color: inkMuted },
     recipeAuthorName: { color: primary, fontWeight: '600' },
+    aiCredit: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, padding: 13, borderRadius: 17, marginTop: 14, backgroundColor: '#E6EEE0' },
+    aiCreditTitle: { color: primary, fontSize: 12, fontWeight: '600' },
+    aiCreditText: { color: inkMuted, fontSize: 11, lineHeight: 17, marginTop: 4 },
+    imageCredit: { marginTop: 10 },
+    imageCreditText: { color: inkMuted, fontSize: 10, lineHeight: 16 },
+    imageCreditLink: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32 },
+    imageCreditLinkText: { color: primary, fontSize: 10, textDecorationLine: 'underline' },
     sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 11, minHeight: 28 },
     sourceText: { fontSize: 12, color: inkMuted, flexShrink: 1 },
     editButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: primary, justifyContent: 'center', alignItems: 'center', shadowColor: primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 8, elevation: 3 },

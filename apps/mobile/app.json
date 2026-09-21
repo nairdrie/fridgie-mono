@@ -4,7 +4,7 @@
     "slug": "fridgie",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/brand/icon.png",
     "scheme": "fridgie",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -18,8 +18,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#0F2317"
+        "foregroundImage": "./assets/brand/adaptive-icon.png",
+        "backgroundColor": "#23785E"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.nairdrie.fridgie",
@@ -31,7 +31,7 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/brand/favicon.png"
     },
     "plugins": [
       "expo-apple-authentication",
@@ -67,10 +67,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/brand/splash.png",
+          "imageWidth": 116,
           "resizeMode": "contain",
-          "backgroundColor": "#0F2317"
+          "backgroundColor": "#F5F5EF"
         }
       ],
       [
@@ -79,6 +79,21 @@
           "ios": {
             "useFrameworks": "static"
           }
+        }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "iosShareExtensionName": "Save to Fridgie",
+          "iosAppGroupIdentifier": "group.com.nairdrie.fridgie",
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsWebPageWithMaxCount": 1
+          },
+          "androidIntentFilters": [
+            "text/*"
+          ]
         }
       ]
     ],

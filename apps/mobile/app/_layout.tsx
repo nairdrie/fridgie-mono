@@ -16,6 +16,9 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GlassPreferencesProvider, useGlassPreferences } from '@/components/ui/Glass';
 import { canvas } from '@/utils/styles';
+import { ShareIntentProvider } from 'expo-share-intent';
+import { SharedRecipeProvider } from '@/context/SharedRecipeContext';
+import SharedRecipeRouter from '@/components/SharedRecipeRouter';
 
 // Without a handler, a notification that arrives while the app is open is
 // swallowed silently — the OS assumes a foregrounded app will present it itself.
@@ -78,6 +81,8 @@ function MotionStack({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
 
   return (
+      <ShareIntentProvider options={{ scheme: 'fridgie', resetOnBackground: false, disabled: Platform.OS === 'web' }}>
+      <SharedRecipeProvider>
       <SafeAreaProvider>
         <GlassPreferencesProvider>
         <AuthProvider>
@@ -93,6 +98,7 @@ export default function RootLayout() {
                       constants/features.ts. Leaving it unmounted means a
                       tapped reminder routes nowhere. */}
                   {MEAL_RATING_ENABLED && <MealRatingNotificationRouter />}
+                  <SharedRecipeRouter />
                   {/* The Stack component defines the navigator */}
                   <MotionStack>
                     <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -146,6 +152,8 @@ export default function RootLayout() {
                         headerShown: false
                       }}
                     />
+                    <Stack.Screen name="profile/connections" options={{ headerShown: false, fullScreenGestureEnabled: true }} />
+                    <Stack.Screen name="import-recipe" options={{ headerShown: false, gestureEnabled: false }} />
                     <Stack.Screen
                         name="profile/[uid]"
                         options={{
@@ -175,5 +183,7 @@ export default function RootLayout() {
         </AuthProvider>
         </GlassPreferencesProvider>
       </SafeAreaProvider>
+      </SharedRecipeProvider>
+      </ShareIntentProvider>
   );
 }

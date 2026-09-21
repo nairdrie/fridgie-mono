@@ -54,6 +54,7 @@ COPY --from=prerelease /usr/src/app/apps/api/package.json ./apps/api/
 COPY --from=prerelease /usr/src/app/apps/api/tsconfig.json ./apps/api/
 COPY --from=prerelease /usr/src/app/apps/api/index.ts ./apps/api/
 COPY --from=prerelease /usr/src/app/apps/api/utils ./apps/api/utils
+COPY --from=prerelease /usr/src/app/apps/api/jobs ./apps/api/jobs
 COPY --from=prerelease /usr/src/app/apps/api/middleware ./apps/api/middleware
 COPY --from=prerelease /usr/src/app/apps/api/api ./apps/api/api
 COPY --from=prerelease /usr/src/app/packages/shared ./packages/shared

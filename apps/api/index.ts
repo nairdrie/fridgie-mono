@@ -43,6 +43,12 @@ serve({
   async fetch(req, server) {
     const url = new URL(req.url)
 
+    // Social imports can wait for audio transcription before parsing the
+    // recipe. Keep this request alive without relaxing every route's timeout.
+    if (req.method === 'POST' && /^\/api\/recipe\/import\/?$/.test(url.pathname)) {
+      server.timeout(req, 240)
+    }
+
     // If this is our WS path, do the upgrade
     if (url.pathname.startsWith('/api/ws/list/')) {
       // The token arrives as a WebSocket subprotocol, not a query parameter.

@@ -1,3 +1,5 @@
+import { instagramLink } from './instagram';
+
 // The identity of the thing a recipe was imported FROM, as opposed to the
 // identity of the recipe itself.
 //
@@ -26,6 +28,9 @@ function tiktokVideoIdFromUrl(url: URL): string | null {
 
 /** The key for a TikTok whose numeric video id is already known. */
 export const tiktokSourceKey = (videoId: string): string => `tiktok:${videoId}`;
+
+/** Instagram's case-sensitive shortcode survives reel/post URL variants. */
+export const instagramSourceKey = (shortcode: string): string => `instagram:${shortcode}`;
 
 /**
  * A stable key for any public source URL, or null if there isn't one.
@@ -60,6 +65,9 @@ export function sourceKeyFor(sourceUrl: string | null | undefined): string | nul
     // A short link nobody resolved. Falling through to the generic key keeps it
     // deduped against itself, which is all that is available without a fetch.
   }
+
+  const instagram = instagramLink(sourceUrl);
+  if (instagram?.shortcode) return instagramSourceKey(instagram.shortcode);
 
   const path = url.pathname.replace(/\/+$/, '') || '/';
   return `web:${host}${path}`;

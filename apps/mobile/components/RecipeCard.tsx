@@ -27,7 +27,7 @@ export default function RecipeCard({ recipe, onView }: RecipeCardProps) {
                 </View>
             )}
             <View style={styles.content}>
-                <Text style={styles.category} numberOfLines={1}>{recipe.category || 'From the cookbook'}</Text>
+                <Text style={styles.category} numberOfLines={1}>{recipe.contentOrigin === 'ai-curated' ? 'FRIDGIE · AI RECIPE' : recipe.contentOrigin === 'ai-adapted' ? 'AI-ADAPTED RECIPE' : recipe.category || 'From the cookbook'}</Text>
                 <Text style={styles.title} numberOfLines={2}>{recipe.name}</Text>
                 {!!recipe.description && <Text style={styles.description} numberOfLines={1}>{recipe.description}</Text>}
                 <View style={styles.bottomRow}>

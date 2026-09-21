@@ -17,7 +17,7 @@
 // oEmbed does not carry. Neither is load-bearing on its own — a failure in
 // either degrades rather than throwing.
 
-import axios from 'axios';
+import { fetchPublicUrl, publicUrl } from './publicFetch';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +26,9 @@ const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const REQUEST_TIMEOUT_MS = 15_000;
+const isTikTokHost = (host: string): boolean => host === 'tiktok.com' || host.endsWith('.tiktok.com');
+export const isTikTokMediaHost = (host: string): boolean =>
+  ['tiktok.com', 'tiktokcdn.com', 'tiktokcdn-us.com', 'tiktokcdn-eu.com', 'tiktokv.com', 'byteoversea.com', 'ibytedtos.com', 'ibyteimg.com', 'byteimg.com', 'muscdn.com', 'ttwstatic.com'].some(domain => host === domain || host.endsWith(`.${domain}`));
 /**
  * Downloading the video is the slow leg, but it is not the only one: oEmbed,
  * the watch page, the subtitle track, the download and then a Claude call with
@@ -80,8 +83,9 @@ export const isTikTokUrl = (url: string): boolean => {
     // Suffix match on a label boundary. The old `hostname.includes('tiktok.com')`
     // also matched `nottiktok.com.evil.com`, handing an attacker-controlled host
     // to the branch that fetches and downloads whatever it is given.
-    const host = new URL(url).hostname.toLowerCase();
-    return host === 'tiktok.com' || host.endsWith('.tiktok.com');
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password && !parsed.port && isTikTokHost(host);
   } catch {
     return false;
   }
@@ -92,15 +96,14 @@ export const isTikTokUrl = (url: string): boolean => {
  * this file with any promise of stability, so it runs first and its failure is
  * survivable.
  */
-async function fetchOEmbed(url: string): Promise<Partial<TikTokSource> | null> {
+async function fetchOEmbed(url: string, fetcher: typeof fetchPublicUrl): Promise<Partial<TikTokSource> | null> {
   try {
-    const { data } = await axios.get<{
-      title?: string; author_name?: string; thumbnail_url?: string;
-    }>('https://www.tiktok.com/oembed', {
-      params: { url },
-      timeout: REQUEST_TIMEOUT_MS,
+    const response = await fetcher(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`, {
+      timeoutMs: REQUEST_TIMEOUT_MS, maxBytes: 256 * 1024, allowedHosts: isTikTokHost,
       headers: { 'User-Agent': BROWSER_UA, Accept: 'application/json' },
     });
+    if (response.status !== 200) return null;
+    const data = JSON.parse(response.data.toString('utf8')) as { title?: string; author_name?: string; thumbnail_url?: string };
     return {
       caption: (data?.title ?? '').trim(),
       author: data?.author_name?.trim() || null,
@@ -151,20 +154,18 @@ export function parseWatchPage(html: string): Record<string, any> | null {
  * signed `playAddr` with a 403 unless the request carries the `ttwid` cookie
  * that this fetch sets. Both are returned together for that reason.
  */
-async function fetchWatchPage(url: string): Promise<WatchPageData | null> {
+async function fetchWatchPage(url: string, fetcher: typeof fetchPublicUrl): Promise<WatchPageData | null> {
   try {
-    const response = await axios.get<string>(url, {
-      timeout: REQUEST_TIMEOUT_MS,
-      maxRedirects: 5,
-      responseType: 'text',
+    const response = await fetcher(url, {
+      timeoutMs: REQUEST_TIMEOUT_MS, maxBytes: 5 * 1024 * 1024, allowedHosts: isTikTokHost,
       headers: {
         'User-Agent': BROWSER_UA,
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        Accept: 'text/html,application/xhtml+xml',
         'Accept-Language': 'en-US,en;q=0.9',
       },
     });
-
-    const item = parseWatchPage(response.data);
+    if (response.status !== 200) return null;
+    const item = parseWatchPage(response.data.toString('utf8'));
     if (!item) return null;
 
     const setCookie = response.headers['set-cookie'];
@@ -224,18 +225,17 @@ export function webVttToText(vtt: string): string {
   return lines.join(' ');
 }
 
-async function fetchTranscript(subtitleUrl: string, cookieHeader: string | null): Promise<string> {
+async function fetchTranscript(subtitleUrl: string, cookieHeader: string | null, fetcher: typeof fetchPublicUrl): Promise<string> {
   try {
-    const { data } = await axios.get<string>(subtitleUrl, {
-      timeout: REQUEST_TIMEOUT_MS,
-      responseType: 'text',
+    const response = await fetcher(subtitleUrl, {
+      timeoutMs: REQUEST_TIMEOUT_MS, maxBytes: 512 * 1024, allowedHosts: isTikTokMediaHost,
       headers: {
         'User-Agent': BROWSER_UA,
         Referer: 'https://www.tiktok.com/',
         ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
     });
-    return webVttToText(typeof data === 'string' ? data : String(data));
+    return response.status === 200 ? webVttToText(response.data.toString('utf8')) : '';
   } catch (error) {
     console.warn('TikTok subtitle fetch failed:', error instanceof Error ? error.message : error);
     return '';
@@ -249,14 +249,15 @@ async function fetchTranscript(subtitleUrl: string, cookieHeader: string | null)
  * enough. Only a total failure — no caption and no transcript — is worth
  * refusing on, and that is the caller's call to make.
  */
-export async function collectTikTokSource(url: string): Promise<TikTokSource> {
-  const [oembed, page] = await Promise.all([fetchOEmbed(url), fetchWatchPage(url)]);
+export async function collectTikTokSource(url: string, fetcher: typeof fetchPublicUrl = fetchPublicUrl): Promise<TikTokSource> {
+  publicUrl(url, isTikTokHost);
+  const [oembed, page] = await Promise.all([fetchOEmbed(url, fetcher), fetchWatchPage(url, fetcher)]);
 
   const item = page?.item;
   const cookieHeader = page?.cookieHeader ?? null;
 
   const subtitleUrl = item ? pickSubtitleTrack(item) : null;
-  const transcript = subtitleUrl ? await fetchTranscript(subtitleUrl, cookieHeader) : '';
+  const transcript = subtitleUrl ? await fetchTranscript(subtitleUrl, cookieHeader, fetcher) : '';
 
   const duration = Number(item?.video?.duration);
 
@@ -281,14 +282,20 @@ function frameCountFor(durationSec: number): number {
   return Math.max(MIN_FRAMES, Math.min(MAX_FRAMES, wanted));
 }
 
+async function boundedExit(process: { exited: Promise<number>; kill(signal?: number): void }, milliseconds: number): Promise<number> {
+  const timer = setTimeout(() => process.kill(9), Math.max(1, milliseconds));
+  try { return await process.exited; } finally { clearTimeout(timer); }
+}
+
 async function ffprobeDuration(path: string): Promise<number | null> {
   try {
     const probe = Bun.spawn(
-      ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', path],
+      ['ffprobe', '-v', 'error', '-protocol_whitelist', 'file,pipe', '-f', 'mov', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', path],
       { stdout: 'pipe', stderr: 'ignore' },
     );
+    const exited = boundedExit(probe, 5_000);
     const seconds = Number((await new Response(probe.stdout).text()).trim());
-    await probe.exited;
+    if ((await exited) !== 0) return null;
     return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
   } catch {
     return null;
@@ -305,14 +312,15 @@ async function ffprobeDuration(path: string): Promise<number | null> {
  */
 export async function framesFromFile(videoPath: string, fallbackDuration?: number | null): Promise<string[]> {
   const duration = (await ffprobeDuration(videoPath)) ?? fallbackDuration;
-  if (!duration) return [];
+  if (!duration || duration <= 0 || duration > 3600) return [];
 
   const workDir = await mkdtemp(join(tmpdir(), 'fridgie-frames-'));
   try {
     const count = frameCountFor(duration);
     const frames: string[] = [];
+    const expires = Date.now() + 20_000;
 
-    for (let i = 0; i < count; i += 1) {
+    for (let i = 0; i < count && Date.now() < expires; i += 1) {
       // Mid-slot rather than slot edges: t=0 is usually a title card or a black
       // frame, and seeking to exactly the duration frequently yields nothing.
       const at = (duration * (i + 0.5)) / count;
@@ -321,13 +329,13 @@ export async function framesFromFile(videoPath: string, fallbackDuration?: numbe
       const ffmpeg = Bun.spawn(
         [
           'ffmpeg', '-nostdin', '-v', 'error',
-          '-ss', at.toFixed(2), '-i', videoPath,
-          '-frames:v', '1', '-vf', `scale=${FRAME_WIDTH}:-2`,
+          '-ss', at.toFixed(2), '-protocol_whitelist', 'file,pipe', '-f', 'mov', '-i', videoPath,
+          '-frames:v', '1', '-threads', '1', '-vf', `scale=${FRAME_WIDTH}:1280:force_original_aspect_ratio=decrease`,
           '-q:v', '3', '-f', 'image2', '-y', framePath,
         ],
         { stdout: 'ignore', stderr: 'ignore' },
       );
-      if ((await ffmpeg.exited) !== 0) continue;
+      if ((await boundedExit(ffmpeg, Math.min(5_000, expires - Date.now()))) !== 0) continue;
 
       frames.push(Buffer.from(await readFile(framePath)).toString('base64'));
     }
@@ -348,32 +356,35 @@ export async function framesFromFile(videoPath: string, fallbackDuration?: numbe
  * cost us an import that the caption alone could have satisfied. Requires
  * ffmpeg on PATH (the API image installs it; see apps/api/Dockerfile).
  */
-export async function sampleVideoFrames(source: TikTokSource): Promise<string[]> {
+export async function sampleVideoFrames(
+  source: Pick<TikTokSource, 'videoUrl' | 'cookieHeader' | 'durationSec'>,
+  options: { referer?: string; allowedHosts?: (host: string) => boolean } = {},
+): Promise<string[]> {
   if (!source.videoUrl) return [];
 
   let workDir: string | null = null;
   try {
-    const { data } = await axios.get<ArrayBuffer>(source.videoUrl, {
-      timeout: VIDEO_TIMEOUT_MS,
-      responseType: 'arraybuffer',
-      maxContentLength: MAX_VIDEO_BYTES,
-      maxRedirects: 5,
+    const response = await fetchPublicUrl(source.videoUrl, {
+      timeoutMs: VIDEO_TIMEOUT_MS, maxBytes: MAX_VIDEO_BYTES,
+      allowedHosts: options.allowedHosts ?? isTikTokMediaHost,
       headers: {
         'User-Agent': BROWSER_UA,
-        // Both are required: the CDN 403s a signed playAddr without the `ttwid`
-        // cookie the watch-page fetch set, and Referer alone is not enough.
-        Referer: 'https://www.tiktok.com/',
+        Referer: options.referer ?? 'https://www.tiktok.com/',
         ...(source.cookieHeader ? { Cookie: source.cookieHeader } : {}),
       },
     });
+    // A media URL must actually yield an MP4, never a playlist that could make
+    // ffmpeg read another URL or local file through its own network stack.
+    const data = response.data;
+    if (response.status !== 200 || data.length < 12 || data.toString('ascii', 4, 8) !== 'ftyp') return [];
 
-    workDir = await mkdtemp(join(tmpdir(), 'fridgie-tiktok-'));
+    workDir = await mkdtemp(join(tmpdir(), 'fridgie-video-'));
     const videoPath = join(workDir, 'video.mp4');
     await writeFile(videoPath, Buffer.from(data));
 
     return await framesFromFile(videoPath, source.durationSec);
   } catch (error) {
-    console.warn('TikTok frame sampling failed:', error instanceof Error ? error.message : error);
+    console.warn('Video frame sampling failed:', error instanceof Error ? error.message : error);
     return [];
   } finally {
     if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});

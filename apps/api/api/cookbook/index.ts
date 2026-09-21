@@ -3,7 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore'
 import { fs } from '@/utils/firebase'
 import { auth } from '@/middleware/auth'
 import { requireAccount } from '@/middleware/requireAccount'
-import { getAuth } from 'firebase-admin/auth'
+import { publicProfiles } from '@/utils/publicProfiles'
 import { fileRecipes, normalizeRecipeCategory } from '@/utils/recipeCategory'
 
 const route = new Hono()
@@ -125,7 +125,7 @@ function toIsoString(value: any): string | null {
  *    each answer is written back onto the recipe, so a given recipe is filed
  *    once ever rather than once per fetch.
  */
-export async function getCookbook(uid: string) {
+export async function getCookbook(uid: string, viewerUid = uid) {
     const cookbookSnapshot = await fs.collection('users').doc(uid).collection('cookbook').orderBy('addedAt', 'desc').get()
 
     if (cookbookSnapshot.empty) {
@@ -139,20 +139,14 @@ export async function getCookbook(uid: string) {
     const shelfOrder = new Map(entries.map((entry, index) => [entry.id, index]))
     const addedAt = new Map(entries.map((entry) => [entry.id, entry.addedAt]))
 
-    const recipeDocs = await fetchRecipeDocsByIds(entries.map((entry) => entry.id));
+    const recipeDocs = (await fetchRecipeDocsByIds(entries.map((entry) => entry.id)))
+      .filter(doc => viewerUid === uid || doc.data().visibility !== 'private');
 
     // Authors and categories are independent questions about the same recipes,
     // and both are round trips — one to Auth, one to the model. Ask together.
     const uniqueAuthorUids = [...new Set(recipeDocs.map(doc => doc.data().createdBy))];
     const [authorResults, categories] = await Promise.all([
-      Promise.all(uniqueAuthorUids.map(authorUid =>
-        getAuth().getUser(authorUid).catch(error => {
-            // If a user is not found or another error occurs, return null
-            // This prevents one failed lookup from crashing the entire Promise.all
-            console.error(`Could not fetch author for UID: ${authorUid}`, error.code);
-            return null;
-        })
-      )),
+      publicProfiles(uniqueAuthorUids).catch(() => new Map()),
       // Never throws — a cookbook that fails to load because a model was busy
       // would be a far worse trade than one whose newest recipe has no chip yet.
       fileRecipes(recipeDocs.map(doc => ({

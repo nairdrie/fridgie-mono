@@ -10,7 +10,7 @@ import {
 } from "firebase/auth";
 import { Platform } from 'react-native';
 import uuid from 'react-native-uuid';
-import { Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, SuggestionRequest, UserProfile, UserSearchResult } from "../types/types";
+import { ConnectionKind, ExploreContent, Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, SuggestionRequest, UserConnectionsPage, UserProfile, UserSearchResult } from "../types/types";
 import { authStatePromise } from "./authState";
 import { reportReachable, reportUnreachable } from "./connectivity";
 import { auth } from "./firebase";
@@ -41,6 +41,9 @@ const DEFAULT_TIMEOUT_MS = 30_000
  * those out at 30s would break a working feature.
  */
 const AI_TIMEOUT_MS = 120_000
+
+/** Social video imports may also wait for speech transcription before parsing. */
+const URL_RECIPE_IMPORT_TIMEOUT_MS = 240_000
 
 export class ApiError extends Error {
   status: number;
@@ -267,11 +270,22 @@ export async function getUserProfile(uid: string): Promise<UserProfile> {
 }
 
 export async function followUser(uid: string): Promise<void> {
-    await authorizedFetch(`${BASE_URL}/user/follow/${uid}`, { method: 'POST' });
+    await authorizedFetch(`${BASE_URL}/user/follow/${encodeURIComponent(uid)}`, { method: 'POST' });
 }
 
 export async function unfollowUser(uid: string): Promise<void> {
-    await authorizedFetch(`${BASE_URL}/user/follow/${uid}`, { method: 'DELETE' });
+    await authorizedFetch(`${BASE_URL}/user/follow/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+}
+
+export async function getUserConnections(uid: string, kind: ConnectionKind, cursor?: string): Promise<UserConnectionsPage> {
+    const query = new URLSearchParams({ kind, limit: '40', ...(cursor ? { cursor } : {}) });
+    const res = await authorizedFetch(`${BASE_URL}/user/${encodeURIComponent(uid)}/connections?${query}`);
+    return res.json();
+}
+
+/** Removes this person from the signed-in user's followers. */
+export async function removeFollower(uid: string): Promise<void> {
+    await authorizedFetch(`${BASE_URL}/user/follower/${encodeURIComponent(uid)}`, { method: 'DELETE' });
 }
 
 
@@ -561,7 +575,7 @@ export const getMealPreferences = async (): Promise<MealPreferences> => {
   return res.json()
 };
 
-export async function getExploreContent(): Promise<any> {
+export async function getExploreContent(): Promise<ExploreContent> {
   const res = await authorizedFetch(`${BASE_URL}/explore`);
   return res.json();
 }
@@ -713,8 +727,7 @@ export async function importRecipeFromUrl(url: string): Promise<Recipe> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
-  }, [], AI_TIMEOUT_MS);
-  console.log("import results:", res);
+  }, [], URL_RECIPE_IMPORT_TIMEOUT_MS);
   return res.json();
 }
 

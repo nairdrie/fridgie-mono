@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { hasPublicSource, sourceDocId, sourceKeyFor, tiktokSourceKey } from '../utils/recipeSource'
+import { hasPublicSource, sourceDocId, sourceKeyFor, tiktokSourceKey, instagramSourceKey } from '../utils/recipeSource'
 
 describe('sourceKeyFor: TikTok', () => {
   test('two people sharing one video land on the same key', () => {
@@ -82,3 +82,22 @@ describe('sourceDocId', () => {
       .not.toBe(sourceDocId('web:example.com/r/curry'))
   })
 })
+
+
+describe('sourceKeyFor: Instagram', () => {
+  test('deduplicates direct, post, plural, mobile, creator and tracking links by shortcode', () => {
+    const key = instagramSourceKey('Fridgie_123');
+    for (const url of [
+      'https://www.instagram.com/reel/Fridgie_123/',
+      'https://instagram.com/reels/Fridgie_123/?igsh=tracking',
+      'https://m.instagram.com/p/Fridgie_123/',
+      'https://www.instagram.com/fixture_cook/reel/Fridgie_123/',
+      'https://instagr.am/reel/Fridgie_123/',
+    ]) expect(sourceKeyFor(url)).toBe(key);
+  });
+  test('preserves case-sensitive IDs and does not misfile share tokens or lookalikes', () => {
+    expect(sourceKeyFor('https://www.instagram.com/reel/Fridgie_123/')).not.toBe(sourceKeyFor('https://www.instagram.com/reel/fridgie_123/'));
+    expect(sourceKeyFor('https://www.instagram.com/share/reel/Token123/')).toBe('web:instagram.com/share/reel/Token123');
+    expect(sourceKeyFor('https://instagram.com.evil.test/reel/Fridgie_123/')).toBe('web:instagram.com.evil.test/reel/Fridgie_123');
+  });
+});

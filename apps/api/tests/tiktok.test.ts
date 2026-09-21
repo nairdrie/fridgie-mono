@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  collectTikTokSource,
   framesFromFile,
   isTikTokUrl,
   parseWatchPage,
@@ -170,3 +171,37 @@ describe('framesFromFile', () => {
     expect(await framesFromFile('/nonexistent/video.mp4')).toEqual([])
   })
 })
+
+
+describe('TikTok collection regression', () => {
+  test('keeps the oEmbed caption when the watch page is unavailable', async () => {
+    const source = await collectTikTokSource('https://www.tiktok.com/@fixture/video/7311982', async (url) => {
+      if (!url.includes('/oembed?')) throw new Error('Page unavailable');
+      return { data: Buffer.from(JSON.stringify({ title: '1 apple. Slice the apple.', author_name: 'Fixture Cook', thumbnail_url: 'https://p16.tiktokcdn.com/cover.jpg' })), headers: {}, status: 200, url };
+    });
+    expect(source.caption).toBe('1 apple. Slice the apple.');
+    expect(source.author).toBe('Fixture Cook');
+    expect(source.photoURL).toContain('tiktokcdn.com/cover.jpg');
+    expect(source.transcript).toBe('');
+    expect(source.videoUrl).toBeNull();
+  });
+  test('retains watch-page identity, anonymous cookies, subtitles and media when oEmbed fails', async () => {
+    const html = await Bun.file(`${import.meta.dir}/fixtures/tiktok-watch-page.html`).text();
+    const item = parseWatchPage(html)!;
+    const source = await collectTikTokSource('https://vm.tiktok.com/Token123/', async (url, options) => {
+      if (url.includes('/oembed?')) throw new Error('oEmbed unavailable');
+      if (url === 'https://vm.tiktok.com/Token123/') return { data: Buffer.from(html), headers: { 'set-cookie': ['ttwid=anonymous-fixture; Path=/; Secure'] }, status: 200, url };
+      expect(options.headers?.Cookie).toBe('ttwid=anonymous-fixture');
+      return { data: Buffer.from('WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nAdd two eggs'), headers: {}, status: 200, url };
+    });
+    expect(source.caption).toBe(item.desc);
+    expect(source.videoId).toBe(String(item.id));
+    expect(source.authorHandle).toBe(item.author.uniqueId);
+    expect(source.transcript).toBe('Add two eggs');
+    expect(source.videoUrl).toBe(item.video.playAddr);
+  });
+  test('rejects deceptive schemes and credentials before collecting', () => {
+    expect(isTikTokUrl('ftp://www.tiktok.com/@chef/video/123')).toBe(false);
+    expect(isTikTokUrl('https://user:pass@www.tiktok.com/@chef/video/123')).toBe(false);
+  });
+});

@@ -83,7 +83,7 @@ route.get('/', async (c) => {
     if(!uid) {
       throw Error('No uid');
     }
-    const res = await getCookbook(uid);
+    const res = await getCookbook(uid, c.get('uid'));
     return c.json(res);
   } catch(error: any) {
     console.error('Error fetching cookbook:', error)

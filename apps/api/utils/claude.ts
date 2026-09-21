@@ -79,6 +79,9 @@ export interface JsonCallOptions {
   maxTokens?: number;
   /** Turn off when the system prompt is assembled per request — caching a unique prefix is pure cost. */
   cacheSystem?: boolean;
+  /** Per-call network deadline/retry policy; import must fit the mobile deadline. */
+  timeoutMs?: number;
+  maxRetries?: number;
 }
 
 export class ClaudeError extends Error {}
@@ -98,6 +101,8 @@ export async function completeJson<T>({
   effort = 'low',
   maxTokens = 16000,
   cacheSystem = true,
+  timeoutMs,
+  maxRetries,
 }: JsonCallOptions): Promise<T> {
   const message = await anthropic.messages.create({
     model,
@@ -114,6 +119,9 @@ export async function completeJson<T>({
       format: { type: 'json_schema', schema },
     },
     messages: [{ role: 'user', content: user }],
+  }, {
+    ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }),
+    ...(maxRetries === undefined ? {} : { maxRetries }),
   });
 
   // Safety classifiers answer with a 200 and an empty content array, so this

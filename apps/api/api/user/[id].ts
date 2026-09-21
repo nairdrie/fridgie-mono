@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
 import admin from 'firebase-admin';
 import { fs } from '@/utils/firebase'; // Make sure you import your Firestore instance
+import { curatedProfileFields } from '@/utils/publicProfiles';
 
 const route = new Hono();
 route.use('*', auth);
@@ -32,6 +33,8 @@ route.get('/', async (c) => {
             displayName: userRecord.displayName || null,
             photoURL: userRecord.photoURL || null,
             email: userRecord.email || null,
+            ...curatedProfileFields(firestoreData),
+            recipeCount: Math.max(0, Number(firestoreData.recipeCount) || 0),
             // Add new data from Firestore
             followerCount: firestoreData.followerCount || 0,
             followingCount: firestoreData.followingCount || 0,

@@ -105,6 +105,7 @@ jobs:
       PROJECT_ID: grocerease-5abbb
       REGION: us-central1
       SERVICE: fridgie-api
+      DISCOVERY_JOB: fridgie-discover-publish
       RUNTIME_SA: fridgie-api-run@grocerease-5abbb.iam.gserviceaccount.com
     steps:
       - uses: actions/checkout@v4
@@ -174,7 +175,7 @@ jobs:
             --cpu=1 --memory=1Gi --timeout=3600 \
             --execution-environment=gen2 --cpu-boost --cpu-throttling \
             --set-env-vars="NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" \
-            --set-secrets="ANTHROPIC_API_KEY=fridgie-anthropic-api-key:latest" \
+            --set-secrets="ANTHROPIC_API_KEY=fridgie-anthropic-api-key:latest,SUPADATA_API_KEY=fridgie-supadata-api-key:latest" \
             --revision-suffix="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" \
             --no-traffic --tag=candidate --quiet
 
@@ -222,6 +223,18 @@ jobs:
             --project="$PROJECT_ID" --region="$REGION" \
             --to-revisions="${{ steps.deploy.outputs.revision }}=100" --quiet
 
+      # The worker consumes the same verified image, but keeps its independently
+      # configured command, service account, secrets, environment and timeout.
+      # Updating the job does not execute it; Cloud Scheduler owns execution.
+      - name: Update scheduled Discover worker image
+        run: |
+          set -euo pipefail
+          gcloud run jobs update "$DISCOVERY_JOB" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --image="${{ steps.image.outputs.ref }}" --quiet
+
+      # This also runs if the worker update fails after API promotion. Rollback
+      # remains API-traffic-only; it does not restore or execute the worker job.
       - name: Roll back
         if: failure() && steps.deploy.outputs.prev != ''
         run: |

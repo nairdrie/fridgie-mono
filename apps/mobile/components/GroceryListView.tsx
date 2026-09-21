@@ -1,3 +1,4 @@
+import { BrandMark } from '@/components/ui/Brand';
 // components/GroceryListView.tsx
 
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
@@ -124,6 +125,7 @@ interface GroceryListViewProps {
    * would put the row back; the screen uses this to throw such an answer away.
    */
   onManualReorder?: () => void;
+  onScrollOffsetChange?: (offset: number) => void;
   /**
    * Canonical keys of the ingredients this household has been observed to
    * always have in — see packages/shared/staples.ts. Empty for a household that
@@ -145,6 +147,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     isKeyboardVisible,
     markDirty,
     onManualReorder,
+    onScrollOffsetChange,
     staples,
     onAlwaysShowStaple,
 }, ref) => {
@@ -948,21 +951,25 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         shoppingProgress.value = reduceMotion ? progress : withSpring(progress, { damping: 22, stiffness: 150, reduceMotion: ReduceMotion.System });
     }, [boughtCount, shoppingCount, reduceMotion, shoppingProgress]);
     const progressStyle = useAnimatedStyle(() => ({ width: `${shoppingProgress.value * 100}%` as `${number}%` }));
+    const trackKeyboardOffset = keyboard.draggableProps.onScrollOffsetChange;
+    const handleScrollOffsetChange = useCallback((offset: number) => {
+        trackKeyboardOffset(offset);
+        onScrollOffsetChange?.(offset);
+    }, [trackKeyboardOffset, onScrollOffsetChange]);
 
     return (
         <View style={{ flex: 1 }}>
             { aggregatedItems.length === 0 ? (
-                <ScrollView contentContainerStyle={styles.emptyMealsContainer} showsVerticalScrollIndicator={false}>
+                <ScrollView contentContainerStyle={styles.emptyMealsContainer} showsVerticalScrollIndicator={false} onScroll={event => handleScrollOffsetChange(event.nativeEvent.contentOffset.y)} scrollEventThrottle={16}>
                     <View style={styles.emptyIllustration}>
                         <View style={styles.emptyHalo} />
                         <GlassSurface style={styles.emptyIcon} intensity={45}>
                             <Ionicons name="basket-outline" size={44} color={primary} />
                         </GlassSurface>
-                        <View style={styles.emptyLeaf}><Ionicons name="leaf" size={20} color={primary} /></View>
+                        <View style={styles.emptyLeaf}><BrandMark size={20} color={primary} /></View>
                     </View>
-                    <Text style={styles.eyebrow}>LESS TO REMEMBER. MORE TO ENJOY.</Text>
-                    <Text style={styles.emptyMealsText}>A fresh start{`\n`}for your basket.</Text>
-                    <Text style={styles.emptySubtext}>Add the things you need, or plan a meal and we’ll gather the ingredients here.</Text>
+                    <Text style={styles.emptyMealsText}>Your shopping list</Text>
+                    <Text style={styles.emptySubtext}>Add an item, or plan a meal to gather its ingredients here.</Text>
                     <GlassPressable
                         style={styles.addMealButton}
                         onPress={() => addItemAfter()}>
@@ -977,45 +984,35 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     // drag-to-autoscroll with it — so it reports where it is
                     // scrolled to through onScrollOffsetChange instead.
                     {...keyboard.draggableProps}
+                    onScrollOffsetChange={handleScrollOffsetChange}
                     data={openRows} onDragEnd={applyDragOrder}
                     keyExtractor={item => item.id} renderItem={renderItem as any}
                     // Progress counts the visible shopping rows after aggregation,
                     // and leaves pantry staples out until they are added back.
                     ListHeaderComponent={
                         <View style={styles.listHeader}>
-                            <Text style={styles.eyebrow}>YOUR WEEK, ALL TOGETHER</Text>
-                            <View style={styles.shoppingHeading}>
-                                <Text style={styles.shoppingTitle}>{toBuyCount === 0 && boughtCount > 0 ? 'All in the basket.' : 'Let’s fill the fridge.'}</Text>
-                                <View style={styles.basketIcon}><Ionicons name={toBuyCount === 0 && boughtCount > 0 ? 'checkmark' : 'basket-outline'} size={23} color={primary} /></View>
-                            </View>
-                            <GlassSurface style={styles.progressCard} intensity={24}>
+                            <View style={styles.progressSummary}>
                                 <View style={styles.progressLabels}>
-                                    <View style={styles.progressLabelGroup}>
-                                        <Text style={styles.progressNumber}>{toBuyCount}</Text>
-                                        <Text style={styles.progressDetail}>left to pick up</Text>
-                                    </View>
-                                    <Text style={styles.progressCaption}>{boughtCount} of {shoppingCount} in your basket</Text>
+                                    <Text style={styles.progressCount}>{toBuyCount} to buy</Text>
+                                    <Text style={styles.progressCaption}>{boughtCount}/{shoppingCount} checked</Text>
                                 </View>
                                 <View style={styles.progressTrack} accessibilityRole="progressbar" accessibilityLabel="Shopping progress" accessibilityValue={{ min: 0, max: Math.max(1, shoppingCount), now: boughtCount }} aria-valuemin={0} aria-valuemax={Math.max(1, shoppingCount)} aria-valuenow={boughtCount}>
                                     <Animated.View style={[styles.progressFill, progressStyle]} />
                                 </View>
-                            </GlassSurface>
-                            <View style={styles.mealToggleHeader}>
-                                <Text style={styles.listSectionTitle}>Shopping list</Text>
-                                {hasMealLinks && (
-                                    <GlassPressable
-                                        style={[styles.mealToggle, showMealTags && styles.mealToggleOn]}
-                                        onPress={toggleMealTags}
-                                        accessibilityRole="switch"
-                                        accessibilityState={{ checked: showMealTags }}
-                                        accessibilityLabel="Show which meal each item is for"
-                                        hitSlop={8}
-                                    >
-                                        <Ionicons name="restaurant-outline" size={13} color={showMealTags ? primary : inkMuted} />
-                                        <Text style={[styles.mealToggleText, showMealTags && styles.mealToggleTextOn]}>{showMealTags ? 'Meals shown' : 'Show meals'}</Text>
-                                    </GlassPressable>
-                                )}
                             </View>
+                            {hasMealLinks && (
+                                <GlassPressable
+                                    style={[styles.mealToggle, showMealTags && styles.mealToggleOn]}
+                                    onPress={toggleMealTags}
+                                    accessibilityRole="switch"
+                                    accessibilityState={{ checked: showMealTags }}
+                                    accessibilityLabel="Show which meal each item is for"
+                                    hitSlop={8}
+                                >
+                                    <Ionicons name="restaurant-outline" size={13} color={showMealTags ? primary : inkMuted} />
+                                    <Text style={[styles.mealToggleText, showMealTags && styles.mealToggleTextOn]}>{showMealTags ? 'Meals shown' : 'Show meals'}</Text>
+                                </GlassPressable>
+                            )}
                         </View>
                     }
                     keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled"
@@ -1215,9 +1212,8 @@ const styles = StyleSheet.create({
     mealTagRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
     mealTagIcon: { marginTop: 0.5 },
     mealTagText: { flex: 1, fontSize: 12, color: inkFaint },
-    // The show/hide-backlinks control above the list.
-    mealToggleHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, paddingBottom: 6 },
-    mealToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: hairline, backgroundColor: '#fff' },
+    // The show/hide-backlinks control beside shopping progress.
+    mealToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: hairline, backgroundColor: '#fff' },
     mealToggleOn: { borderColor: 'transparent', backgroundColor: accentSoft },
     mealToggleText: { fontSize: 12, fontWeight: '600', color: inkMuted },
     mealToggleTextOn: { color: primary },
@@ -1228,30 +1224,21 @@ const styles = StyleSheet.create({
     quantityLabel: { backgroundColor: accentSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginRight: 8 },
     quantityChecked: { backgroundColor: surface },
     quantityText: { color: primary, fontSize: 12, fontWeight: '600' },
-    // An invitation rather than a shrug: what this space is for, then the one
-    // action that fills it.
-    listHeader: { paddingTop: 13, paddingBottom: 4 },
-    eyebrow: { color: inkMuted, fontSize: 10, letterSpacing: 1.5, fontWeight: '700', textAlign: 'left' },
-    shoppingHeading: { flexDirection: 'row', gap: 10, alignItems: 'center', justifyContent: 'space-between', marginTop: 7, marginBottom: 18 },
-    shoppingTitle: { flex: 1, fontSize: 29, lineHeight: 35, fontWeight: '700', color: ink, letterSpacing: -1.2 },
-    basketIcon: { backgroundColor: accentSoft, width: 45, height: 45, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
-    progressCard: { borderRadius: 24, padding: 17 },
-    progressLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
-    progressLabelGroup: { flexDirection: 'row', alignItems: 'baseline', gap: 7 },
-    progressNumber: { fontSize: 25, fontWeight: '700', letterSpacing: -1, color: ink },
-    progressDetail: { color: inkMuted, fontSize: 12 },
-    progressCaption: { flexShrink: 1, textAlign: 'right', color: inkMuted, fontSize: 11 },
-    progressTrack: { height: 5, backgroundColor: 'rgba(23,63,53,0.07)', borderRadius: 3, marginTop: 14, overflow: 'hidden' },
-    progressFill: { height: 5, backgroundColor: primary, borderRadius: 3 },
-    listSectionTitle: { color: ink, fontSize: 20, fontWeight: '700', letterSpacing: -0.5 },
+    listHeader: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 8, paddingBottom: 9 },
+    progressSummary: { flex: 1 },
+    progressLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 7 },
+    progressCount: { fontSize: 14, lineHeight: 20, fontWeight: '600', color: ink },
+    progressCaption: { color: inkMuted, fontSize: 11, lineHeight: 17 },
+    progressTrack: { height: 3, backgroundColor: 'rgba(23,63,53,0.07)', borderRadius: 2, marginTop: 6, overflow: 'hidden' },
+    progressFill: { height: 3, backgroundColor: primary, borderRadius: 2 },
     addAnotherItem: { flexDirection: 'row', gap: 9, alignItems: 'center', paddingHorizontal: 29, paddingTop: 22 },
     addAnotherText: { color: primary, fontSize: 14, fontWeight: '600' },
     emptyMealsContainer: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 30, paddingBottom: 155, paddingTop: 25 },
     emptyIllustration: { width: 170, height: 145, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
     emptyHalo: { position: 'absolute', width: 140, height: 140, borderRadius: 70, backgroundColor: '#DCEDE2' },
     emptyIcon: { width: 102, height: 102, borderRadius: 33, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-8deg' }] },
-    emptyLeaf: { position: 'absolute', right: 0, bottom: 9, width: 44, height: 44, borderRadius: 22, backgroundColor: '#E7EEDC', borderWidth: 2, borderColor: '#F5F5EF', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '25deg' }] },
-    emptyMealsText: { fontSize: 32, lineHeight: 37, fontWeight: '700', color: ink, letterSpacing: -1.2, textAlign: 'center', marginTop: 11 },
+    emptyLeaf: { position: 'absolute', right: 0, bottom: 9, width: 44, height: 44, borderRadius: 22, backgroundColor: '#E7EEDC', borderWidth: 2, borderColor: '#F5F5EF', alignItems: 'center', justifyContent: 'center' },
+    emptyMealsText: { fontSize: 28, lineHeight: 34, fontWeight: '700', color: ink, letterSpacing: -1.2, textAlign: 'center', marginTop: 11 },
     emptySubtext: { fontSize: 15, lineHeight: 23, color: inkMuted, textAlign: 'center', marginTop: 13, maxWidth: 310 },
     addMealButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 25, paddingVertical: 16, paddingHorizontal: 26, borderRadius: 28, borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)', backgroundColor: primary },
     addMealText: { color: '#fff', fontSize: 16, fontWeight: '600' }
