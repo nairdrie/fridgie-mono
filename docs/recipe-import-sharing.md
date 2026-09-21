@@ -21,12 +21,45 @@ All source, subtitle, and video requests now use bounded public fetching: valida
 ## Native setup and release
 
 - `expo-share-intent` is pinned to **4.1.2**, the upstream Expo SDK 53 version. The small upstream `xcode@3.0.1` patch is applied by `patch-package` alongside the existing postinstall patch.
-- The iOS share extension is `com.nairdrie.fridgie.share-extension`, target **Save to Fridgie**. Both targets use **group.com.nairdrie.fridgie**. Activation accepts one web URL/web page or text; raw image/video sharing is not advertised.
+- The iOS share extension is `com.nairdrie.fridgie.share-extension`, display name **Save to Fridgie**, generated Xcode target `SavetoFridgie`. Both targets use **group.com.nairdrie.fridgie**. Activation accepts one web URL/web page or text; raw image/video sharing is not advertised.
 - Android receives `ACTION_SEND` with `text/*`. Expo Router rewrites the extension’s transport URL and routes the durable shared-link inbox into the import screen.
 - This requires a **new native build**; an OTA JavaScript update or Expo Go cannot add a system share extension. Real-device/release signing must provision the host and extension with the matching Apple App Group. No Apple account configuration was changed here.
 - The Instagram/Supadata backend is deployed to `api.fridgie.ca` as of 2026-09-20. Distributing the share extension still requires a signed native client build.
 
 Primary references: [module compatibility and configuration](https://github.com/achorein/expo-share-intent/tree/v4.1.2), [Expo native-intent routing](https://docs.expo.dev/router/advanced/native-intent/), [Apple share extensions](https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/Share.html).
+
+### One-time iOS signing setup for CI
+
+The `preview` profile uses internal (ad hoc) distribution. The host app and share extension can reuse the same Apple Distribution certificate, but each bundle identifier needs its own provisioning profile. A previously working host-only build does not provision a newly added extension automatically in non-interactive CI.
+
+If EAS reports that it cannot find internal-distribution credentials for `SavetoFridgie`, run the following locally from the repository root in an interactive terminal:
+
+```sh
+cd apps/mobile
+npx --yes eas-cli@latest login
+npx --yes eas-cli@latest credentials:configure-build --platform ios --profile preview
+```
+
+Sign in to the Expo account that owns the project and the Apple Developer account for its existing team. Reuse the existing distribution certificate when offered. Let EAS register the extension identifier, synchronize the shared App Group, and generate or refresh the required ad hoc profiles using the intended registered devices. Both `com.nairdrie.fridgie` and `com.nairdrie.fridgie.share-extension` must have `group.com.nairdrie.fridgie` in their signed entitlements. Apple account authentication is required for App Group assignment; an App Store Connect API key alone cannot perform that operation.
+
+After setup succeeds, use the full `preview` profile and rerun the **mobile — EAS preview builds (installable)** GitHub Actions job. Keep `--non-interactive` in CI: future pushes to `main` reuse the credentials stored in EAS. Do not commit credentials, add Apple passwords to GitHub, or duplicate the extension declaration; `expo-share-intent` already supplies it through its config plugin. App Store distribution uses separate provisioning profiles and requires its own setup when releasing with the `production` profile.
+
+References: [Expo app-extension credentials](https://docs.expo.dev/build-reference/app-extensions/), [internal distribution in CI](https://docs.expo.dev/build/internal-distribution/#automation-on-ci-optional), [App Group capability synchronization](https://docs.expo.dev/build-reference/ios-capabilities/#capability-identifiers).
+
+### Temporary installable IPA during Apple membership renewal
+
+CI currently defaults its iOS build to `preview-existing-signing`. This extends `preview` and sets `EXPO_PUBLIC_IOS_SHARE_EXTENSION_ENABLED=false`, omitting the new iOS extension and its App Group. The iOS runtime also disables the native share listener. Paste-link/photo importing and Android system sharing remain available. This is a physical-device ad hoc IPA with an EAS install link, not a simulator build.
+
+The fallback can only reuse existing credentials. EAS reported the host distribution certificate and ad hoc profile active with an October 18, 2026 expiration when checked on September 20, 2026 (Toronto time); it listed two provisioned iPhones. That is EAS metadata, not fresh Apple validation. The build and installation still require credentials that Apple accepts, a listed device, and compatible entitlements. It cannot register new devices, create missing profiles, or work around revoked/expired signing credentials.
+
+To build this temporary variant manually:
+
+```sh
+cd apps/mobile
+npx --yes eas-cli@latest build --platform ios --profile preview-existing-signing --non-interactive --no-wait
+```
+
+Once Apple membership is active, complete the one-time `credentials:configure-build --platform ios --profile preview` setup above, then set the GitHub repository **Actions variable** `IOS_EAS_BUILD_PROFILE` to `preview`. The next push to `main` will include the share extension again. This variable contains only a profile name, not a secret. CI accepts only `preview` and `preview-existing-signing`; Android always uses `preview`.
 
 ## Verification
 

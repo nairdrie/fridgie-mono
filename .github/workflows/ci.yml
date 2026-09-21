@@ -244,7 +244,7 @@ jobs:
             --to-revisions="${{ steps.deploy.outputs.prev }}=100" --quiet
 
   build-mobile:
-    name: mobile — EAS preview build (installable)
+    name: mobile — EAS preview builds (installable)
     needs: [mobile]
     # Deliberately NOT `needs: deploy-api`. A slow EAS free-tier queue must never
     # block the API from going live, and a failed API deploy must not block
@@ -253,6 +253,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read      # NEVER give this job id-token: write
+    env:
+      # Temporary IPA profile while Apple membership renewal is pending. Set
+      # this repository variable to preview after provisioning the extension.
+      IOS_EAS_BUILD_PROFILE: ${{ vars.IOS_EAS_BUILD_PROFILE || 'preview-existing-signing' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -279,17 +283,35 @@ jobs:
         working-directory: apps/mobile
         run: npm ci --no-audit --no-fund
 
-      # --profile preview: Android APK + iOS ad-hoc IPA, both installable
-      # directly on hardware. `production` would emit an AAB, which cannot be
-      # installed on any device at all.
-      #
       # --no-wait returns as soon as the build is QUEUED. Free-tier queues run
       # 10-60+ minutes; waiting would bill all of it to GitHub Actions minutes.
-      - name: Queue EAS build
+      - name: Validate iOS build profile
+        run: |
+          case "$IOS_EAS_BUILD_PROFILE" in
+            preview|preview-existing-signing) ;;
+            *) echo "::error::IOS_EAS_BUILD_PROFILE must be preview or preview-existing-signing"; exit 1 ;;
+          esac
+
+      - name: Queue Android EAS build
         working-directory: apps/mobile
         run: |
-          eas build --profile preview --platform all \
+          eas build --profile preview --platform android \
             --non-interactive --no-wait \
             --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME}"
-          echo "### EAS builds queued" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Android APK build queued" >> "$GITHUB_STEP_SUMMARY"
+
+      # Both profiles produce an ad hoc IPA. The temporary profile omits the
+      # new share extension/App Group so EAS can reuse the existing host-app
+      # credentials. It still requires valid credentials and registered devices.
+      # See docs/recipe-import-sharing.md for restoring full iOS sharing.
+      - name: Queue iOS EAS build
+        working-directory: apps/mobile
+        run: |
+          eas build --profile "$IOS_EAS_BUILD_PROFILE" --platform ios \
+            --non-interactive --no-wait \
+            --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME}"
+          echo "### iOS IPA build queued ($IOS_EAS_BUILD_PROFILE)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$IOS_EAS_BUILD_PROFILE" = preview-existing-signing ]; then
+            echo "iOS system sharing is temporarily omitted while Apple membership renews. Paste-link importing remains available." >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "Install links: https://expo.dev/accounts/_/projects/fridgie/builds" >> "$GITHUB_STEP_SUMMARY"

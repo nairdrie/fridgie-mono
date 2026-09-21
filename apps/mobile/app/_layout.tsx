@@ -79,9 +79,11 @@ function MotionStack({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
+  const nativeSharingDisabled = Platform.OS === 'web' ||
+    (Platform.OS === 'ios' && process.env.EXPO_PUBLIC_IOS_SHARE_EXTENSION_ENABLED === 'false');
 
   return (
-      <ShareIntentProvider options={{ scheme: 'fridgie', resetOnBackground: false, disabled: Platform.OS === 'web' }}>
+      <ShareIntentProvider options={{ scheme: 'fridgie', resetOnBackground: false, disabled: nativeSharingDisabled }}>
       <SharedRecipeProvider>
       <SafeAreaProvider>
         <GlassPreferencesProvider>
