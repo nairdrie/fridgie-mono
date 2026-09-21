@@ -27,12 +27,6 @@
         "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api"
       }
     },
-    "preview-existing-signing": {
-      "extends": "preview",
-      "env": {
-        "EXPO_PUBLIC_IOS_SHARE_EXTENSION_ENABLED": "false"
-      }
-    },
     "production": {
       "developmentClient": false,
       "android": {
