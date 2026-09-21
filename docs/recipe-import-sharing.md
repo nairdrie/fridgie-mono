@@ -46,20 +46,7 @@ After setup succeeds, use the full `preview` profile and rerun the **mobile — 
 
 References: [Expo app-extension credentials](https://docs.expo.dev/build-reference/app-extensions/), [internal distribution in CI](https://docs.expo.dev/build/internal-distribution/#automation-on-ci-optional), [App Group capability synchronization](https://docs.expo.dev/build-reference/ios-capabilities/#capability-identifiers).
 
-### Temporary installable IPA during Apple membership renewal
-
-CI currently defaults its iOS build to `preview-existing-signing`. This extends `preview` and sets `EXPO_PUBLIC_IOS_SHARE_EXTENSION_ENABLED=false`, omitting the new iOS extension and its App Group. The iOS runtime also disables the native share listener. Paste-link/photo importing and Android system sharing remain available. This is a physical-device ad hoc IPA with an EAS install link, not a simulator build.
-
-The fallback can only reuse existing credentials. EAS reported the host distribution certificate and ad hoc profile active with an October 18, 2026 expiration when checked on September 20, 2026 (Toronto time); it listed two provisioned iPhones. That is EAS metadata, not fresh Apple validation. The build and installation still require credentials that Apple accepts, a listed device, and compatible entitlements. It cannot register new devices, create missing profiles, or work around revoked/expired signing credentials.
-
-To build this temporary variant manually:
-
-```sh
-cd apps/mobile
-npx --yes eas-cli@latest build --platform ios --profile preview-existing-signing --non-interactive --no-wait
-```
-
-Once Apple membership is active, complete the one-time `credentials:configure-build --platform ios --profile preview` setup above, then set the GitHub repository **Actions variable** `IOS_EAS_BUILD_PROFILE` to `preview`. The next push to `main` will include the share extension again. This variable contains only a profile name, not a secret. CI accepts only `preview` and `preview-existing-signing`; Android always uses `preview`.
+CI uses the full `preview` profile for iOS, including the share extension. The temporary renewal-only profile and its feature flag have been removed; `IOS_EAS_BUILD_PROFILE` is no longer used. Complete signing setup before pushing these changes to `main`. The setup command prepares credentials only and does not start a build.
 
 ## Verification
 
