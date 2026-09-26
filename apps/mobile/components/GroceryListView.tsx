@@ -102,6 +102,8 @@ const isRowBeingEdited = (row: AggregatedItem | Item, editingId: string): boolea
 export interface GroceryListHandle {
   /** Bring the row holding `itemId` into view, if it is on screen at all. */
   scrollToItemId: (itemId: string) => void;
+  /** Add or focus the blank row at the end of the list. */
+  addItemAtEnd: () => void;
 }
 
 // --- COMPONENT PROPS ---
@@ -158,6 +160,12 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     const [showChecked, setShowChecked] = useState(false);
     // Same reasoning as the checked section: filed away, opened on request.
     const [showStaples, setShowStaples] = useState(false);
+
+    // UI-only identity for rows created by either add-at-the-end control. The
+    // flag deliberately does not live on Item: drafts persist and sync exactly
+    // like every other row, while this only decides where to draw them until
+    // the existing filing pass gives them a section.
+    const endDraftIdsRef = useRef<Set<string>>(new Set());
 
     // Whether to show, beside each item, which meal put it on the list. On by
     // default so the link to the plan is there to be seen, and remembered across
@@ -277,6 +285,13 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [items, editingId, mealNameLookup]);
 
+    useEffect(() => {
+        const stillUnfiled = new Set(items.filter(item => !item.isSection && !item.section).map(item => item.id));
+        for (const id of endDraftIdsRef.current) {
+            if (!stillUnfiled.has(id)) endDraftIdsRef.current.delete(id);
+        }
+    }, [items]);
+
     /**
      * The list as it is actually shown: everything still to be bought, and
      * separately everything already in the trolley.
@@ -291,10 +306,11 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
      * twice. A heading with nothing under it at all is one the user has just
      * written and not filled in yet, so that one stays.
      */
-    const { openRows, checkedRows, stapleRows } = useMemo(() => {
+    const { openRows, checkedRows, stapleRows, unfiledRows } = useMemo(() => {
         const open: (AggregatedItem | Item)[] = [];
         const checked: AggregatedItem[] = [];
         const staple: AggregatedItem[] = [];
+        const unfiled: AggregatedItem[] = [];
         const stapleSet = staples ?? EMPTY_STAPLES;
         // Backwards, so a heading is reached knowing what survived beneath it.
         let openBelow = 0;
@@ -307,8 +323,8 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 rowsBelow = 0;
                 continue;
             }
-            rowsBelow++;
             if (row.checked) {
+                rowsBelow++;
                 checked.push(row as AggregatedItem);
             } else if (
                 // Checked wins over staple: a row already in the trolley has
@@ -322,8 +338,28 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 && !isRowBeingEdited(row, editingId)
                 && isStapleRow(row.text, stapleSet)
             ) {
+                rowsBelow++;
                 staple.push(row as AggregatedItem);
+            } else if (
+                !row.section
+                && (
+                    !isRowBeingEdited(row, editingId)
+                    || (row as AggregatedItem).sourceIds.some(id => endDraftIdsRef.current.has(id))
+                )
+            ) {
+                // A newly added row is deliberately outside every aisle until
+                // its edit ends and the filing pass assigns one. Keeping it out
+                // of `open` prevents its trailing rank from making it look like
+                // it belongs to whichever heading happens to be last.
+                //
+                // A categorized row being renamed is the exception while its
+                // input is active: editing clears its stale `section`, but it
+                // should stay under the old heading rather than teleport to the
+                // end on the first keystroke. Once the edit ends it joins this
+                // unfiled area until it is re-filed.
+                unfiled.push(row as AggregatedItem);
             } else {
+                rowsBelow++;
                 openBelow++;
                 open.push(row);
             }
@@ -331,7 +367,8 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         open.reverse();
         checked.reverse();
         staple.reverse();
-        return { openRows: open, checkedRows: checked, stapleRows: staple };
+        unfiled.reverse();
+        return { openRows: open, checkedRows: checked, stapleRows: staple, unfiledRows: unfiled };
     }, [aggregatedItems, editingId, staples]);
 
     // Whether anything on the list came from a meal at all. The show-meals
@@ -429,32 +466,6 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     /** The scroll being asked for, so a failed measure can be retried once. */
     const pendingScrollRef = useRef<{ index: number; viewPosition: number; retried: boolean } | null>(null);
 
-    useImperativeHandle(ref, () => ({
-        scrollToItemId: (itemId: string) => {
-            // Rows are aggregates, not items: one row can stand for several
-            // item ids, and identical texts collapse into one. Look the id up
-            // through that mapping instead of assuming the two arrays line up —
-            // scrollToIndex throws on an out-of-range index, and an exception
-            // here blanks the screen. A checked row isn't in the list at all.
-            const index = openRows.findIndex(row =>
-                'sourceIds' in row ? (row as AggregatedItem).sourceIds.includes(itemId) : row.id === itemId);
-            if (index < 0 || index >= openRows.length) return;
-
-            const visible = viewableRangeRef.current;
-            // Already on screen: leave the list exactly where the user put it.
-            // Scrolling to a row you are looking at is movement for nothing, and
-            // it is movement the user reads as the app stuttering.
-            if (visible && index >= visible.first && index <= visible.last) return;
-
-            // Otherwise move as little as it takes: to the top edge for a row
-            // above the fold, to the bottom edge for one below it. Centring was
-            // a much larger movement than the situation ever called for.
-            const viewPosition = !visible ? 0.5 : index < visible.first ? 0 : 1;
-            pendingScrollRef.current = { index, viewPosition, retried: false };
-            flatListRef.current?.scrollToIndex?.({ index, animated: true, viewPosition });
-        },
-    }), [openRows]);
-
     const assignRef = useCallback((id: string) => (ref: TextInput | null) => {
         inputRefs.current[id] = ref;
     }, [inputRefs]);
@@ -496,6 +507,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         if (!currentItem) {
             const blank = findBlankRow();
             if (blank) {
+                endDraftIdsRef.current.add(blank.id);
                 // Already the row being typed into: setEditingId would be a
                 // no-op, the screen's focus effect would never run, and the tap
                 // would do nothing at all. Ask for the keyboard directly.
@@ -504,6 +516,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 return;
             }
             const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: false };
+            endDraftIdsRef.current.add(newItem.id);
             setItems(prev => [...prev, newItem]);
             setEditingId(newItem.id);
             markDirty();
@@ -519,10 +532,47 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             ? currentRank.between(nextRank)
             : currentRank.genNext();
         const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: newRank.toString(), isSection: false };
+        endDraftIdsRef.current.add(newItem.id);
         setItems(prev => [...prev, newItem]);
         setEditingId(newItem.id);
         markDirty();
     };
+
+    useImperativeHandle(ref, () => ({
+        addItemAtEnd: () => addItemAfter(),
+        scrollToItemId: (itemId: string) => {
+            // Rows are aggregates, not items: one row can stand for several
+            // item ids, and identical texts collapse into one. Look the id up
+            // through that mapping instead of assuming the two arrays line up —
+            // scrollToIndex throws on an out-of-range index, and an exception
+            // here blanks the screen. A checked row isn't in the list at all.
+            const index = openRows.findIndex(row =>
+                'sourceIds' in row ? (row as AggregatedItem).sourceIds.includes(itemId) : row.id === itemId);
+
+            // Unfiled rows live in the footer, outside the draggable data. The
+            // keyboard-aware measurement can still move one only when it is
+            // genuinely obscured, without forcing the list to its end on every
+            // keystroke.
+            if (index < 0) {
+                const isUnfiled = unfiledRows.some(row => row.sourceIds.includes(itemId));
+                if (isUnfiled) keyboard.keepFocusedInputVisible();
+                return;
+            }
+
+            const visible = viewableRangeRef.current;
+            // Already on screen: leave the list exactly where the user put it.
+            // Scrolling to a row you are looking at is movement for nothing, and
+            // it is movement the user reads as the app stuttering.
+            if (visible && index >= visible.first && index <= visible.last) return;
+
+            // Otherwise move as little as it takes: to the top edge for a row
+            // above the fold, to the bottom edge for one below it. Centring was
+            // a much larger movement than the situation ever called for.
+            const viewPosition = !visible ? 0.5 : index < visible.first ? 0 : 1;
+            pendingScrollRef.current = { index, viewPosition, retried: false };
+            flatListRef.current?.scrollToIndex?.({ index, animated: true, viewPosition });
+        },
+    }));
 
     // Return on a row with nothing in it is the user finishing, not asking for
     // one more empty row. The empty one they are on gets cleaned up too.
@@ -907,7 +957,14 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     <View style={styles.itemBody}>
                         <TextInput
                             accessibilityLabel="Grocery item" ref={assignRef(baseItemId)} value={aggItem.text} style={[styles.itemInput, aggItem.checked && styles.checked]}
-                            onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => setEditingId(baseItemId)}
+                            onChangeText={text => updateAggregatedText(aggItem, text)} onFocus={() => {
+                                // A draft restored from sync has no in-memory
+                                // marker yet. Capture it before typing so the
+                                // first character cannot move it under the last
+                                // aisle heading.
+                                if (!aggItem.section) aggItem.sourceIds.forEach(id => endDraftIdsRef.current.add(id));
+                                setEditingId(baseItemId);
+                            }}
                             onBlur={() => handleItemBlur(aggItem)} onSubmitEditing={() => submitRow(aggItem)}
                             onKeyPress={({ nativeEvent }) => { if (nativeEvent.key === 'Backspace' && aggItem.text === '') { deleteItem(aggItem, true); } }}
                             returnKeyType="next" blurOnSubmit={false}
@@ -941,7 +998,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         [renderRow]
     );
 
-    const toBuyCount = openRows.filter(item => !item.isSection && item.text?.trim()).length;
+    const toBuyCount = [...openRows, ...unfiledRows].filter(item => !item.isSection && item.text?.trim()).length;
     const boughtCount = checkedRows.filter(item => item.text?.trim()).length;
     const shoppingCount = toBuyCount + boughtCount;
     const { reduceMotion } = useGlassPreferences();
@@ -1146,6 +1203,11 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                                     {showChecked && checkedRows.map(row => renderRow(row))}
                                 </View>
                             )}
+                            {unfiledRows.length > 0 && (
+                                <View style={styles.unfiledItems}>
+                                    {unfiledRows.map(row => renderRow(row))}
+                                </View>
+                            )}
                             {/* The blank space under the last row is still the
                                 list, and tapping it is how you say "another
                                 one". addItemAfter hands back the empty row
@@ -1195,6 +1257,9 @@ const styles = StyleSheet.create({
     // rows above it instead of shifting left once it is put away.
     dragIconIdle: { opacity: 0 },
     checkedSection: { marginTop: 17, paddingTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
+    // A quiet boundary is enough to show that a draft is not part of the final
+    // named aisle; it does not need a user-facing "Uncategorized" category.
+    unfiledItems: { marginTop: 17, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     checkedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 12 },
     stapleHint: { fontSize: 12, color: inkFaint, lineHeight: 17, paddingHorizontal: 15, paddingBottom: 10 },
     stapleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, paddingVertical: 11 },

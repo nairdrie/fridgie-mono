@@ -41,6 +41,7 @@ describe('recipe import HTTP contract', () => {
     expect(frames).toHaveBeenCalledTimes(1);
     const prompt = model.mock.calls[0]![0] as { system: string; user: { type: string; text?: string }[] };
     expect(prompt.system).toContain('Never reconstruct a familiar recipe');
+    expect(prompt.system).toContain('preserve the measurement unit used by the source');
     expect(prompt.user.at(-1)?.text).toContain('1 can chickpeas');
   });
   test('passes available frames to the video model in chronological order', async () => {
@@ -88,6 +89,38 @@ describe('recipe import HTTP contract', () => {
     const { request } = setup({ fetchPage: async () => html, completeJson: async <T>() => recipe() as T });
     const result = await (await request('https://example.com/recipe')).json();
     expect(result).toMatchObject({ name: 'Source title', photoURL: 'https://example.com/dish.jpg', servings: 3, sourceAuthor: 'Source Cook' });
+  });
+  test('canonicalizes source spelling without converting imported tsp, tbsp or cups', async () => {
+    const html = `<script type="application/ld+json">${JSON.stringify({
+      '@type': 'Recipe',
+      name: 'Source units',
+      recipeIngredient: ['1 tablespoon olive oil', '2 teaspoons lemon juice', '3 cups spinach'],
+      recipeInstructions: ['Toss together.'],
+    })}</script>`;
+    let prompt: any;
+    const { request } = setup({
+      fetchPage: async () => html,
+      completeJson: async <T>(options: unknown) => {
+        prompt = options;
+        return {
+          ...recipe(),
+          ingredients: [
+            { name: 'olive oil', quantity: '1 tablespoon' },
+            { name: 'lemon juice', quantity: '2 teaspoons' },
+            { name: 'spinach', quantity: '3 cups' },
+          ],
+        } as T;
+      },
+    });
+
+    const result = await (await request('https://example.com/source-units')).json();
+    expect(prompt.user).toContain('1 tablespoon olive oil');
+    expect(prompt.system).toContain('preserve the measurement unit used by the source');
+    expect(result.ingredients.map((ingredient: any) => ingredient.quantity)).toEqual([
+      '1 tbsp',
+      '2 tsp',
+      '3 cup',
+    ]);
   });
   test('preserves TikTok caption, cover, canonical watch URL and creator attribution', async () => {
     const { request } = setup({ collectTikTokSource: async () => ({ caption: '1 can chickpeas. Toss with 2 tbsp lemon juice.', author: 'Fixture Cook', authorHandle: 'fixture_cook', videoId: '7311982', transcript: '', photoURL: 'https://p16.tiktokcdn.com/cover.jpg', videoUrl: null, cookieHeader: null, durationSec: null }) });

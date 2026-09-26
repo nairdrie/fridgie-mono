@@ -938,26 +938,6 @@ export default function HomeScreen() {
         await handleToggleCookbookById(meal.recipeId);
     };
     
-    const handleAddItem = (isSection = false) => {
-    if (!selectedList) return;
-
-    // An empty row already waiting for text IS the row being asked for. Without
-    // this, every tap stacked up another unlabelled checkbox.
-    const blank = items.find(i => !i.isSection && !i.mealId && (i.text ?? '').trim() === '');
-    if (!isSection && blank) {
-        // Already the row being typed into: setEditingId would be a no-op and
-        // the focus effect would never run, so ask for the keyboard directly.
-        if (editingId === blank.id) inputRefs.current[blank.id]?.focus?.();
-        else setEditingId(blank.id);
-        return;
-    }
-
-    const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: isSection };
-    setItems([...items, newItem]);
-    setEditingId(newItem.id);
-    markDirty();
-};
-
     useFocusEffect(
         useCallback(() => {
             const checkForPendingAction = async () => {
@@ -1127,61 +1107,50 @@ export default function HomeScreen() {
                 scroll pane jumped down and then back up under the user's thumb. */}
             <SyncStatus engine={engine} />
 
-            {showFab && isFabMenuOpen && (
+            {showFab && selectedView === ListView.MealPlan && isFabMenuOpen && (
                 <Pressable style={styles.backdrop} onPress={() => setIsFabMenuOpen(false)} accessibilityLabel="Close add menu" />
             )}
 
             {showFab && <View pointerEvents="box-none" style={[styles.bottomActionContainer, { bottom: Math.max(insets.bottom, 14) + 96 }]}>
-                <View pointerEvents="box-none" style={[styles.fabContainer, isFabMenuOpen && styles.fabContainerOpen]}>
-                    {isFabMenuOpen && (
+                <View pointerEvents="box-none" style={[styles.fabContainer, selectedView === ListView.MealPlan && isFabMenuOpen && styles.fabContainerOpen]}>
+                    {selectedView === ListView.MealPlan && isFabMenuOpen && (
+                        // Ordered by expected use: the nearest to the FAB is the
+                        // quickest action, the furthest is the most involved.
                         <>
-                            {selectedView === ListView.MealPlan ? (
-                                // Ordered by expected use: the nearest to the FAB is the
-                                // quickest action, the furthest is the most involved.
-                                <>
-                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
-                                        <GlassPressable style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="sparkles" size={20} color={primary} style={styles.secondaryButtonIcon}/>
-                                            <Text style={styles.secondaryButtonText}>Suggest Meal</Text>
-                                        </GlassPressable>
-                                    </Animated.View>
-                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                                        <GlassPressable style={styles.secondaryButton} onPress={() => { setCookbookModalVisible(true); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="book-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
-                                            <Text style={styles.secondaryButtonText}>From Cookbook</Text>
-                                        </GlassPressable>
-                                    </Animated.View>
-                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                                        <GlassPressable style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="add-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
-                                            <Text style={styles.secondaryButtonText}>New Meal</Text>
-                                        </GlassPressable>
-                                    </Animated.View>
-                                </>
-                            ) : (
-                                <>
-                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
-                                        <GlassPressable style={styles.secondaryButton} onPress={() => { handleAddItem(true); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="reorder-two-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
-                                            <Text style={styles.secondaryButtonText}>Category</Text>
-                                        </GlassPressable>
-                                    </Animated.View>
-                                    <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
-                                        <GlassPressable style={styles.secondaryButton} onPress={() => { handleAddItem(); setIsFabMenuOpen(false); }}>
-                                            <Ionicons name="add-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
-                                            <Text style={styles.secondaryButtonText}>Item</Text>
-                                        </GlassPressable>
-                                    </Animated.View>
-                                </>
-                            )}
+                            <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
+                                <GlassPressable style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
+                                    <Ionicons name="sparkles" size={20} color={primary} style={styles.secondaryButtonIcon}/>
+                                    <Text style={styles.secondaryButtonText}>Suggest Meal</Text>
+                                </GlassPressable>
+                            </Animated.View>
+                            <Animated.View style={[styles.secondaryFabContainer, fabStyle1]}>
+                                <GlassPressable style={styles.secondaryButton} onPress={() => { setCookbookModalVisible(true); setIsFabMenuOpen(false); }}>
+                                    <Ionicons name="book-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
+                                    <Text style={styles.secondaryButtonText}>From Cookbook</Text>
+                                </GlassPressable>
+                            </Animated.View>
+                            <Animated.View style={[styles.secondaryFabContainer, fabStyle0]}>
+                                <GlassPressable style={styles.secondaryButton} onPress={() => { handleAddMeal(); setIsFabMenuOpen(false); }}>
+                                    <Ionicons name="add-outline" size={20} color={primary} style={styles.secondaryButtonIcon}/>
+                                    <Text style={styles.secondaryButtonText}>New Meal</Text>
+                                </GlassPressable>
+                            </Animated.View>
                         </>
                     )}
-                    <GlassPressable style={styles.fab} onPress={() => setIsFabMenuOpen(prev => !prev)} accessibilityLabel={isFabMenuOpen ? 'Close add menu' : selectedView === ListView.MealPlan ? 'Add to meal plan' : 'Add to shopping list'} accessibilityState={{ expanded: isFabMenuOpen }}>
+                    <GlassPressable
+                        style={styles.fab}
+                        onPress={() => {
+                            if (selectedView === ListView.MealPlan) setIsFabMenuOpen(prev => !prev);
+                            else listRef.current?.addItemAtEnd();
+                        }}
+                        accessibilityLabel={selectedView === ListView.MealPlan ? (isFabMenuOpen ? 'Close add menu' : 'Add to meal plan') : 'Add item'}
+                        accessibilityState={selectedView === ListView.MealPlan ? { expanded: isFabMenuOpen } : undefined}
+                    >
                         <View pointerEvents="none" style={styles.fabShine} />
                         <Animated.View style={fabRotation}>
                             <Ionicons name="add" size={25} color="white" />
                         </Animated.View>
-                        <Text style={styles.fabText}>{isFabMenuOpen ? 'Close' : selectedView === ListView.MealPlan ? 'Add meal' : 'Add item'}</Text>
+                        <Text style={styles.fabText}>{selectedView === ListView.MealPlan && isFabMenuOpen ? 'Close' : selectedView === ListView.MealPlan ? 'Add meal' : 'Add item'}</Text>
                     </GlassPressable>
                 </View>
             </View>}

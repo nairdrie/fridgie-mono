@@ -13,6 +13,7 @@ import { RECIPE_CATEGORIES } from '@fridgie/shared/recipeCategory';
 export const quantityFormatRules = `
 Quantity format rules (apply to every ingredient's "quantity" field):
 - Express each quantity as "<number> <unit>", where the unit is one of: g, kg, oz, lb, ml, l, tsp, tbsp, cup — or a bare number for countable items (e.g. "2" for 2 eggs, with the ingredient name "eggs").
+- When extracting a recipe, preserve the measurement unit used by the source. Canonicalize its spelling only: "1 tablespoon" -> "1 tbsp", "2 teaspoons" -> "2 tsp", "3 cups" -> "3 cup". Never convert a source unit to an equivalent unit; for example, do not turn tsp, tbsp, or cup into ml or l, and do not turn oz or lb into g or kg.
 - Convert fractions (including unicode like ½) to decimals: "1 1/2 cups" -> "1.5 cup", "½ tsp" -> "0.5 tsp".
 - PRESERVE ranges as a range: "2-3 cloves" -> "2-3 clove", "5 to 10 cloves" -> "5-10 clove". Do NOT collapse a range to one end of it.
 - Never put a preparation into the quantity. "1 cup butter, melted" has quantity "1 cup", name "butter" — the melting becomes an instruction step.
@@ -72,7 +73,10 @@ const ingredientSchema = {
   type: 'object',
   properties: {
     name: { type: 'string', description: 'The ingredient alone, with no preparation or quantity.' },
-    quantity: { type: 'string', description: "e.g. '1.5 cup', '200 g', '2-3 clove', '2', 'to taste'." },
+    quantity: {
+      type: 'string',
+      description: "Preserve an imported source's unit, canonicalizing spelling only (tablespoon -> tbsp, teaspoon -> tsp, cups -> cup); never convert it to an equivalent unit. Examples: '1.5 cup', '200 g', '2-3 clove', '2', 'to taste'.",
+    },
   },
   required: ['name', 'quantity'],
   additionalProperties: false,
