@@ -176,6 +176,10 @@ const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisibl
                         <Ionicons name="open-outline" size={16} color={primary}></Ionicons>
                         <Text style={styles.editMealPreferencesText}>Edit Meal Preferences</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity style={[styles.editMealPreferences, { marginTop: 10 }]} onPress={() => onNavigate('/connect-claude')}>
+                        <Ionicons name="sparkles-outline" size={16} color={primary}></Ionicons>
+                        <Text style={styles.editMealPreferencesText}>Connect Claude</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity style={[styles.primaryButton, { marginTop: 30, width: '100%' }]} onPress={() => {
                         // Push anything still owed to the server BEFORE signing
                         // out, then wipe the on-device mirror. Both halves

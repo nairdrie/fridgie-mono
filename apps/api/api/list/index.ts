@@ -4,41 +4,11 @@ import { LexoRank } from 'lexorank'
 import { v4 as uuid } from 'uuid'
 import { groupAuth } from '@/middleware/groupAuth'
 import { auth } from '@/middleware/auth'
-import { addWeeks, format, startOfWeek } from 'date-fns'
-import { fromZonedTime, toZonedTime } from 'date-fns-tz';
+import { localWeekKeys, matchesWeek } from '@/utils/weekLists'
 
 const route = new Hono()
 
 route.use('*', auth, groupAuth)
-
-/**
- * The Sunday starting the caller's local week, as a bare `yyyy-MM-dd` key.
- *
- * weekStart used to be persisted as a UTC *instant* (`fromZonedTime(...)
- * .toISOString()`). For every zone east of Greenwich that instant falls on the
- * previous UTC day, so the client — which reads `weekStart.slice(0, 10)` as a
- * local date — saw Saturday and shifted the entire app back one week. Keeping
- * the value in local calendar fields and never round-tripping through UTC also
- * makes the arithmetic immune to DST transitions across UTC+0.
- */
-const localWeekKeys = (now: Date, tz: string) => {
-  const zonedNow = toZonedTime(now, tz)
-  const thisWeekLocal = startOfWeek(zonedNow, { weekStartsOn: 0 })
-  const nextWeekLocal = addWeeks(thisWeekLocal, 1)
-  return {
-    thisWeek: format(thisWeekLocal, 'yyyy-MM-dd'),
-    nextWeek: format(nextWeekLocal, 'yyyy-MM-dd'),
-    // What the old code would have written for the same week, so pre-existing
-    // lists are still recognised and we don't create duplicates on rollout.
-    legacyThisWeek: fromZonedTime(thisWeekLocal, tz).toISOString().substring(0, 10),
-    legacyNextWeek: fromZonedTime(nextWeekLocal, tz).toISOString().substring(0, 10),
-  }
-}
-
-const matchesWeek = (stored: unknown, ...keys: string[]) => {
-  const value = typeof stored === 'string' ? stored : ''
-  return keys.some((k) => value.startsWith(k))
-}
 
 // The `createListForWeek` helper function is no longer needed
 // as all list creation logic is now handled atomically inside the transaction.

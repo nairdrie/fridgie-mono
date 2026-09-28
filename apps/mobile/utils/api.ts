@@ -575,6 +575,52 @@ export const getMealPreferences = async (): Promise<MealPreferences> => {
   return res.json()
 };
 
+// ─────── CLAUDE CONNECTOR ────────────────────────────────────────────────────
+
+/**
+ * The URL a user pastes into Claude as a custom connector. The connector is
+ * served by this same API, at the root rather than under /api, because that is
+ * where MCP clients look for its sign-in metadata.
+ */
+export const CLAUDE_CONNECTOR_URL = `${BASE_URL.replace(/\/api\/?$/, '')}/mcp`
+
+export interface ClaudeLinkCode {
+  /** `ABCD-EFGH` — what the connector's sign-in page asks for. */
+  code: string;
+  expiresAt: string;
+}
+
+export interface ClaudeConnection {
+  id: string;
+  clientName: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/**
+ * A one-time code that links whichever app is signing in to this account.
+ * `groupId` is the household to add things to by default, and the timezone
+ * decides what "this week" means when Claude asks for it.
+ */
+export async function createClaudeLinkCode(groupId?: string): Promise<ClaudeLinkCode> {
+  const res = await authorizedFetch(`${BASE_URL}/claude/link-code`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ groupId, timezone: deviceTimeZone() }),
+  });
+  return res.json();
+}
+
+export async function getClaudeConnections(): Promise<ClaudeConnection[]> {
+  const res = await authorizedFetch(`${BASE_URL}/claude/connections`);
+  const body = await res.json();
+  return Array.isArray(body) ? body : [];
+}
+
+export async function disconnectClaude(connectionId: string): Promise<void> {
+  await authorizedFetch(`${BASE_URL}/claude/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE' }, [404]);
+}
+
 export async function getExploreContent(): Promise<ExploreContent> {
   const res = await authorizedFetch(`${BASE_URL}/explore`);
   return res.json();
