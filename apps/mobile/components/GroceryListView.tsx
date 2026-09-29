@@ -73,6 +73,9 @@ const LIST_BOTTOM_SPACE = 190;
 const aggregationKey = (item: Item): string =>
     (item.text ?? '').trim().toLowerCase() || `__blank-${item.id}__`;
 
+/** The staples card's accent: the app's warm secondary, darkened for text. */
+const stapleAccent = '#B66D4E';
+
 /** How long the "moved to" note stays up, and how long the row it names glows. */
 const FILED_TOAST_MS = 4500;
 const FILED_FLASH_MS = 1600;
@@ -1255,20 +1258,40 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                                 line. */}
                             {stapleRows.length > 0 && (
                                 <View style={styles.stapleSection}>
+                                    {/* Tinted and titled like a card of
+                                        its own, with what is in it spelled
+                                        out while collapsed: these are easy to
+                                        scroll past, and skipping them is how
+                                        you get home without the rice. */}
                                     <Pressable
-                                        style={styles.checkedHeader}
+                                        style={({ pressed }) => [styles.stapleHeader, pressed && styles.stapleHeaderPressed]}
                                         onPress={() => setShowStaples(prev => !prev)}
                                         accessibilityRole="button"
                                         accessibilityState={{ expanded: showStaples }}
-                                        accessibilityLabel={`You usually have these, ${stapleRows.length} item${stapleRows.length === 1 ? '' : 's'}`}
+                                        accessibilityLabel={`You usually have these, ${stapleRows.length} item${stapleRows.length === 1 ? '' : 's'}: ${stapleRows.map(row => row.text).join(', ')}`}
+                                        accessibilityHint={showStaples ? 'Hides them' : "Shows them, so you can add back anything you're out of"}
                                     >
+                                        <View style={styles.stapleIcon}>
+                                            <Ionicons name="home" size={15} color={stapleAccent} />
+                                        </View>
+                                        <View style={styles.stapleHeaderBody}>
+                                            <View style={styles.stapleTitleRow}>
+                                                <Text style={styles.stapleTitle}>You usually have these</Text>
+                                                <Text style={styles.stapleCount}>{stapleRows.length}</Text>
+                                            </View>
+                                            {!showStaples && (
+                                                <Text style={styles.staplePreview} numberOfLines={1}>
+                                                    {stapleRows.slice(0, 4).map(row => row.text).join(', ')}
+                                                    {stapleRows.length > 4 ? ` +${stapleRows.length - 4}` : ''}
+                                                    {' · Out of any?'}
+                                                </Text>
+                                            )}
+                                        </View>
                                         <Ionicons
-                                            name={showStaples ? 'chevron-down' : 'chevron-forward'}
-                                            size={14}
-                                            color="#8e8e93"
+                                            name={showStaples ? 'chevron-up' : 'chevron-down'}
+                                            size={16}
+                                            color={stapleAccent}
                                         />
-                                        <Text style={styles.checkedHeaderText}>You usually have these</Text>
-                                        <Text style={styles.checkedCount}>{stapleRows.length}</Text>
                                     </Pressable>
                                     {showStaples && (
                                         <>
@@ -1290,7 +1313,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                                                     accessibilityRole="button"
                                                     accessibilityLabel={`Add ${row.text} back to the list`}
                                                 >
-                                                    <Ionicons name="add-circle-outline" size={20} color={inkFaint} />
+                                                    <Ionicons name="add-circle-outline" size={21} color={stapleAccent} />
                                                     <Text style={styles.stapleText} numberOfLines={1}>{row.text}</Text>
                                                     {!!row.totalQuantity && (
                                                         <Text style={styles.stapleQuantity}>{row.totalQuantity}</Text>
@@ -1437,15 +1460,25 @@ const styles = StyleSheet.create({
     // Kept in the layout rather than removed, so a checked row lines up with the
     // rows above it instead of shifting left once it is put away.
     dragIconIdle: { opacity: 0 },
-    stapleSection: { marginTop: 4, marginBottom: 8, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)' },
+    // Warm, where the rest of the list is green and white: set apart enough to
+    // be noticed on the way past, without shouting like a warning would.
+    stapleSection: { marginTop: 4, marginBottom: 10, borderRadius: 17, backgroundColor: '#FBEFE8', borderWidth: 1, borderColor: 'rgba(233,162,139,0.4)', overflow: 'hidden' },
+    stapleHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingLeft: 12, paddingRight: 14, paddingVertical: 11 },
+    stapleHeaderPressed: { backgroundColor: 'rgba(233,162,139,0.12)' },
+    stapleIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4DDD0' },
+    stapleHeaderBody: { flex: 1 },
+    stapleTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+    stapleTitle: { fontSize: 14, fontWeight: '600', color: ink },
+    stapleCount: { fontSize: 11, fontWeight: '600', color: stapleAccent, backgroundColor: '#F4DDD0', borderRadius: 9, paddingHorizontal: 6, paddingVertical: 2, overflow: 'hidden' },
+    staplePreview: { fontSize: 12, color: inkMuted, marginTop: 2 },
     checkedSection: { marginTop: 17, paddingTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     // A quiet boundary is enough to show that a draft is not part of the final
     // named aisle; it does not need a user-facing "Uncategorized" category.
     unfiledItems: { marginTop: 17, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     checkedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 12 },
-    stapleHint: { fontSize: 12, color: inkFaint, lineHeight: 17, paddingHorizontal: 15, paddingBottom: 10 },
-    stapleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, paddingVertical: 11 },
-    stapleText: { flex: 1, fontSize: 16, color: inkMuted },
+    stapleHint: { fontSize: 12, color: inkMuted, lineHeight: 17, paddingHorizontal: 15, paddingBottom: 10 },
+    stapleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(233,162,139,0.45)' },
+    stapleText: { flex: 1, fontSize: 16, color: ink },
     stapleQuantity: { fontSize: 13, color: inkFaint },
     checkedHeaderText: { fontSize: 13, fontWeight: '600', color: inkMuted },
     checkedCount: { fontSize: 11, color: primary, backgroundColor: accentSoft, borderRadius: 9, paddingHorizontal: 6, paddingVertical: 2 },
