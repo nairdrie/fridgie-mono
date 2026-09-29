@@ -22,6 +22,7 @@ import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
+    AccessibilityInfo,
     Alert,
     Keyboard,
     Pressable,
@@ -33,8 +34,9 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import Animated, { ReduceMotion, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { ReduceMotion, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { GlassPressable, GlassSurface, useGlassPreferences } from './ui/Glass';
+import FiledToast, { FiledToastInfo } from './FiledToast';
 import QuantityEditorModal from './QuantityEditorModal';
 import SwipeToDeleteRow from './SwipeToDeleteRow';
 
@@ -70,6 +72,29 @@ const LIST_BOTTOM_SPACE = 190;
  */
 const aggregationKey = (item: Item): string =>
     (item.text ?? '').trim().toLowerCase() || `__blank-${item.id}__`;
+
+/** How long the "moved to" note stays up, and how long the row it names glows. */
+const FILED_TOAST_MS = 4500;
+const FILED_FLASH_MS = 1600;
+
+/**
+ * A soft glow over a row that has just been filed, so the eye can find where
+ * it went. Keyed by the filing pass, so filing the same row again replays it.
+ */
+const FiledFlash = () => {
+    const { reduceMotion } = useGlassPreferences();
+    const opacity = useSharedValue(0);
+    useEffect(() => {
+        opacity.value = reduceMotion
+            ? withSequence(withTiming(1, { duration: 0 }), withDelay(FILED_FLASH_MS - 400, withTiming(0, { duration: 400 })))
+            : withSequence(
+                withTiming(1, { duration: 220 }),
+                withDelay(FILED_FLASH_MS - 720, withTiming(0, { duration: 500 })),
+            );
+    }, [opacity, reduceMotion]);
+    const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+    return <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.filedFlash, style]} />;
+};
 
 /** The group a row belonged to when the caret arrived in it. See `editPinRef`. */
 interface EditPin {
@@ -166,6 +191,31 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // like every other row, while this only decides where to draw them until
     // the existing filing pass gives them a section.
     const endDraftIdsRef = useRef<Set<string>>(new Set());
+
+    // Rows the user added or renamed on THIS device that the filing pass has
+    // not answered yet. Filing moves a row out of the unfiled area and up under
+    // a heading that may be off screen, which reads as the row disappearing —
+    // so when one of these picks up a section, the list says where it went.
+    // Rows filed for a housemate, or a meal's ingredients, arrive quietly.
+    //
+    // Each id maps to the aisle it was in before the edit, so a rename that
+    // lands back where it already was doesn't announce a move that never was.
+    const awaitingFilingRef = useRef<Map<string, string | undefined>>(new Map());
+    const [filedToast, setFiledToast] = useState<(FiledToastInfo & { keys: string[] }) | null>(null);
+    // Ids just filed, for the glow that shows where they landed.
+    const [flashIds, setFlashIds] = useState<ReadonlySet<string>>(EMPTY_STAPLES);
+    const filedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => {
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    }, []);
+    const awaitFiling = (ids: readonly string[]) => {
+        const awaiting = awaitingFilingRef.current;
+        for (const id of ids) {
+            if (!awaiting.has(id)) awaiting.set(id, items.find(item => item.id === id)?.section);
+        }
+    };
 
     // Whether to show, beside each item, which meal put it on the list. On by
     // default so the link to the plan is there to be seen, and remembered across
@@ -290,7 +340,83 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         for (const id of endDraftIdsRef.current) {
             if (!stillUnfiled.has(id)) endDraftIdsRef.current.delete(id);
         }
+
+        const awaiting = awaitingFilingRef.current;
+        if (awaiting.size === 0) return;
+        const byId = new Map(items.map(item => [item.id, item]));
+        const filed: Item[] = [];
+        for (const [id, sectionBefore] of awaiting) {
+            const item = byId.get(id);
+            // Deleted, or ticked off before it was filed: nothing to point at.
+            if (!item || item.isSection || item.checked) awaiting.delete(id);
+            else if (item.section) {
+                awaiting.delete(id);
+                if (item.section !== sectionBefore) filed.push(item);
+            }
+        }
+        if (filed.length === 0) return;
+
+        // One note per filing pass, counted in rows as the list shows them —
+        // two sources that aggregate into one row are one item moved.
+        const byKey = new Map<string, Item>();
+        for (const item of filed) {
+            const key = aggregationKey(item);
+            if (!byKey.has(key)) byKey.set(key, item);
+        }
+        const moved = [...byKey.values()];
+        const sections = new Set(moved.map(item => item.section!));
+        const itemLabel = moved.length === 1 ? (moved[0].text ?? '').trim() : `${moved.length} items`;
+        const section = sections.size === 1 ? moved[0].section! : null;
+
+        setFiledToast(prev => ({
+            key: (prev?.key ?? 0) + 1,
+            itemLabel,
+            section,
+            count: moved.length,
+            keys: [...byKey.keys()],
+        }));
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        filedToastTimerRef.current = setTimeout(() => setFiledToast(null), FILED_TOAST_MS);
+
+        setFlashIds(new Set(filed.map(item => item.id)));
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = setTimeout(() => setFlashIds(EMPTY_STAPLES), FILED_FLASH_MS);
+
+        AccessibilityInfo.announceForAccessibility(
+            section ? `${itemLabel} moved to ${section}` : `${itemLabel} sorted into aisles`,
+        );
     }, [items]);
+
+    /**
+     * The ✕ on the "moved to" note: the user would rather the row stayed where
+     * they typed it. Every row with that text comes back together — they are
+     * one row on screen — and lands at the end, in the unfiled area, marked so
+     * the filing pass leaves it there.
+     */
+    const unfileFromToast = () => {
+        if (!filedToast) return;
+        const keys = new Set(filedToast.keys);
+        Haptics.selectionAsync().catch(() => {});
+        setItems(prev => {
+            let rank = nextListRank(prev);
+            const updated = prev.map(item => {
+                if (item.isSection || !keys.has(aggregationKey(item))) return item;
+                const next: Item = { ...item, section: undefined, keepUnfiled: true, listOrder: rank.toString() };
+                rank = rank.genNext();
+                return next;
+            });
+            // Taking the only row out of an aisle leaves its heading over
+            // nothing, the same as deleting it would.
+            return dropEmptiedSections(prev, updated);
+        });
+        // A filing answer already in flight was worked out with this row in its
+        // aisle and would put it straight back.
+        onManualReorder?.();
+        markDirty();
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        setFiledToast(null);
+        setFlashIds(EMPTY_STAPLES);
+    };
 
     /**
      * The list as it is actually shown: everything still to be bought, and
@@ -481,8 +607,9 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // The aisle on file was decided from the old text, so it goes with it — the
     // list re-files the row once the edit settles.
     const updateAggregatedText = (aggItem: AggregatedItem, text: string) => {
+        awaitFiling(aggItem.sourceIds);
         setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id)
-            ? { ...item, text, section: undefined }
+            ? { ...item, text, section: undefined, keepUnfiled: undefined }
             : item));
         markDirty();
     };
@@ -508,6 +635,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             const blank = findBlankRow();
             if (blank) {
                 endDraftIdsRef.current.add(blank.id);
+                awaitFiling([blank.id]);
                 // Already the row being typed into: setEditingId would be a
                 // no-op, the screen's focus effect would never run, and the tap
                 // would do nothing at all. Ask for the keyboard directly.
@@ -517,6 +645,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             }
             const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: false };
             endDraftIdsRef.current.add(newItem.id);
+            awaitFiling([newItem.id]);
             setItems(prev => [...prev, newItem]);
             setEditingId(newItem.id);
             markDirty();
@@ -533,6 +662,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             : currentRank.genNext();
         const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: newRank.toString(), isSection: false };
         endDraftIdsRef.current.add(newItem.id);
+        awaitFiling([newItem.id]);
         setItems(prev => [...prev, newItem]);
         setEditingId(newItem.id);
         markDirty();
@@ -650,7 +780,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 prev.map(i => {
                     if (!aggItem.sourceIds.includes(i.id)) return i;
                     // Text applies to every source; a typed-in quantity only to the base.
-                    const updated = { ...i, text: newText, section: undefined };
+                    const updated = { ...i, text: newText, section: undefined, keepUnfiled: undefined };
                     if (i.id === baseItemId && quantity) updated.quantity = quantity;
                     return updated;
                 })
@@ -986,12 +1116,13 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     )}
                 </View>
             </SwipeToDeleteRow>
+            {aggItem.sourceIds.some(id => flashIds.has(id)) && <FiledFlash key={filedToast?.key} />}
             </View>
         );
         // `showMealTags` is read inside a row, so it belongs here: without it the
         // memoized row keeps a stale closure and the tags don't appear or vanish
         // until something else (an edit, a check) forces the list to redraw.
-    }, [items, editingId, aggregatedItems, showMealTags]);
+    }, [items, editingId, aggregatedItems, showMealTags, flashIds, filedToast?.key]);
 
     const renderItem = useCallback(
         ({ item, drag, isActive }: RenderItemParams<AggregatedItem | Item>) => renderRow(item, drag, isActive),
@@ -1229,6 +1360,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     }
                 />
             )}
+            <FiledToast toast={filedToast} onUnfile={unfileFromToast} />
             <QuantityEditorModal
                 isVisible={isModalVisible} item={selectedItem}
                 onSave={handleSaveQuantity} onClose={closeQuantityEditor}
@@ -1249,6 +1381,7 @@ const styles = StyleSheet.create({
     tapToAdd: { flexGrow: 1, minHeight: 120 },
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingRight: 12, minHeight: 55, backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 17, borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)' },
     swipeRowFrame: { borderRadius: 17, overflow: 'hidden', marginBottom: 3 },
+    filedFlash: { borderRadius: 17, borderWidth: 1.5, borderColor: 'rgba(35, 120, 94, 0.35)', backgroundColor: 'rgba(35, 120, 94, 0.10)' },
     sectionRow: { backgroundColor: 'transparent', borderColor: 'transparent', paddingTop: 18, paddingBottom: 8, minHeight: 48, marginBottom: 0 },
     checkboxChecked: { backgroundColor: primary, borderColor: primary },
     dragHandle: { paddingLeft: 10, paddingRight: 9, paddingVertical: 5 },

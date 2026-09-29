@@ -111,7 +111,7 @@ function MealCard({
             setAllItems(prev =>
                 prev.map(i =>
                     i.id === item.id
-                        ? { ...i, text: newText, quantity: quantity || i.quantity, section: undefined }
+                        ? { ...i, text: newText, quantity: quantity || i.quantity, section: undefined, keepUnfiled: undefined }
                         : i
                 )
             );
@@ -138,7 +138,7 @@ function MealCard({
     // decided from the old text — drop it so the list re-files this row once the
     // edit settles.
     const handleUpdateIngredientText = (id: string, text: string) => {
-        setAllItems(prev => prev.map(item => (item.id === id ? { ...item, text, section: undefined } : item)));
+        setAllItems(prev => prev.map(item => (item.id === id ? { ...item, text, section: undefined, keepUnfiled: undefined } : item)));
         markDirty();
     };
 

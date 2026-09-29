@@ -270,7 +270,7 @@ export default function HomeScreen() {
     // ids, which meant a list reopened after the app was closed looked entirely
     // sorted and the rows added just before closing never got a department.
     const needsSection = (i: Item) =>
-        hasText(i) && !i.section && !sortFailedIdsRef.current.has(i.id);
+        hasText(i) && !i.section && !i.keepUnfiled && !sortFailedIdsRef.current.has(i.id);
 
     /**
      * Puts a snapshot on screen — from the socket, from a merge, or from the
@@ -793,6 +793,9 @@ export default function HomeScreen() {
                     // old text, so leave the row unfiled and let the next pass
                     // decide where it really goes.
                     const renamed = (local.text ?? '') !== (i.text ?? '');
+                    // Taken back out of its aisle by the user since we asked;
+                    // an answer that still files it would undo that.
+                    if (local.keepUnfiled) return local;
                     return renamed
                         ? { ...local, listOrder: i.listOrder }
                         : { ...local, listOrder: i.listOrder, section: i.section };
