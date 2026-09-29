@@ -201,9 +201,19 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // Each id maps to the aisle it was in before the edit, so a rename that
     // lands back where it already was doesn't announce a move that never was.
     const awaitingFilingRef = useRef<Map<string, string | undefined>>(new Map());
-    const [filedToast, setFiledToast] = useState<(FiledToastInfo & { keys: string[] }) | null>(null);
-    // Ids just filed, for the glow that shows where they landed.
-    const [flashIds, setFlashIds] = useState<ReadonlySet<string>>(EMPTY_STAPLES);
+    const [filedToast, setFiledToast] = useState<(FiledToastInfo & { keys: string[]; ids: string[] }) | null>(null);
+    // Ids just filed, for the glow that shows where they landed. `key` replays
+    // the glow on a row that is already glowing.
+    const [flash, setFlash] = useState<{ ids: ReadonlySet<string>; key: number } | null>(null);
+    const flashRows = (ids: Iterable<string>, delay = 0) => {
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        const start = () => {
+            setFlash(prev => ({ ids: new Set(ids), key: (prev?.key ?? 0) + 1 }));
+            flashTimerRef.current = setTimeout(() => setFlash(null), FILED_FLASH_MS);
+        };
+        if (delay > 0) flashTimerRef.current = setTimeout(start, delay);
+        else start();
+    };
     const filedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => () => {
@@ -374,13 +384,12 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             section,
             count: moved.length,
             keys: [...byKey.keys()],
+            ids: filed.map(item => item.id),
         }));
         if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
         filedToastTimerRef.current = setTimeout(() => setFiledToast(null), FILED_TOAST_MS);
 
-        setFlashIds(new Set(filed.map(item => item.id)));
-        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
-        flashTimerRef.current = setTimeout(() => setFlashIds(EMPTY_STAPLES), FILED_FLASH_MS);
+        flashRows(filed.map(item => item.id));
 
         AccessibilityInfo.announceForAccessibility(
             section ? `${itemLabel} moved to ${section}` : `${itemLabel} sorted into aisles`,
@@ -415,7 +424,8 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         markDirty();
         if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
         setFiledToast(null);
-        setFlashIds(EMPTY_STAPLES);
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        setFlash(null);
     };
 
     /**
@@ -703,6 +713,40 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             flatListRef.current?.scrollToIndex?.({ index, animated: true, viewPosition });
         },
     }));
+
+    /**
+     * A tap on the "moved to" note: go and look. Scrolls to the aisle the row
+     * was filed under and glows the row again once it has arrived.
+     *
+     * The heading is the target rather than the row, since "Bakery" is what the
+     * note named — unless the row sits so far down a long aisle that putting
+     * the heading at the top would leave the row itself off screen.
+     */
+    const showFiledRows = () => {
+        if (!filedToast) return;
+        const ids = new Set(filedToast.ids);
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        setFiledToast(null);
+
+        // Unchecked, still on the list, and the first of them if several moved.
+        const rowIndex = openRows.findIndex(row =>
+            'sourceIds' in row && (row as AggregatedItem).sourceIds.some(id => ids.has(id)));
+        if (rowIndex < 0) return;
+        let headingIndex = -1;
+        for (let i = rowIndex - 1; i >= 0; i--) {
+            if (openRows[i].isSection) { headingIndex = i; break; }
+        }
+        const toHeading = headingIndex >= 0 && rowIndex - headingIndex <= 6;
+        const index = toHeading ? headingIndex : rowIndex;
+        const viewPosition = toHeading ? 0 : 0.3;
+
+        Haptics.selectionAsync().catch(() => {});
+        pendingScrollRef.current = { index, viewPosition, retried: false };
+        flatListRef.current?.scrollToIndex?.({ index, animated: !reduceMotion, viewPosition });
+        // Long enough for the scroll to land, so the glow is seen and not
+        // spent while the row is still sliding into view.
+        flashRows((openRows[rowIndex] as AggregatedItem).sourceIds, reduceMotion ? 0 : 350);
+    };
 
     // Return on a row with nothing in it is the user finishing, not asking for
     // one more empty row. The empty one they are on gets cleaned up too.
@@ -1116,13 +1160,13 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     )}
                 </View>
             </SwipeToDeleteRow>
-            {aggItem.sourceIds.some(id => flashIds.has(id)) && <FiledFlash key={filedToast?.key} />}
+            {flash && aggItem.sourceIds.some(id => flash.ids.has(id)) && <FiledFlash key={flash.key} />}
             </View>
         );
         // `showMealTags` is read inside a row, so it belongs here: without it the
         // memoized row keeps a stale closure and the tags don't appear or vanish
         // until something else (an edit, a check) forces the list to redraw.
-    }, [items, editingId, aggregatedItems, showMealTags, flashIds, filedToast?.key]);
+    }, [items, editingId, aggregatedItems, showMealTags, flash]);
 
     const renderItem = useCallback(
         ({ item, drag, isActive }: RenderItemParams<AggregatedItem | Item>) => renderRow(item, drag, isActive),
@@ -1360,7 +1404,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     }
                 />
             )}
-            <FiledToast toast={filedToast} onUnfile={unfileFromToast} />
+            <FiledToast toast={filedToast} onShow={showFiledRows} onUnfile={unfileFromToast} />
             <QuantityEditorModal
                 isVisible={isModalVisible} item={selectedItem}
                 onSave={handleSaveQuantity} onClose={closeQuantityEditor}
