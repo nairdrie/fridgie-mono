@@ -1077,6 +1077,7 @@ export default function HomeScreen() {
                         onManualReorder={() => { reorderSeqRef.current += 1; }}
                         staples={staples}
                         onAlwaysShowStaple={handleAlwaysShowStaple}
+                        historyKey={selectedList?.id}
                         ref={listRef}
                     />
                 ) : (
