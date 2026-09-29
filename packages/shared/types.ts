@@ -47,6 +47,13 @@ export type Item = {
    */
   section?: string;
   /**
+   * The user took this row back out of the aisle it was auto-filed under, so
+   * the list leaves it in the unfiled area at the bottom instead of filing it
+   * again. Cleared along with `section` when the text changes: a renamed item
+   * is a new question about where it goes.
+   */
+  keepUnfiled?: boolean;
+  /**
    * The user has promoted this row back into the list body for this shop, even
    * though its ingredient is one of the household's staples.
    *

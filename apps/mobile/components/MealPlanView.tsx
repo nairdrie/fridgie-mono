@@ -3,7 +3,7 @@ import { BrandMark } from '@/components/ui/Brand';
 import { useKeyboardAwareScroll } from "@/hooks/useKeyboardAwareScroll";
 import { Item, Meal } from "@/types/types";
 import { formatQuantity, parseQuantity } from "@/utils/quantity";
-import { ink, inkMuted, primary } from "@/utils/styles";
+import { ink, inkFaint, inkMuted, primary } from "@/utils/styles";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, NativeScrollEvent, NativeSyntheticEvent, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
@@ -125,6 +125,19 @@ export default function MealPlanView({
     });
   }, [meals]);
 
+  const emptyOptions: {
+    title: string;
+    hint: string;
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    tint: string;
+    iconColor: string;
+    onPress: () => void;
+  }[] = [
+    { title: 'Inspire me', hint: 'Get meal ideas to choose from', icon: 'sparkles', tint: '#F4DDD0', iconColor: '#B66D4E', onPress: onSuggestMeal },
+    { title: 'From your cookbook', hint: "Plan a recipe you've saved", icon: 'book', tint: '#DCEDE2', iconColor: primary, onPress: onAddFromCookbook },
+    { title: 'Start from scratch', hint: 'Name a meal and add its ingredients', icon: 'create', tint: '#E7EEDC', iconColor: primary, onPress: onAddMeal },
+  ];
+
   const plannedDays = new Set(meals.map(meal => meal.dayOfWeek).filter(Boolean));
   const overview = (
     <View style={styles.overview}>
@@ -158,22 +171,30 @@ export default function MealPlanView({
           <View style={[styles.emptyAccent, styles.emptyAccentRight]}><Ionicons name="sparkles" size={21} color="#B66D4E" /></View>
         </View>
         <Text style={styles.emptyMealsText}>Your meal plan</Text>
-        <Text style={styles.emptySubtext}>Add a meal, choose a saved recipe, or get a suggestion. Ingredients go straight to your list.</Text>
+        <Text style={styles.emptySubtext}>Pick a way to start. Ingredients go straight to your list.</Text>
+        {/* Three equal choices rather than one big button and two small ones:
+            which is most useful depends on the week, and writing a meal out by
+            hand is usually the least common of the three. Each says what it
+            does so nobody has to tap one to find out. */}
         <View style={styles.emptyActions}>
-          <GlassPressable style={[styles.emptyAction, styles.emptyActionPrimary]} onPress={onAddMeal} accessibilityRole="button">
-            <Ionicons name="add" size={22} color="#fff" />
-            <Text style={[styles.emptyActionText, styles.emptyActionTextPrimary]}>Plan your first meal</Text>
-          </GlassPressable>
-          <View style={styles.emptySecondaryActions}>
-            <GlassPressable style={styles.emptySecondaryAction} onPress={onAddFromCookbook} accessibilityRole="button">
-              <Ionicons name="book-outline" size={21} color={primary} />
-              <Text style={styles.emptySecondaryText}>Cookbook</Text>
+          {emptyOptions.map(option => (
+            <GlassPressable
+              key={option.title}
+              style={styles.emptyOption}
+              onPress={option.onPress}
+              accessibilityLabel={option.title}
+              accessibilityHint={option.hint}
+            >
+              <View style={[styles.emptyOptionIcon, { backgroundColor: option.tint }]}>
+                <Ionicons name={option.icon} size={20} color={option.iconColor} />
+              </View>
+              <View style={styles.emptyOptionBody}>
+                <Text style={styles.emptyOptionTitle}>{option.title}</Text>
+                <Text style={styles.emptyOptionHint} numberOfLines={2}>{option.hint}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={17} color={inkFaint} />
             </GlassPressable>
-            <GlassPressable style={styles.emptySecondaryAction} onPress={onSuggestMeal} accessibilityRole="button">
-              <Ionicons name="sparkles-outline" size={21} color={primary} />
-              <Text style={styles.emptySecondaryText}>Inspire me</Text>
-            </GlassPressable>
-          </View>
+          ))}
         </View>
       </ScrollView>
      )}
@@ -255,12 +276,10 @@ const styles = StyleSheet.create({
   emptyAccentRight: { right: 3, bottom: 13, backgroundColor: '#F4DDD0', transform: [{ rotate: '12deg' }] },
   emptyMealsText: { fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -1.2, color: ink, textAlign: 'center', marginTop: 11 },
   emptySubtext: { fontSize: 15, lineHeight: 23, color: inkMuted, textAlign: 'center', marginTop: 13, maxWidth: 310 },
-  emptyActions: { marginTop: 20, gap: 11, alignSelf: 'stretch', maxWidth: 350, width: '100%', alignItems: 'stretch' },
-  emptyAction: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderRadius: 28, minHeight: 54, paddingHorizontal: 18 },
-  emptyActionPrimary: { backgroundColor: primary, borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)' },
-  emptyActionText: { fontSize: 16, fontWeight: '600', color: primary },
-  emptyActionTextPrimary: { color: '#fff' },
-  emptySecondaryActions: { flexDirection: 'row', gap: 11 },
-  emptySecondaryAction: { flex: 1, flexDirection: 'row', gap: 8, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.78)', minHeight: 51, borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,255,255,0.9)' },
-  emptySecondaryText: { color: primary, fontSize: 14, fontWeight: '600' },
+  emptyActions: { marginTop: 22, gap: 10, alignSelf: 'stretch', maxWidth: 380, width: '100%' },
+  emptyOption: { flexDirection: 'row', alignItems: 'center', gap: 13, paddingVertical: 12, paddingLeft: 12, paddingRight: 14, minHeight: 66, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.8)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.9)' },
+  emptyOptionIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  emptyOptionBody: { flex: 1 },
+  emptyOptionTitle: { fontSize: 16, fontWeight: '600', color: ink },
+  emptyOptionHint: { fontSize: 13, lineHeight: 18, color: inkMuted, marginTop: 1 },
 });

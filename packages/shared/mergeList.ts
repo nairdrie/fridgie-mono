@@ -99,7 +99,7 @@ export interface MergeOptions {
  * to exist. If a housemate deliberately removed it, my "actually we're out of
  * this" must not bring it back.
  */
-export const SOFT_ITEM_FIELDS = ['checked', 'listOrder', 'mealOrder', 'section', 'stapleOverride'] as const;
+export const SOFT_ITEM_FIELDS = ['checked', 'listOrder', 'mealOrder', 'section', 'keepUnfiled', 'stapleOverride'] as const;
 
 /** Meal fields that must not resurrect a meal somebody else deleted. */
 export const SOFT_MEAL_FIELDS = ['addedToCookbook'] as const;

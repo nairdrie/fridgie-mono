@@ -13,8 +13,11 @@ import {
     quantitiesEquivalent,
 } from '@/utils/quantity';
 import { nextListRank, safeParseRank } from '@/utils/rank';
+import { reorderByAisle } from '@/utils/aisleOrder';
+import { replayStep } from '@/utils/listHistory';
 import { isStapleRow, stapleKey } from '@/utils/staples';
 import { dropEmptiedSections } from '@fridgie/shared/listSections';
+import { rowsEqual } from '@fridgie/shared/mergeList';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,6 +25,7 @@ import * as Haptics from 'expo-haptics';
 import { LexoRank } from 'lexorank';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
+    AccessibilityInfo,
     Alert,
     Keyboard,
     Pressable,
@@ -33,8 +37,10 @@ import {
 } from 'react-native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import uuid from 'react-native-uuid';
-import Animated, { ReduceMotion, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, { ReduceMotion, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import { GlassPressable, GlassSurface, useGlassPreferences } from './ui/Glass';
+import FiledToast, { FiledToastInfo } from './FiledToast';
+import GroceryListMenu from './GroceryListMenu';
 import QuantityEditorModal from './QuantityEditorModal';
 import SwipeToDeleteRow from './SwipeToDeleteRow';
 
@@ -51,6 +57,17 @@ type AggregatedItem = Item & {
 
 /** Remembers the show/which-meal toggle across app launches. */
 const SHOW_MEAL_TAGS_KEY = 'showMealTags';
+
+/** Which aisles are folded away, by name, remembered across launches. */
+const COLLAPSED_AISLES_KEY = 'collapsedAisles';
+
+/**
+ * What an aisle is remembered by. Not its id: the server mints a fresh id for
+ * every heading each time it files (see mergeList's rowKey), so a fold keyed by
+ * id would spring open again the moment anything new was added.
+ */
+const aisleKey = (heading: Item): string =>
+    (heading.text ?? '').trim().toLowerCase() || `__aisle-${heading.id}__`;
 
 /** Stable identity, so the split memo doesn't re-run on every render. */
 const EMPTY_STAPLES: ReadonlySet<string> = new Set();
@@ -70,6 +87,32 @@ const LIST_BOTTOM_SPACE = 190;
  */
 const aggregationKey = (item: Item): string =>
     (item.text ?? '').trim().toLowerCase() || `__blank-${item.id}__`;
+
+/** The staples card's accent: the app's warm secondary, darkened for text. */
+const stapleAccent = '#B66D4E';
+
+/** How long the "moved to" note stays up, and how long the row it names glows. */
+const FILED_TOAST_MS = 4500;
+const FILED_FLASH_MS = 1600;
+
+/**
+ * A soft glow over a row that has just been filed, so the eye can find where
+ * it went. Keyed by the filing pass, so filing the same row again replays it.
+ */
+const FiledFlash = () => {
+    const { reduceMotion } = useGlassPreferences();
+    const opacity = useSharedValue(0);
+    useEffect(() => {
+        opacity.value = reduceMotion
+            ? withSequence(withTiming(1, { duration: 0 }), withDelay(FILED_FLASH_MS - 400, withTiming(0, { duration: 400 })))
+            : withSequence(
+                withTiming(1, { duration: 220 }),
+                withDelay(FILED_FLASH_MS - 720, withTiming(0, { duration: 500 })),
+            );
+    }, [opacity, reduceMotion]);
+    const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+    return <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.filedFlash, style]} />;
+};
 
 /** The group a row belonged to when the caret arrived in it. See `editPinRef`. */
 interface EditPin {
@@ -137,6 +180,11 @@ interface GroceryListViewProps {
   staples?: ReadonlySet<string>;
   /** "I do buy this" — permanently stops a key being treated as a staple. */
   onAlwaysShowStaple?: (key: string, name: string) => void;
+  /**
+   * Which list this is. Undo history belongs to one list: stepping back after
+   * switching weeks must not replay last week's edits onto this one.
+   */
+  historyKey?: string;
 }
 
 const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
@@ -152,6 +200,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     onScrollOffsetChange,
     staples,
     onAlwaysShowStaple,
+    historyKey,
 }, ref) => {
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [selectedItem, setSelectedItem] = useState<AggregatedItem | null>(null);
@@ -161,11 +210,182 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // Same reasoning as the checked section: filed away, opened on request.
     const [showStaples, setShowStaples] = useState(false);
 
+    // Aisles the user has folded shut. Remembered across launches like the
+    // meal-tag toggle: "I never need to look at Household" is a standing
+    // preference, not a one-off.
+    const [collapsedAisles, setCollapsedAisles] = useState<ReadonlySet<string>>(EMPTY_STAPLES);
+    useEffect(() => {
+        AsyncStorage.getItem(COLLAPSED_AISLES_KEY)
+            .then(stored => {
+                const keys = stored ? JSON.parse(stored) : null;
+                if (Array.isArray(keys)) setCollapsedAisles(new Set(keys.filter(k => typeof k === 'string')));
+            })
+            .catch(() => {});
+    }, []);
+    const toggleAisle = useCallback((key: string) => {
+        Haptics.selectionAsync().catch(() => {});
+        setCollapsedAisles(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            AsyncStorage.setItem(COLLAPSED_AISLES_KEY, JSON.stringify([...next])).catch(() => {});
+            return next;
+        });
+    }, []);
+
+    // The heading being dragged, folded for the length of the drag so its
+    // aisle travels with it as one block. See startAisleDrag.
+    const [dragFoldedId, setDragFoldedId] = useState<string | null>(null);
+
     // UI-only identity for rows created by either add-at-the-end control. The
     // flag deliberately does not live on Item: drafts persist and sync exactly
     // like every other row, while this only decides where to draw them until
     // the existing filing pass gives them a section.
     const endDraftIdsRef = useRef<Set<string>>(new Set());
+
+    // Rows the user added or renamed on THIS device that the filing pass has
+    // not answered yet. Filing moves a row out of the unfiled area and up under
+    // a heading that may be off screen, which reads as the row disappearing —
+    // so when one of these picks up a section, the list says where it went.
+    // Rows filed for a housemate, or a meal's ingredients, arrive quietly.
+    //
+    // Each id maps to the aisle it was in before the edit, so a rename that
+    // lands back where it already was doesn't announce a move that never was.
+    const awaitingFilingRef = useRef<Map<string, string | undefined>>(new Map());
+    const [filedToast, setFiledToast] = useState<(FiledToastInfo & { keys: string[]; ids: string[] }) | null>(null);
+    // Ids just filed, for the glow that shows where they landed. `key` replays
+    // the glow on a row that is already glowing.
+    const [flash, setFlash] = useState<{ ids: ReadonlySet<string>; key: number } | null>(null);
+    const flashRows = (ids: Iterable<string>, delay = 0) => {
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        const start = () => {
+            setFlash(prev => ({ ids: new Set(ids), key: (prev?.key ?? 0) + 1 }));
+            flashTimerRef.current = setTimeout(() => setFlash(null), FILED_FLASH_MS);
+        };
+        if (delay > 0) flashTimerRef.current = setTimeout(start, delay);
+        else start();
+    };
+    const filedToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => {
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+    }, []);
+    const awaitFiling = (ids: readonly string[]) => {
+        const awaiting = awaitingFilingRef.current;
+        for (const id of ids) {
+            if (!awaiting.has(id)) awaiting.set(id, items.find(item => item.id === id)?.section);
+        }
+    };
+
+    /**
+     * Undo and redo, for what the user does on this screen.
+     *
+     * Each step keeps the list as it was before and after the change, and is
+     * replayed as a merge over the list as it is now (see replayStep), so a
+     * housemate's edits or a filing that landed since are not undone with it.
+     *
+     * Typing into one row is one step, from the first keystroke to leaving the
+     * row, so undo takes back a word rather than a letter.
+     */
+    type HistoryStep = {
+        before: Item[];
+        after: Item[] | null;
+        verb: string;
+        subject: string;
+        /** Later changes with the same key fold into this step. */
+        key?: string;
+        /** Stop folding once `after` has been taken. See sealTyping. */
+        sealOnCapture?: boolean;
+    };
+    const undoStackRef = useRef<HistoryStep[]>([]);
+    const redoStackRef = useRef<HistoryStep[]>([]);
+    const awaitingAfterRef = useRef<HistoryStep | null>(null);
+    // The stacks live in refs; this is only what makes the menu redraw.
+    const [, setHistoryVersion] = useState(0);
+    const bumpHistory = () => setHistoryVersion(v => v + 1);
+
+    const recordStep = (verb: string, subject = '', key?: string) => {
+        const stack = undoStackRef.current;
+        const top = stack[stack.length - 1];
+        if (key && top?.key === key) {
+            if (subject) top.subject = subject;
+            awaitingAfterRef.current = top;
+        } else {
+            const step: HistoryStep = { before: items, after: null, verb, subject, key };
+            stack.push(step);
+            if (stack.length > 50) stack.shift();
+            awaitingAfterRef.current = step;
+        }
+        redoStackRef.current = [];
+        bumpHistory();
+    };
+    /** The edit of a row is over; the next edit to it is a new step. */
+    const sealTyping = () => {
+        const top = undoStackRef.current[undoStackRef.current.length - 1];
+        if (!top?.key) return;
+        if (awaitingAfterRef.current === top) top.sealOnCapture = true;
+        else top.key = undefined;
+    };
+    useEffect(() => {
+        const step = awaitingAfterRef.current;
+        if (!step) return;
+        awaitingAfterRef.current = null;
+        step.after = items;
+        if (step.sealOnCapture) {
+            step.key = undefined;
+            step.sealOnCapture = false;
+        }
+    }, [items]);
+    useEffect(() => {
+        undoStackRef.current = [];
+        redoStackRef.current = [];
+        awaitingAfterRef.current = null;
+        bumpHistory();
+    }, [historyKey]);
+
+    /** The step undo (or redo) would take next: the newest one that finished. */
+    const nextStep = (stack: HistoryStep[]): HistoryStep | undefined => {
+        for (let i = stack.length - 1; i >= 0; i--) if (stack[i].after) return stack[i];
+        return undefined;
+    };
+    const stepLabel = (step: HistoryStep | undefined) =>
+        step ? (step.subject ? `${step.verb} ${step.subject}` : step.verb) : null;
+
+    /**
+     * Moves one step from `from` to `to`, applying `toward` (before for undo,
+     * after for redo) over the list as it stands. A step that no longer changes
+     * anything — its row was cleaned up, or someone else already did the same —
+     * is passed over rather than spending a tap on nothing.
+     */
+    const travel = (from: React.MutableRefObject<HistoryStep[]>, to: React.MutableRefObject<HistoryStep[]>, direction: 'undo' | 'redo') => {
+        while (from.current.length > 0) {
+            const step = from.current.pop()!;
+            if (!step.after) continue;
+            const [base, target] = direction === 'undo' ? [step.after, step.before] : [step.before, step.after];
+            const merged = replayStep(base, target, items);
+            step.key = undefined;
+            to.current.push(step);
+            if (rowsEqual(merged, items)) continue;
+
+            Haptics.selectionAsync().catch(() => {});
+            // Whatever was being typed into may be the row this takes away.
+            if (editingId) {
+                setEditingId('');
+                Keyboard.dismiss();
+            }
+            awaitingAfterRef.current = null;
+            setItems(merged);
+            markDirty();
+            // A filing answer in flight was worked out from the list before
+            // this, and would put back what was just taken away.
+            onManualReorder?.();
+            break;
+        }
+        bumpHistory();
+    };
+    const undo = () => travel(undoStackRef, redoStackRef, 'undo');
+    const redo = () => travel(redoStackRef, undoStackRef, 'redo');
 
     // Whether to show, beside each item, which meal put it on the list. On by
     // default so the link to the plan is there to be seen, and remembered across
@@ -290,7 +510,84 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         for (const id of endDraftIdsRef.current) {
             if (!stillUnfiled.has(id)) endDraftIdsRef.current.delete(id);
         }
+
+        const awaiting = awaitingFilingRef.current;
+        if (awaiting.size === 0) return;
+        const byId = new Map(items.map(item => [item.id, item]));
+        const filed: Item[] = [];
+        for (const [id, sectionBefore] of awaiting) {
+            const item = byId.get(id);
+            // Deleted, or ticked off before it was filed: nothing to point at.
+            if (!item || item.isSection || item.checked) awaiting.delete(id);
+            else if (item.section) {
+                awaiting.delete(id);
+                if (item.section !== sectionBefore) filed.push(item);
+            }
+        }
+        if (filed.length === 0) return;
+
+        // One note per filing pass, counted in rows as the list shows them —
+        // two sources that aggregate into one row are one item moved.
+        const byKey = new Map<string, Item>();
+        for (const item of filed) {
+            const key = aggregationKey(item);
+            if (!byKey.has(key)) byKey.set(key, item);
+        }
+        const moved = [...byKey.values()];
+        const sections = new Set(moved.map(item => item.section!));
+        const itemLabel = moved.length === 1 ? (moved[0].text ?? '').trim() : `${moved.length} items`;
+        const section = sections.size === 1 ? moved[0].section! : null;
+
+        setFiledToast(prev => ({
+            key: (prev?.key ?? 0) + 1,
+            itemLabel,
+            section,
+            count: moved.length,
+            keys: [...byKey.keys()],
+            ids: filed.map(item => item.id),
+        }));
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        filedToastTimerRef.current = setTimeout(() => setFiledToast(null), FILED_TOAST_MS);
+
+        flashRows(filed.map(item => item.id));
+
+        AccessibilityInfo.announceForAccessibility(
+            section ? `${itemLabel} moved to ${section}` : `${itemLabel} sorted into aisles`,
+        );
     }, [items]);
+
+    /**
+     * The ✕ on the "moved to" note: the user would rather the row stayed where
+     * they typed it. Every row with that text comes back together — they are
+     * one row on screen — and lands at the end, in the unfiled area, marked so
+     * the filing pass leaves it there.
+     */
+    const unfileFromToast = () => {
+        if (!filedToast) return;
+        const keys = new Set(filedToast.keys);
+        Haptics.selectionAsync().catch(() => {});
+        recordStep('Uncategorize', filedToast.count === 1 ? filedToast.itemLabel : '');
+        setItems(prev => {
+            let rank = nextListRank(prev);
+            const updated = prev.map(item => {
+                if (item.isSection || !keys.has(aggregationKey(item))) return item;
+                const next: Item = { ...item, section: undefined, keepUnfiled: true, listOrder: rank.toString() };
+                rank = rank.genNext();
+                return next;
+            });
+            // Taking the only row out of an aisle leaves its heading over
+            // nothing, the same as deleting it would.
+            return dropEmptiedSections(prev, updated);
+        });
+        // A filing answer already in flight was worked out with this row in its
+        // aisle and would put it straight back.
+        onManualReorder?.();
+        markDirty();
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        setFiledToast(null);
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        setFlash(null);
+    };
 
     /**
      * The list as it is actually shown: everything still to be bought, and
@@ -305,13 +602,39 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
      * leaving a run of empty aisles behind on screen would say the same thing
      * twice. A heading with nothing under it at all is one the user has just
      * written and not filled in yet, so that one stays.
+     *
+     * A folded aisle keeps its heading on screen and hides the rows under it,
+     * except one being typed into — folding must never take the keyboard away.
+     * `aisleStats` is what the folded heading shows instead: how much of the
+     * aisle is already in the trolley.
      */
-    const { openRows, checkedRows, stapleRows, unfiledRows } = useMemo(() => {
+    const { openRows, checkedRows, stapleRows, unfiledRows, aisleStats } = useMemo(() => {
         const open: (AggregatedItem | Item)[] = [];
         const checked: AggregatedItem[] = [];
         const staple: AggregatedItem[] = [];
         const unfiled: AggregatedItem[] = [];
+        const stats = new Map<string, { checked: number; total: number }>();
         const stapleSet = staples ?? EMPTY_STAPLES;
+
+        // Which heading each row sits under. A row belongs to the nearest
+        // heading above it in rank order — the same rule the server files by.
+        const headingOf = new Map<string, AggregatedItem | Item>();
+        let heading: AggregatedItem | Item | null = null;
+        for (const row of aggregatedItems) {
+            if (row.isSection) heading = row;
+            else if (heading) headingOf.set(row.id, heading);
+        }
+        const isFolded = (h: AggregatedItem | Item | undefined) =>
+            !!h && (h.id === dragFoldedId || collapsedAisles.has(aisleKey(h)));
+        const count = (row: AggregatedItem | Item, isChecked: boolean) => {
+            const h = headingOf.get(row.id);
+            if (!h) return;
+            const entry = stats.get(h.id) ?? { checked: 0, total: 0 };
+            entry.total++;
+            if (isChecked) entry.checked++;
+            stats.set(h.id, entry);
+        };
+
         // Backwards, so a heading is reached knowing what survived beneath it.
         let openBelow = 0;
         let rowsBelow = 0;
@@ -325,6 +648,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             }
             if (row.checked) {
                 rowsBelow++;
+                count(row, true);
                 checked.push(row as AggregatedItem);
             } else if (
                 // Checked wins over staple: a row already in the trolley has
@@ -361,15 +685,16 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             } else {
                 rowsBelow++;
                 openBelow++;
-                open.push(row);
+                count(row, false);
+                if (!isFolded(headingOf.get(row.id)) || isRowBeingEdited(row, editingId)) open.push(row);
             }
         }
         open.reverse();
         checked.reverse();
         staple.reverse();
         unfiled.reverse();
-        return { openRows: open, checkedRows: checked, stapleRows: staple, unfiledRows: unfiled };
-    }, [aggregatedItems, editingId, staples]);
+        return { openRows: open, checkedRows: checked, stapleRows: staple, unfiledRows: unfiled, aisleStats: stats };
+    }, [aggregatedItems, editingId, staples, collapsedAisles, dragFoldedId]);
 
     // Whether anything on the list came from a meal at all. The show-meals
     // toggle is only offered when it would change something — a list of
@@ -397,6 +722,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
      */
     const promoteStaple = (aggItem: AggregatedItem) => {
         Haptics.selectionAsync().catch(() => {});
+        recordStep('Add back', (aggItem.text ?? '').trim());
         setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id)
             ? { ...item, stapleOverride: true }
             : item));
@@ -471,6 +797,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     }, [inputRefs]);
 
     const updateSectionText = (id: string, text: string) => {
+        recordStep('Rename', text.trim(), `text:${id}`);
         setItems(prev => prev.map(item => (item.id === id ? { ...item, text } : item)));
         markDirty();
     };
@@ -481,8 +808,10 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     // The aisle on file was decided from the old text, so it goes with it — the
     // list re-files the row once the edit settles.
     const updateAggregatedText = (aggItem: AggregatedItem, text: string) => {
+        awaitFiling(aggItem.sourceIds);
+        recordStep('Edit', text.trim(), `text:${aggItem.sourceIds[0]}`);
         setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id)
-            ? { ...item, text, section: undefined }
+            ? { ...item, text, section: undefined, keepUnfiled: undefined }
             : item));
         markDirty();
     };
@@ -492,6 +821,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         // The row is about to leave for the section at the bottom (or come back
         // from it), which is a big enough move to want confirming by touch.
         Haptics.selectionAsync().catch(() => {});
+        recordStep(newCheckedState ? 'Check' : 'Uncheck', (aggItem.text ?? '').trim());
         setItems(prev => prev.map(item => aggItem.sourceIds.includes(item.id) ? { ...item, checked: newCheckedState } : item));
         markDirty();
     };
@@ -508,6 +838,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             const blank = findBlankRow();
             if (blank) {
                 endDraftIdsRef.current.add(blank.id);
+                awaitFiling([blank.id]);
                 // Already the row being typed into: setEditingId would be a
                 // no-op, the screen's focus effect would never run, and the tap
                 // would do nothing at all. Ask for the keyboard directly.
@@ -517,6 +848,8 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             }
             const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: nextListRank(items).toString(), isSection: false };
             endDraftIdsRef.current.add(newItem.id);
+            awaitFiling([newItem.id]);
+            recordStep('Add', '', `text:${newItem.id}`);
             setItems(prev => [...prev, newItem]);
             setEditingId(newItem.id);
             markDirty();
@@ -533,6 +866,8 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
             : currentRank.genNext();
         const newItem: Item = { id: uuid.v4() as string, text: '', checked: false, listOrder: newRank.toString(), isSection: false };
         endDraftIdsRef.current.add(newItem.id);
+        awaitFiling([newItem.id]);
+        recordStep('Add', '', `text:${newItem.id}`);
         setItems(prev => [...prev, newItem]);
         setEditingId(newItem.id);
         markDirty();
@@ -574,6 +909,62 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         },
     }));
 
+    /**
+     * A tap on the "moved to" note: go and look. Scrolls to the aisle the row
+     * was filed under and glows the row again once it has arrived.
+     *
+     * The heading is the target rather than the row, since "Bakery" is what the
+     * note named — unless the row sits so far down a long aisle that putting
+     * the heading at the top would leave the row itself off screen.
+     */
+    const showFiledRows = () => {
+        if (!filedToast) return;
+        const ids = new Set(filedToast.ids);
+        if (filedToastTimerRef.current) clearTimeout(filedToastTimerRef.current);
+        setFiledToast(null);
+        if (scrollToFiled(ids)) return;
+
+        // Filed into an aisle that is folded shut: open it, then go there once
+        // its rows are back on screen. Through the ref, because the rows this
+        // render knows about are the ones without that aisle's contents.
+        let heading: AggregatedItem | Item | null = null;
+        for (const row of aggregatedItems) {
+            if (row.isSection) heading = row;
+            else if (heading && (row as AggregatedItem).sourceIds?.some(id => ids.has(id))) {
+                const key = aisleKey(heading);
+                if (!collapsedAisles.has(key)) return;
+                toggleAisle(key);
+                setTimeout(() => scrollToFiledRef.current(ids), 120);
+                return;
+            }
+        }
+    };
+
+    /** Scrolls to the first of `ids` on screen. False when none of them is. */
+    const scrollToFiled = (ids: ReadonlySet<string>): boolean => {
+        // Unchecked, still on the list, and the first of them if several moved.
+        const rowIndex = openRows.findIndex(row =>
+            'sourceIds' in row && (row as AggregatedItem).sourceIds.some(id => ids.has(id)));
+        if (rowIndex < 0) return false;
+        let headingIndex = -1;
+        for (let i = rowIndex - 1; i >= 0; i--) {
+            if (openRows[i].isSection) { headingIndex = i; break; }
+        }
+        const toHeading = headingIndex >= 0 && rowIndex - headingIndex <= 6;
+        const index = toHeading ? headingIndex : rowIndex;
+        const viewPosition = toHeading ? 0 : 0.3;
+
+        Haptics.selectionAsync().catch(() => {});
+        pendingScrollRef.current = { index, viewPosition, retried: false };
+        flatListRef.current?.scrollToIndex?.({ index, animated: !reduceMotion, viewPosition });
+        // Long enough for the scroll to land, so the glow is seen and not
+        // spent while the row is still sliding into view.
+        flashRows((openRows[rowIndex] as AggregatedItem).sourceIds, reduceMotion ? 0 : 350);
+        return true;
+    };
+    const scrollToFiledRef = useRef(scrollToFiled);
+    scrollToFiledRef.current = scrollToFiled;
+
     // Return on a row with nothing in it is the user finishing, not asking for
     // one more empty row. The empty one they are on gets cleaned up too.
     const submitRow = (currentItem: AggregatedItem | Item) => {
@@ -598,6 +989,18 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         // Deletes every source, including meal ingredients — checking and
         // deleting intentionally act on the whole aggregate.
         const sourceIdsToDelete = new Set(aggItem.sourceIds);
+        if ((aggItem.text ?? '').trim()) {
+            recordStep('Delete', (aggItem.text ?? '').trim());
+        } else {
+            // A row that never got any text: adding it and taking it away again
+            // is nothing to undo, so the step that added it goes too.
+            const stack = undoStackRef.current;
+            if (stack[stack.length - 1]?.key === `text:${aggItem.sourceIds[0]}`) {
+                stack.pop();
+                if (awaitingAfterRef.current && !stack.includes(awaitingAfterRef.current)) awaitingAfterRef.current = null;
+                bumpHistory();
+            }
+        }
         // Taking the last row out of an aisle would leave its heading standing
         // over nothing. The render can't drop that on its own — a heading with
         // no rows under it is also what one the user has just typed looks like —
@@ -646,11 +1049,12 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         if (!baseItem) return;
         const { quantity, text: newText } = parseQuantityAndText(baseItem.text);
         if (quantity || newText !== baseItem.text) {
+            recordStep('Edit', newText.trim(), `text:${baseItemId}`);
             setItems(prev =>
                 prev.map(i => {
                     if (!aggItem.sourceIds.includes(i.id)) return i;
                     // Text applies to every source; a typed-in quantity only to the base.
-                    const updated = { ...i, text: newText, section: undefined };
+                    const updated = { ...i, text: newText, section: undefined, keepUnfiled: undefined };
                     if (i.id === baseItemId && quantity) updated.quantity = quantity;
                     return updated;
                 })
@@ -663,29 +1067,71 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         // wipes out the row that was just asked for, which is why a tap down
         // there produced a row that looked selected with nothing typing into it.
         setEditingId(prev => (aggItem.sourceIds.includes(prev) ? '' : prev));
+        sealTyping();
     };
 
     /**
      * Puts the rows the list just handed back into the order of the whole list.
      *
-     * The draggable list only ever holds the rows on screen, so checked items
-     * and the headings hiding with them are missing from `data`. Dropping the
-     * dragged rows back into the slots they occupied keeps everything else
-     * exactly where it was — which is what makes unchecking an item return it to
-     * its aisle rather than to the bottom of the list.
+     * Aisles hold together. The draggable list only ever holds the rows on
+     * screen — checked items, staples, and everything in a folded aisle are
+     * missing from `data` — so each heading's hidden rows are gathered back up
+     * under it wherever it went. That is what makes dragging a heading move its
+     * whole aisle, and what makes unchecking an item return it to its aisle
+     * rather than to wherever its old rank happens to fall now.
+     *
+     * An item dropped under a different heading has been re-filed by hand: it
+     * takes that aisle's name, so it stays there when the list files again.
      */
     const applyDragOrder = ({ data, from, to }: { data: (AggregatedItem | Item)[]; from: number; to: number }) => {
+        setDragFoldedId(null);
         // A long press that ended where it started still reports a drag. Re-ranking
         // the list over it would save nothing new and would throw away whichever
         // filing is in flight, so treat it as the nothing it is.
         if (from === to) return;
-        const onScreen = new Set(data.map(row => row.id));
-        let next = 0;
-        reRankItems(aggregatedItems.map(row => (onScreen.has(row.id) ? data[next++] ?? row : row)));
+
+        const moved = data[to];
+        recordStep('Move', moved?.isSection ? `${(moved.text ?? '').trim()} aisle` : (moved?.text ?? '').trim());
+
+        const { ordered, refiled } = reorderByAisle(aggregatedItems, data);
+        reRankItems(ordered, refiled);
         onManualReorder?.();
     };
 
-    const reRankItems = (data: (AggregatedItem | Item)[]) => {
+    /**
+     * Long-pressing a heading's handle folds its aisle before the drag starts,
+     * so the heading picks the whole aisle up with it and the rows are not left
+     * behind in the list while it moves. The fold lasts only for the drag.
+     *
+     * The drag itself waits a moment: the list has to lay itself out without
+     * the folded rows first, or it measures the drop positions against rows
+     * that are no longer there.
+     */
+    const aisleDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const startAisleDrag = (heading: Item, drag: () => void) => {
+        if (collapsedAisles.has(aisleKey(heading))) {
+            drag();
+            return;
+        }
+        setDragFoldedId(heading.id);
+        if (aisleDragTimerRef.current) clearTimeout(aisleDragTimerRef.current);
+        aisleDragTimerRef.current = setTimeout(() => {
+            aisleDragTimerRef.current = null;
+            drag();
+        }, 90);
+    };
+    // Let go before the drag got going: nothing is moving, so unfold again.
+    const cancelPendingAisleDrag = () => {
+        if (!aisleDragTimerRef.current) return;
+        clearTimeout(aisleDragTimerRef.current);
+        aisleDragTimerRef.current = null;
+        setDragFoldedId(null);
+    };
+    useEffect(() => () => {
+        if (aisleDragTimerRef.current) clearTimeout(aisleDragTimerRef.current);
+    }, []);
+
+    const reRankItems = (data: (AggregatedItem | Item)[], sections?: ReadonlyMap<string, string>) => {
         let rank = LexoRank.middle();
         const rankMap = new Map<string, string>();
         // Advance once per assigned id. genNext() is pure, so the old code gave
@@ -703,7 +1149,14 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 assign(item.id);
             }
         });
-        setItems(prev => prev.map(originalItem => ({ ...originalItem, listOrder: rankMap.get(originalItem.id) || originalItem.listOrder })));
+        setItems(prev => prev.map(originalItem => {
+            const section = sections?.get(originalItem.id);
+            return {
+                ...originalItem,
+                listOrder: rankMap.get(originalItem.id) || originalItem.listOrder,
+                ...(section ? { section, keepUnfiled: undefined } : {}),
+            };
+        }));
         markDirty();
     };
 
@@ -730,6 +1183,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         }
 
         const desired = parseQuantity(newQuant);
+        recordStep('Change', `${(selectedItem.text ?? '').trim()} amount`);
 
         setItems(prev => {
             const sources = prev.filter(item => selectedItem.sourceIds.includes(item.id));
@@ -854,7 +1308,12 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     const renderRow = useCallback((item: AggregatedItem | Item, drag?: () => void, isActive?: boolean) => {
         const handle = drag ? (
             <Pressable
-                onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); drag(); }}
+                onLongPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                    if (item.isSection) startAisleDrag(item, drag);
+                    else drag();
+                }}
+                onPressOut={item.isSection ? cancelPendingAisleDrag : undefined}
                 disabled={isActive}
                 style={styles.dragHandle}
                 hitSlop={20}
@@ -866,10 +1325,13 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
         );
 
         if (item.isSection) {
-            const isEditing = editingId === item.id;
-            // No swipe on a heading. Swiping one away would leave the rows it
-            // was holding sitting under whichever aisle came before it, which
-            // reads as the list having broken rather than as a deletion.
+            const key = aisleKey(item);
+            const folded = collapsedAisles.has(key) || item.id === dragFoldedId;
+            const stats = aisleStats.get(item.id);
+            // No swipe on a heading, and no ✕ either. Filing puts every row in
+            // an aisle, so taking a heading away would only tip its rows into
+            // whichever aisle came before it — the list looking broken rather
+            // than anything having been deleted.
             return (
                 <View key={item.id} style={[styles.itemRow, styles.sectionRow]}>
                     {handle}
@@ -882,10 +1344,14 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                         onFocus={() => setEditingId(item.id)}
                         // Same reasoning as handleItemBlur: blur lands after the
                         // next row has taken focus, so this must not speak for it.
-                        onBlur={() => setEditingId(prev => (prev === item.id ? '' : prev))}
+                        onBlur={() => {
+                            setEditingId(prev => (prev === item.id ? '' : prev));
+                            sealTyping();
+                        }}
                         onSubmitEditing={() => submitRow(item)}
                         onKeyPress={({ nativeEvent }) => {
                             if (nativeEvent.key === 'Backspace' && item.text === '') {
+                                recordStep('Remove heading');
                                 const currentIndex = aggregatedItems.findIndex(i => i.id === item.id);
                                 const prevItem = currentIndex > 0 ? aggregatedItems[currentIndex - 1] : null;
 
@@ -906,24 +1372,23 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                         returnKeyType="next"
                         blurOnSubmit={false}
                     />
-                    {isEditing && (
-                        <GlassPressable
-                            // onPressIn: the input's onBlur unmounts this button
-                            // before a regular onPress can fire.
-                            onPressIn={() => {
-                                setItems(prev => prev.filter(i => i.id !== item.id));
-                                markDirty();
-                            }}
-                            onPress={() => {
-                                setItems(prev => prev.filter(i => i.id !== item.id));
-                                markDirty();
-                            }}
-                            accessibilityLabel={`Delete ${item.text || "category"}`}
-                            style={styles.clearButton}
-                        >
-                            <Text style={styles.clearText}>✕</Text>
-                        </GlassPressable>
-                    )}
+                    <Pressable
+                        onPress={() => toggleAisle(key)}
+                        hitSlop={12}
+                        style={({ pressed }) => [styles.aisleToggle, pressed && styles.aisleTogglePressed]}
+                        accessibilityRole="button"
+                        accessibilityState={{ expanded: !folded }}
+                        accessibilityLabel={folded && stats
+                            ? `${item.text || 'Aisle'}, ${stats.checked} of ${stats.total} checked. Show items`
+                            : `${folded ? 'Show' : 'Hide'} ${item.text || 'aisle'} items`}
+                    >
+                        {folded && stats && (
+                            <Text style={[styles.aisleCount, stats.checked > 0 && styles.aisleCountProgress]}>
+                                {stats.checked}/{stats.total}
+                            </Text>
+                        )}
+                        <Ionicons name={folded ? 'chevron-forward' : 'chevron-down'} size={15} color={inkMuted} />
+                    </Pressable>
                 </View>
             );
         }
@@ -986,17 +1451,69 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     )}
                 </View>
             </SwipeToDeleteRow>
+            {flash && aggItem.sourceIds.some(id => flash.ids.has(id)) && <FiledFlash key={flash.key} />}
             </View>
         );
         // `showMealTags` is read inside a row, so it belongs here: without it the
         // memoized row keeps a stale closure and the tags don't appear or vanish
         // until something else (an edit, a check) forces the list to redraw.
-    }, [items, editingId, aggregatedItems, showMealTags]);
+    }, [items, editingId, aggregatedItems, showMealTags, flash, collapsedAisles, dragFoldedId, aisleStats]);
 
     const renderItem = useCallback(
         ({ item, drag, isActive }: RenderItemParams<AggregatedItem | Item>) => renderRow(item, drag, isActive),
         [renderRow]
     );
+
+    // Aisles on the list, by the name their fold is remembered under.
+    const aisleKeys = useMemo(
+        () => [...new Set(aggregatedItems.filter(row => row.isSection).map(row => aisleKey(row)))],
+        [aggregatedItems],
+    );
+    const setAllAislesFolded = (fold: boolean) => {
+        Haptics.selectionAsync().catch(() => {});
+        setCollapsedAisles(prev => {
+            const next = new Set(prev);
+            for (const key of aisleKeys) {
+                if (fold) next.add(key);
+                else next.delete(key);
+            }
+            AsyncStorage.setItem(COLLAPSED_AISLES_KEY, JSON.stringify([...next])).catch(() => {});
+            return next;
+        });
+    };
+
+    /**
+     * "3/10 checked" at the top: opens the checked section and brings it up to
+     * the top of the screen.
+     *
+     * Measured rather than estimated — the section sits below every aisle,
+     * however tall they are — and after it has opened, so the list is long
+     * enough to put it at the top. Clamped to the end of the list: scrolling
+     * past it on iOS leaves a gap that does not bounce back.
+     */
+    const checkedSectionRef = useRef<View>(null);
+    const contentHeightRef = useRef(0);
+    const viewportHeightRef = useRef(0);
+    const showCheckedSection = () => {
+        Haptics.selectionAsync().catch(() => {});
+        setShowChecked(true);
+        setTimeout(() => {
+            const list = flatListRef.current;
+            const scroller = list?.getNativeScrollRef?.();
+            const content = scroller?.getInnerViewRef?.() ?? scroller?.getInnerViewNode?.();
+            const animated = !reduceMotion;
+            const toEnd = () => list?.scrollToEnd?.({ animated });
+            if (!content || !checkedSectionRef.current) return toEnd();
+            checkedSectionRef.current.measureLayout(
+                content,
+                (_x, y) => {
+                    const max = Math.max(0, contentHeightRef.current - viewportHeightRef.current);
+                    list?.scrollToOffset?.({ offset: Math.min(Math.max(0, y - 8), max), animated });
+                },
+                toEnd,
+            );
+        }, 80);
+    };
 
     const toBuyCount = [...openRows, ...unfiledRows].filter(item => !item.isSection && item.text?.trim()).length;
     const boughtCount = checkedRows.filter(item => item.text?.trim()).length;
@@ -1015,7 +1532,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
     }, [trackKeyboardOffset, onScrollOffsetChange]);
 
     return (
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }} onLayout={event => { viewportHeightRef.current = event.nativeEvent.layout.height; }}>
             { aggregatedItems.length === 0 ? (
                 <ScrollView contentContainerStyle={styles.emptyMealsContainer} showsVerticalScrollIndicator={false} onScroll={event => handleScrollOffsetChange(event.nativeEvent.contentOffset.y)} scrollEventThrottle={16}>
                     <View style={styles.emptyIllustration}>
@@ -1047,28 +1564,120 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     // Progress counts the visible shopping rows after aggregation,
                     // and leaves pantry staples out until they are added back.
                     ListHeaderComponent={
-                        <View style={styles.listHeader}>
-                            <View style={styles.progressSummary}>
-                                <View style={styles.progressLabels}>
-                                    <Text style={styles.progressCount}>{toBuyCount} to buy</Text>
-                                    <Text style={styles.progressCaption}>{boughtCount}/{shoppingCount} checked</Text>
+                        <View>
+                            <View style={styles.listHeader}>
+                                <View style={styles.progressSummary}>
+                                    <View style={styles.progressLabels}>
+                                        <Text style={styles.progressCount}>{toBuyCount} to buy</Text>
+                                        {boughtCount > 0 ? (
+                                            // Where the checked items went: they
+                                            // leave their aisles, and this is
+                                            // the way to them.
+                                            <Pressable
+                                                onPress={showCheckedSection}
+                                                hitSlop={10}
+                                                style={({ pressed }) => [styles.progressCaptionLink, pressed && styles.pressedFaint]}
+                                                accessibilityRole="button"
+                                                accessibilityLabel={`${boughtCount} of ${shoppingCount} checked`}
+                                                accessibilityHint="Shows the checked items"
+                                            >
+                                                <Text style={[styles.progressCaption, styles.progressCaptionActive]}>{boughtCount}/{shoppingCount} checked</Text>
+                                                <Ionicons name="chevron-down" size={11} color={primary} />
+                                            </Pressable>
+                                        ) : (
+                                            <Text style={styles.progressCaption}>{boughtCount}/{shoppingCount} checked</Text>
+                                        )}
+                                    </View>
+                                    <View style={styles.progressTrack} accessibilityRole="progressbar" accessibilityLabel="Shopping progress" accessibilityValue={{ min: 0, max: Math.max(1, shoppingCount), now: boughtCount }} aria-valuemin={0} aria-valuemax={Math.max(1, shoppingCount)} aria-valuenow={boughtCount}>
+                                        <Animated.View style={[styles.progressFill, progressStyle]} />
+                                    </View>
                                 </View>
-                                <View style={styles.progressTrack} accessibilityRole="progressbar" accessibilityLabel="Shopping progress" accessibilityValue={{ min: 0, max: Math.max(1, shoppingCount), now: boughtCount }} aria-valuemin={0} aria-valuemax={Math.max(1, shoppingCount)} aria-valuenow={boughtCount}>
-                                    <Animated.View style={[styles.progressFill, progressStyle]} />
-                                </View>
+                                <GroceryListMenu
+                                    undoLabel={stepLabel(nextStep(undoStackRef.current))}
+                                    redoLabel={stepLabel(nextStep(redoStackRef.current))}
+                                    onUndo={undo}
+                                    onRedo={redo}
+                                    mealTags={hasMealLinks ? { shown: showMealTags, onToggle: toggleMealTags } : undefined}
+                                    aisles={aisleKeys.length > 0 ? {
+                                        allFolded: aisleKeys.every(key => collapsedAisles.has(key)),
+                                        onFoldAll: () => setAllAislesFolded(true),
+                                        onUnfoldAll: () => setAllAislesFolded(false),
+                                    } : undefined}
+                                />
                             </View>
-                            {hasMealLinks && (
-                                <GlassPressable
-                                    style={[styles.mealToggle, showMealTags && styles.mealToggleOn]}
-                                    onPress={toggleMealTags}
-                                    accessibilityRole="switch"
-                                    accessibilityState={{ checked: showMealTags }}
-                                    accessibilityLabel="Show which meal each item is for"
-                                    hitSlop={8}
-                                >
-                                    <Ionicons name="restaurant-outline" size={13} color={showMealTags ? primary : inkMuted} />
-                                    <Text style={[styles.mealToggleText, showMealTags && styles.mealToggleTextOn]}>{showMealTags ? 'Meals shown' : 'Show meals'}</Text>
-                                </GlassPressable>
+                            {/* At the top, before anything else on the
+                                list: it is the question to answer before
+                                setting off ("are we actually out of any of
+                                these?"), not something to scroll past the
+                                whole shop to find. Collapsed, it costs one
+                                line. */}
+                            {stapleRows.length > 0 && (
+                                <View style={styles.stapleSection}>
+                                    {/* Tinted and titled like a card of
+                                        its own, with what is in it spelled
+                                        out while collapsed: these are easy to
+                                        scroll past, and skipping them is how
+                                        you get home without the rice. */}
+                                    <Pressable
+                                        style={({ pressed }) => [styles.stapleHeader, pressed && styles.stapleHeaderPressed]}
+                                        onPress={() => setShowStaples(prev => !prev)}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ expanded: showStaples }}
+                                        accessibilityLabel={`You usually have these, ${stapleRows.length} item${stapleRows.length === 1 ? '' : 's'}: ${stapleRows.map(row => row.text).join(', ')}`}
+                                        accessibilityHint={showStaples ? 'Hides them' : "Shows them, so you can add back anything you're out of"}
+                                    >
+                                        <View style={styles.stapleIcon}>
+                                            <Ionicons name="home" size={15} color={stapleAccent} />
+                                        </View>
+                                        <View style={styles.stapleHeaderBody}>
+                                            <View style={styles.stapleTitleRow}>
+                                                <Text style={styles.stapleTitle}>You usually have these</Text>
+                                                <Text style={styles.stapleCount}>{stapleRows.length}</Text>
+                                            </View>
+                                            {!showStaples && (
+                                                <Text style={styles.staplePreview} numberOfLines={1}>
+                                                    {stapleRows.slice(0, 4).map(row => row.text).join(', ')}
+                                                    {stapleRows.length > 4 ? ` +${stapleRows.length - 4}` : ''}
+                                                    {' · Out of any?'}
+                                                </Text>
+                                            )}
+                                        </View>
+                                        <Ionicons
+                                            name={showStaples ? 'chevron-up' : 'chevron-down'}
+                                            size={16}
+                                            color={stapleAccent}
+                                        />
+                                    </Pressable>
+                                    {showStaples && (
+                                        <>
+                                            {/* Says what a tap does before the
+                                                user has to guess. The rows are
+                                                not swipeable or draggable in
+                                                here — they are a question, not
+                                                a list. */}
+                                            <Text style={styles.stapleHint}>
+                                                Tap one to add it back for this shop. Hold to stop treating it
+                                                as something you keep in.
+                                            </Text>
+                                            {stapleRows.map(row => (
+                                                <Pressable
+                                                    key={row.id}
+                                                    style={styles.stapleRow}
+                                                    onPress={() => promoteStaple(row)}
+                                                    onLongPress={() => confirmAlwaysShow(row)}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={`Add ${row.text} back to the list`}
+                                                >
+                                                    <Ionicons name="add-circle-outline" size={21} color={stapleAccent} />
+                                                    <Text style={styles.stapleText} numberOfLines={1}>{row.text}</Text>
+                                                    {!!row.totalQuantity && (
+                                                        <Text style={styles.stapleQuantity}>{row.totalQuantity}</Text>
+                                                    )}
+                                                </Pressable>
+                                            ))}
+                                        </>
+                                    )}
+                                </View>
                             )}
                         </View>
                     }
@@ -1123,6 +1732,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     // measure zero and the list renders as blank white space.
                     // (Web flexbox falls back to content height here; Yoga does
                     // not, so this looks fine everywhere except on a device.)
+                    onContentSizeChange={(_w: number, h: number) => { contentHeightRef.current = h; }}
                     containerStyle={styles.list}
                     style={styles.list}
                     // The bottom row of a list has nothing below it to scroll up
@@ -1131,60 +1741,8 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     contentContainerStyle={[styles.listContent, { paddingBottom: (isKeyboardVisible ? 28 : LIST_BOTTOM_SPACE) + keyboard.keyboardSpace }]}
                     ListFooterComponent={
                         <>
-                            {/* Above the checked section on purpose. The list
-                                reads top to bottom as still to buy, then things
-                                you already have, then things now in the trolley
-                                — least settled to most. */}
-                            {stapleRows.length > 0 && (
-                                <View style={styles.checkedSection}>
-                                    <Pressable
-                                        style={styles.checkedHeader}
-                                        onPress={() => setShowStaples(prev => !prev)}
-                                        accessibilityRole="button"
-                                        accessibilityState={{ expanded: showStaples }}
-                                        accessibilityLabel={`You usually have these, ${stapleRows.length} item${stapleRows.length === 1 ? '' : 's'}`}
-                                    >
-                                        <Ionicons
-                                            name={showStaples ? 'chevron-down' : 'chevron-forward'}
-                                            size={14}
-                                            color="#8e8e93"
-                                        />
-                                        <Text style={styles.checkedHeaderText}>You usually have these</Text>
-                                        <Text style={styles.checkedCount}>{stapleRows.length}</Text>
-                                    </Pressable>
-                                    {showStaples && (
-                                        <>
-                                            {/* Says what a tap does before the
-                                                user has to guess. The rows are
-                                                not swipeable or draggable in
-                                                here — they are a question, not
-                                                a list. */}
-                                            <Text style={styles.stapleHint}>
-                                                Tap one to add it back for this shop. Hold to stop treating it
-                                                as something you keep in.
-                                            </Text>
-                                            {stapleRows.map(row => (
-                                                <Pressable
-                                                    key={row.id}
-                                                    style={styles.stapleRow}
-                                                    onPress={() => promoteStaple(row)}
-                                                    onLongPress={() => confirmAlwaysShow(row)}
-                                                    accessibilityRole="button"
-                                                    accessibilityLabel={`Add ${row.text} back to the list`}
-                                                >
-                                                    <Ionicons name="add-circle-outline" size={20} color={inkFaint} />
-                                                    <Text style={styles.stapleText} numberOfLines={1}>{row.text}</Text>
-                                                    {!!row.totalQuantity && (
-                                                        <Text style={styles.stapleQuantity}>{row.totalQuantity}</Text>
-                                                    )}
-                                                </Pressable>
-                                            ))}
-                                        </>
-                                    )}
-                                </View>
-                            )}
                             {checkedRows.length > 0 && (
-                                <View style={styles.checkedSection}>
+                                <View ref={checkedSectionRef} collapsable={false} style={styles.checkedSection}>
                                     <Pressable
                                         style={styles.checkedHeader}
                                         onPress={() => setShowChecked(prev => !prev)}
@@ -1229,6 +1787,7 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     }
                 />
             )}
+            <FiledToast toast={filedToast} onShow={showFiledRows} onUnfile={unfileFromToast} />
             <QuantityEditorModal
                 isVisible={isModalVisible} item={selectedItem}
                 onSave={handleSaveQuantity} onClose={closeQuantityEditor}
@@ -1249,6 +1808,7 @@ const styles = StyleSheet.create({
     tapToAdd: { flexGrow: 1, minHeight: 120 },
     itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingRight: 12, minHeight: 55, backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 17, borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)' },
     swipeRowFrame: { borderRadius: 17, overflow: 'hidden', marginBottom: 3 },
+    filedFlash: { borderRadius: 17, borderWidth: 1.5, borderColor: 'rgba(35, 120, 94, 0.35)', backgroundColor: 'rgba(35, 120, 94, 0.10)' },
     sectionRow: { backgroundColor: 'transparent', borderColor: 'transparent', paddingTop: 18, paddingBottom: 8, minHeight: 48, marginBottom: 0 },
     checkboxChecked: { backgroundColor: primary, borderColor: primary },
     dragHandle: { paddingLeft: 10, paddingRight: 9, paddingVertical: 5 },
@@ -1256,14 +1816,25 @@ const styles = StyleSheet.create({
     // Kept in the layout rather than removed, so a checked row lines up with the
     // rows above it instead of shifting left once it is put away.
     dragIconIdle: { opacity: 0 },
+    // Warm, where the rest of the list is green and white: set apart enough to
+    // be noticed on the way past, without shouting like a warning would.
+    stapleSection: { marginTop: 4, marginBottom: 10, borderRadius: 17, backgroundColor: '#FBEFE8', borderWidth: 1, borderColor: 'rgba(233,162,139,0.4)', overflow: 'hidden' },
+    stapleHeader: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingLeft: 12, paddingRight: 14, paddingVertical: 11 },
+    stapleHeaderPressed: { backgroundColor: 'rgba(233,162,139,0.12)' },
+    stapleIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F4DDD0' },
+    stapleHeaderBody: { flex: 1 },
+    stapleTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+    stapleTitle: { fontSize: 14, fontWeight: '600', color: ink },
+    stapleCount: { fontSize: 11, fontWeight: '600', color: stapleAccent, backgroundColor: '#F4DDD0', borderRadius: 9, paddingHorizontal: 6, paddingVertical: 2, overflow: 'hidden' },
+    staplePreview: { fontSize: 12, color: inkMuted, marginTop: 2 },
     checkedSection: { marginTop: 17, paddingTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     // A quiet boundary is enough to show that a draft is not part of the final
     // named aisle; it does not need a user-facing "Uncategorized" category.
     unfiledItems: { marginTop: 17, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     checkedHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 15, paddingVertical: 12 },
-    stapleHint: { fontSize: 12, color: inkFaint, lineHeight: 17, paddingHorizontal: 15, paddingBottom: 10 },
-    stapleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, paddingVertical: 11 },
-    stapleText: { flex: 1, fontSize: 16, color: inkMuted },
+    stapleHint: { fontSize: 12, color: inkMuted, lineHeight: 17, paddingHorizontal: 15, paddingBottom: 10 },
+    stapleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 15, paddingVertical: 11, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(233,162,139,0.45)' },
+    stapleText: { flex: 1, fontSize: 16, color: ink },
     stapleQuantity: { fontSize: 13, color: inkFaint },
     checkedHeaderText: { fontSize: 13, fontWeight: '600', color: inkMuted },
     checkedCount: { fontSize: 11, color: primary, backgroundColor: accentSoft, borderRadius: 9, paddingHorizontal: 6, paddingVertical: 2 },
@@ -1277,14 +1848,15 @@ const styles = StyleSheet.create({
     mealTagRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
     mealTagIcon: { marginTop: 0.5 },
     mealTagText: { flex: 1, fontSize: 12, color: inkFaint },
-    // The show/hide-backlinks control beside shopping progress.
-    mealToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: hairline, backgroundColor: '#fff' },
-    mealToggleOn: { borderColor: 'transparent', backgroundColor: accentSoft },
-    mealToggleText: { fontSize: 12, fontWeight: '600', color: inkMuted },
-    mealToggleTextOn: { color: primary },
     checked: { textDecorationLine: 'line-through', color: inkFaint },
     clearButton: { paddingHorizontal: 8, paddingVertical: 4, width: 35, alignItems: 'center' },
     clearText: { fontSize: 16, color: inkFaint, paddingRight: 5 },
+    // The fold control on an aisle heading, with the aisle's progress beside
+    // the chevron while it is folded.
+    aisleToggle: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, marginLeft: 4 },
+    aisleTogglePressed: { backgroundColor: 'rgba(23,63,53,0.06)' },
+    aisleCount: { fontSize: 12, fontWeight: '600', color: inkMuted, backgroundColor: 'rgba(23,63,53,0.06)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2, overflow: 'hidden' },
+    aisleCountProgress: { color: primary, backgroundColor: accentSoft },
     sectionText: { fontWeight: '700', fontSize: 12, color: inkMuted, letterSpacing: 1.3, textTransform: 'uppercase' },
     quantityLabel: { backgroundColor: accentSoft, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginRight: 8 },
     quantityChecked: { backgroundColor: surface },
@@ -1293,6 +1865,9 @@ const styles = StyleSheet.create({
     progressSummary: { flex: 1 },
     progressLabels: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 7 },
     progressCount: { fontSize: 14, lineHeight: 20, fontWeight: '600', color: ink },
+    progressCaptionLink: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 6 },
+    progressCaptionActive: { color: primary, fontWeight: '600' },
+    pressedFaint: { opacity: 0.55 },
     progressCaption: { color: inkMuted, fontSize: 11, lineHeight: 17 },
     progressTrack: { height: 3, backgroundColor: 'rgba(23,63,53,0.07)', borderRadius: 2, marginTop: 6, overflow: 'hidden' },
     progressFill: { height: 3, backgroundColor: primary, borderRadius: 2 },
