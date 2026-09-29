@@ -1222,28 +1222,84 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     // Progress counts the visible shopping rows after aggregation,
                     // and leaves pantry staples out until they are added back.
                     ListHeaderComponent={
-                        <View style={styles.listHeader}>
-                            <View style={styles.progressSummary}>
-                                <View style={styles.progressLabels}>
-                                    <Text style={styles.progressCount}>{toBuyCount} to buy</Text>
-                                    <Text style={styles.progressCaption}>{boughtCount}/{shoppingCount} checked</Text>
+                        <View>
+                            <View style={styles.listHeader}>
+                                <View style={styles.progressSummary}>
+                                    <View style={styles.progressLabels}>
+                                        <Text style={styles.progressCount}>{toBuyCount} to buy</Text>
+                                        <Text style={styles.progressCaption}>{boughtCount}/{shoppingCount} checked</Text>
+                                    </View>
+                                    <View style={styles.progressTrack} accessibilityRole="progressbar" accessibilityLabel="Shopping progress" accessibilityValue={{ min: 0, max: Math.max(1, shoppingCount), now: boughtCount }} aria-valuemin={0} aria-valuemax={Math.max(1, shoppingCount)} aria-valuenow={boughtCount}>
+                                        <Animated.View style={[styles.progressFill, progressStyle]} />
+                                    </View>
                                 </View>
-                                <View style={styles.progressTrack} accessibilityRole="progressbar" accessibilityLabel="Shopping progress" accessibilityValue={{ min: 0, max: Math.max(1, shoppingCount), now: boughtCount }} aria-valuemin={0} aria-valuemax={Math.max(1, shoppingCount)} aria-valuenow={boughtCount}>
-                                    <Animated.View style={[styles.progressFill, progressStyle]} />
-                                </View>
+                                {hasMealLinks && (
+                                    <GlassPressable
+                                        style={[styles.mealToggle, showMealTags && styles.mealToggleOn]}
+                                        onPress={toggleMealTags}
+                                        accessibilityRole="switch"
+                                        accessibilityState={{ checked: showMealTags }}
+                                        accessibilityLabel="Show which meal each item is for"
+                                        hitSlop={8}
+                                    >
+                                        <Ionicons name="restaurant-outline" size={13} color={showMealTags ? primary : inkMuted} />
+                                        <Text style={[styles.mealToggleText, showMealTags && styles.mealToggleTextOn]}>{showMealTags ? 'Meals shown' : 'Show meals'}</Text>
+                                    </GlassPressable>
+                                )}
                             </View>
-                            {hasMealLinks && (
-                                <GlassPressable
-                                    style={[styles.mealToggle, showMealTags && styles.mealToggleOn]}
-                                    onPress={toggleMealTags}
-                                    accessibilityRole="switch"
-                                    accessibilityState={{ checked: showMealTags }}
-                                    accessibilityLabel="Show which meal each item is for"
-                                    hitSlop={8}
-                                >
-                                    <Ionicons name="restaurant-outline" size={13} color={showMealTags ? primary : inkMuted} />
-                                    <Text style={[styles.mealToggleText, showMealTags && styles.mealToggleTextOn]}>{showMealTags ? 'Meals shown' : 'Show meals'}</Text>
-                                </GlassPressable>
+                            {/* At the top, before anything else on the
+                                list: it is the question to answer before
+                                setting off ("are we actually out of any of
+                                these?"), not something to scroll past the
+                                whole shop to find. Collapsed, it costs one
+                                line. */}
+                            {stapleRows.length > 0 && (
+                                <View style={styles.stapleSection}>
+                                    <Pressable
+                                        style={styles.checkedHeader}
+                                        onPress={() => setShowStaples(prev => !prev)}
+                                        accessibilityRole="button"
+                                        accessibilityState={{ expanded: showStaples }}
+                                        accessibilityLabel={`You usually have these, ${stapleRows.length} item${stapleRows.length === 1 ? '' : 's'}`}
+                                    >
+                                        <Ionicons
+                                            name={showStaples ? 'chevron-down' : 'chevron-forward'}
+                                            size={14}
+                                            color="#8e8e93"
+                                        />
+                                        <Text style={styles.checkedHeaderText}>You usually have these</Text>
+                                        <Text style={styles.checkedCount}>{stapleRows.length}</Text>
+                                    </Pressable>
+                                    {showStaples && (
+                                        <>
+                                            {/* Says what a tap does before the
+                                                user has to guess. The rows are
+                                                not swipeable or draggable in
+                                                here — they are a question, not
+                                                a list. */}
+                                            <Text style={styles.stapleHint}>
+                                                Tap one to add it back for this shop. Hold to stop treating it
+                                                as something you keep in.
+                                            </Text>
+                                            {stapleRows.map(row => (
+                                                <Pressable
+                                                    key={row.id}
+                                                    style={styles.stapleRow}
+                                                    onPress={() => promoteStaple(row)}
+                                                    onLongPress={() => confirmAlwaysShow(row)}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={`Add ${row.text} back to the list`}
+                                                >
+                                                    <Ionicons name="add-circle-outline" size={20} color={inkFaint} />
+                                                    <Text style={styles.stapleText} numberOfLines={1}>{row.text}</Text>
+                                                    {!!row.totalQuantity && (
+                                                        <Text style={styles.stapleQuantity}>{row.totalQuantity}</Text>
+                                                    )}
+                                                </Pressable>
+                                            ))}
+                                        </>
+                                    )}
+                                </View>
                             )}
                         </View>
                     }
@@ -1306,58 +1362,6 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                     contentContainerStyle={[styles.listContent, { paddingBottom: (isKeyboardVisible ? 28 : LIST_BOTTOM_SPACE) + keyboard.keyboardSpace }]}
                     ListFooterComponent={
                         <>
-                            {/* Above the checked section on purpose. The list
-                                reads top to bottom as still to buy, then things
-                                you already have, then things now in the trolley
-                                — least settled to most. */}
-                            {stapleRows.length > 0 && (
-                                <View style={styles.checkedSection}>
-                                    <Pressable
-                                        style={styles.checkedHeader}
-                                        onPress={() => setShowStaples(prev => !prev)}
-                                        accessibilityRole="button"
-                                        accessibilityState={{ expanded: showStaples }}
-                                        accessibilityLabel={`You usually have these, ${stapleRows.length} item${stapleRows.length === 1 ? '' : 's'}`}
-                                    >
-                                        <Ionicons
-                                            name={showStaples ? 'chevron-down' : 'chevron-forward'}
-                                            size={14}
-                                            color="#8e8e93"
-                                        />
-                                        <Text style={styles.checkedHeaderText}>You usually have these</Text>
-                                        <Text style={styles.checkedCount}>{stapleRows.length}</Text>
-                                    </Pressable>
-                                    {showStaples && (
-                                        <>
-                                            {/* Says what a tap does before the
-                                                user has to guess. The rows are
-                                                not swipeable or draggable in
-                                                here — they are a question, not
-                                                a list. */}
-                                            <Text style={styles.stapleHint}>
-                                                Tap one to add it back for this shop. Hold to stop treating it
-                                                as something you keep in.
-                                            </Text>
-                                            {stapleRows.map(row => (
-                                                <Pressable
-                                                    key={row.id}
-                                                    style={styles.stapleRow}
-                                                    onPress={() => promoteStaple(row)}
-                                                    onLongPress={() => confirmAlwaysShow(row)}
-                                                    accessibilityRole="button"
-                                                    accessibilityLabel={`Add ${row.text} back to the list`}
-                                                >
-                                                    <Ionicons name="add-circle-outline" size={20} color={inkFaint} />
-                                                    <Text style={styles.stapleText} numberOfLines={1}>{row.text}</Text>
-                                                    {!!row.totalQuantity && (
-                                                        <Text style={styles.stapleQuantity}>{row.totalQuantity}</Text>
-                                                    )}
-                                                </Pressable>
-                                            ))}
-                                        </>
-                                    )}
-                                </View>
-                            )}
                             {checkedRows.length > 0 && (
                                 <View style={styles.checkedSection}>
                                     <Pressable
@@ -1433,6 +1437,7 @@ const styles = StyleSheet.create({
     // Kept in the layout rather than removed, so a checked row lines up with the
     // rows above it instead of shifting left once it is put away.
     dragIconIdle: { opacity: 0 },
+    stapleSection: { marginTop: 4, marginBottom: 8, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.8)' },
     checkedSection: { marginTop: 17, paddingTop: 4, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: hairline },
     // A quiet boundary is enough to show that a draft is not part of the final
     // named aisle; it does not need a user-facing "Uncategorized" category.
