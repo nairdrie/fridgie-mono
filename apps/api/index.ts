@@ -4,6 +4,7 @@ import { serve } from 'bun'
 import fg from 'fast-glob'
 import { cors } from 'hono/cors'
 import { adminAuth, adminRtdb } from './utils/firebase'
+import { mcpApp } from './mcp'
 import type { ServerWebSocket } from 'bun'
 import type { DataSnapshot } from 'firebase-admin/database'
 
@@ -21,6 +22,11 @@ function toRoute(file: string) {
     .replace(/\.ts$/, '')
     .replace(/\[([^\]]+)\]/g, ':$1')
 }
+
+// The Claude connector: /mcp, its OAuth endpoints under /oauth, and their
+// /.well-known discovery documents. Outside /api on purpose — these URLs are
+// what MCP clients look for at the root of the server. See mcp/README.md.
+app.route('/', mcpApp)
 
 // Mount *only* your pure-HTTP Hono modules
 const files = await fg(['api/**/*.ts'])
@@ -47,6 +53,12 @@ serve({
     // recipe. Keep this request alive without relaxing every route's timeout.
     if (req.method === 'POST' && /^\/api\/recipe\/import\/?$/.test(url.pathname)) {
       server.timeout(req, 240)
+    }
+
+    // Adding a meal through the Claude connector waits on the same aisle
+    // sorting a meal added in the app does, which is a model call.
+    if (req.method === 'POST' && url.pathname === '/mcp') {
+      server.timeout(req, 120)
     }
 
     // If this is our WS path, do the upgrade

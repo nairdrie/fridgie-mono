@@ -139,6 +139,14 @@ export default function RootLayout() {
                       }}
                     />
                     <Stack.Screen
+                      name="connect-claude"
+                      options={{
+                        title: 'Connect Claude',
+                        headerShown: false,
+                        fullScreenGestureEnabled: true
+                      }}
+                    />
+                    <Stack.Screen
                       name="rate-meal"
                       options={{ 
                         title: 'Rate Meal',

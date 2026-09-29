@@ -57,6 +57,7 @@ COPY --from=prerelease /usr/src/app/apps/api/utils ./apps/api/utils
 COPY --from=prerelease /usr/src/app/apps/api/jobs ./apps/api/jobs
 COPY --from=prerelease /usr/src/app/apps/api/middleware ./apps/api/middleware
 COPY --from=prerelease /usr/src/app/apps/api/api ./apps/api/api
+COPY --from=prerelease /usr/src/app/apps/api/mcp ./apps/api/mcp
 COPY --from=prerelease /usr/src/app/packages/shared ./packages/shared
 
 WORKDIR /usr/src/app/apps/api
