@@ -647,6 +647,7 @@ export default function UserProfile() {
 
     if(!authUser) return <></>;
     const showPrintMilestone = !!printEligibility
+        && printEligibility.featureAvailable === true
         && printEligibility.milestoneReached
         && printEligibility.eligibleCount >= 12
         && !isPrintMilestoneDismissed;
@@ -723,15 +724,17 @@ export default function UserProfile() {
                                 <Text style={styles.cookbookTitle}>Your cookbook</Text>
                                 <View style={styles.cookbookTitleActions}>
                                     <Text style={styles.recipeCount}>{cookbook.length} recipes</Text>
-                                    <TouchableOpacity
-                                        style={styles.quietPrintAction}
-                                        onPress={() => router.push('/print-cookbook' as any)}
-                                        accessibilityRole="button"
-                                        accessibilityLabel="Make a printed cookbook"
-                                    >
-                                        <Ionicons name="print-outline" size={15} color={primary} />
-                                        <Text style={styles.quietPrintActionText}>Print</Text>
-                                    </TouchableOpacity>
+                                    {printEligibility?.featureAvailable === true && (
+                                        <TouchableOpacity
+                                            style={styles.quietPrintAction}
+                                            onPress={() => router.push('/print-cookbook' as any)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Make a printed cookbook"
+                                        >
+                                            <Ionicons name="print-outline" size={15} color={primary} />
+                                            <Text style={styles.quietPrintActionText}>Print</Text>
+                                        </TouchableOpacity>
+                                    )}
                                 </View>
                             </View>
                             <View style={styles.searchRow}>

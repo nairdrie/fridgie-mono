@@ -240,12 +240,16 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
             }
         };
 
+        // Reconcile the visible allowance whenever this sheet opens. Success
+        // headers keep the counter exact after this device generates, while
+        // this refresh catches suggestions used on another signed-in device.
+        void refreshPro();
         void fetchPreferences();
         return () => {
             cancelled = true;
             if (suggestionSession.current === session) invalidateSuggestionSession(false);
         };
-    }, [closeSuggestionModal, invalidateSuggestionSession, isVisible, router]);
+    }, [closeSuggestionModal, invalidateSuggestionSession, isVisible, refreshPro, router]);
 
     const push = (bubble: Bubble) => setTranscript(prev => [...prev, bubble]);
 
@@ -768,23 +772,38 @@ export default function MealSuggestionsModal({ isVisible, onClose, onAddSelected
                                     currentUsageNotice.level !== 'normal' && styles.usageRowWarning,
                                     (currentUsageNotice.level === 'critical' || currentUsageNotice.level === 'exhausted') && styles.usageRowCritical,
                                 ]}
-                                accessibilityLiveRegion="polite"
                             >
                                 <Ionicons
                                     name={currentUsageNotice.level === 'normal' ? 'sparkles-outline' : 'time-outline'}
                                     size={14}
                                     color={currentUsageNotice.level === 'exhausted' ? '#A44133' : inkMuted}
+                                    accessible={false}
                                 />
                                 <Text style={[
                                     styles.usageText,
                                     (currentUsageNotice.level === 'critical' || currentUsageNotice.level === 'exhausted')
                                         && styles.usageTextExhausted,
-                                ]}>
+                                ]}
+                                    accessibilityRole={
+                                        currentUsageNotice.level === 'critical' || currentUsageNotice.level === 'exhausted'
+                                            ? 'alert'
+                                            : 'text'
+                                    }
+                                    accessibilityLiveRegion={
+                                        currentUsageNotice.level === 'critical' || currentUsageNotice.level === 'exhausted'
+                                            ? 'assertive'
+                                            : 'polite'
+                                    }
+                                >
                                     {currentUsageNotice.title} · {currentUsageNotice.reset}
                                 </Text>
                                 {!isPro && currentUsageNotice.level !== 'normal' && (
-                                    <GlassPressable onPress={() => openPaywall('quota')} hitSlop={8} accessibilityLabel="See Fridgie Pro">
-                                        <Text style={styles.usageUpgrade}>Pro</Text>
+                                    <GlassPressable
+                                        onPress={() => openPaywall('quota')}
+                                        hitSlop={8}
+                                        accessibilityLabel="Get Fridgie Pro for more weekly suggestions"
+                                    >
+                                        <Text style={styles.usageUpgrade}>Get more with Pro</Text>
                                     </GlassPressable>
                                 )}
                             </View>

@@ -704,9 +704,12 @@ export default function PrintCookbookBuilder() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [summary, drafts] = await Promise.all([getCookbookPrintEligibility(), getCookbookPrintDrafts()]);
+        const summary = await getCookbookPrintEligibility();
         if (ignore) return;
         setEligibility(summary);
+        if (summary.featureAvailable !== true) return;
+        const drafts = await getCookbookPrintDrafts();
+        if (ignore) return;
         const active = drafts.filter((candidate) => candidate.status === 'active').sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
         if (active) {
           const reconciled = { ...draftInput(active), recipes: reconcilePrintSelections(summary.recipes, active.recipes) };
@@ -977,6 +980,7 @@ export default function PrintCookbookBuilder() {
   }
 
   if (loading) return <AmbientBackground><SafeAreaView style={styles.centered}><ActivityIndicator size="large" color={primary} /><Text style={styles.loadingTitle}>Opening your cookbook draft…</Text></SafeAreaView></AmbientBackground>;
+  if (eligibility?.featureAvailable !== true) return <AmbientBackground><SafeAreaView style={styles.centered}><View style={styles.largeIcon}><Ionicons name="book-outline" size={34} color={primary} /></View><Text style={styles.loadingTitle}>Printed cookbooks are coming soon</Text><Text style={styles.loadingDetail}>Fridgie will show the print builder here after private storage, payments, and fulfillment are ready.</Text><GlassPressable style={styles.primaryButton} onPress={() => router.back()}><Text style={styles.primaryButtonText}>Back to your cookbook</Text></GlassPressable></SafeAreaView></AmbientBackground>;
   if (loadError || !eligibility || !input || !draft) return <AmbientBackground><SafeAreaView style={styles.centered}><View style={styles.largeIcon}><Ionicons name="cloud-offline-outline" size={34} color={primary} /></View><Text style={styles.loadingTitle}>Your draft stayed safely put</Text><Text style={styles.loadingDetail}>{loadError || 'The draft could not be loaded.'}</Text><GlassPressable style={styles.primaryButton} onPress={() => router.replace('/print-cookbook' as any)}><Text style={styles.primaryButtonText}>Try again</Text></GlassPressable><GlassPressable style={styles.textButton} onPress={() => router.back()}><Text style={styles.textButtonText}>Back to profile</Text></GlassPressable></SafeAreaView></AmbientBackground>;
 
   return (

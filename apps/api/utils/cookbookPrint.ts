@@ -21,6 +21,12 @@ export const COOKBOOK_PRINT_MIN_RECIPES = 1;
 export const COOKBOOK_PRINT_MILESTONE = 12;
 export const COOKBOOK_PRINT_MIN_PAGES = 32;
 export const COOKBOOK_PRINT_MAX_PAGES = 800;
+
+/** The user-facing builder stays hidden until storage and provider boundaries
+ * have passed the deployment checks and the runtime is explicitly enabled. */
+export function cookbookPrintFeatureAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.PRINT_COMMERCE_ENABLED?.trim().toLowerCase() === 'true';
+}
 /** 7 x 10 trim plus Lulu's required 0.125 inch full bleed on every edge. */
 export const INTERIOR_WIDTH_PT = 7.25 * 72;
 export const INTERIOR_HEIGHT_PT = 10.25 * 72;

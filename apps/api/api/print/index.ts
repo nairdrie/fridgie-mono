@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { auth } from '@/middleware/auth';
 import { requireAccount } from '@/middleware/requireAccount';
 import { CookbookPrintError, CookbookPrintService, publicPrintDraft } from '@/utils/cookbookPrintService';
+import { cookbookPrintFeatureAvailable } from '@/utils/cookbookPrint';
 
 const route = new Hono();
 const service = new CookbookPrintService();
@@ -20,6 +21,16 @@ route.onError((error: any, c) => {
 });
 
 route.get('/eligibility', async c => c.json(await service.eligibility(c.get('uid'))));
+
+route.use('*', async (c, next) => {
+  if (!cookbookPrintFeatureAvailable()) {
+    return c.json({
+      error: 'PRINT_FEATURE_UNAVAILABLE',
+      message: 'Printed cookbooks are not available yet.',
+    }, 503);
+  }
+  await next();
+});
 
 route.get('/draft', async c => c.json(publicPrintDraft(await service.getOrCreateDraft(c.get('uid')))));
 route.post('/draft', async c => {

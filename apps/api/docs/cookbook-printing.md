@@ -225,11 +225,11 @@ requires it.
 ## 5. CI deployment and one-time worker bootstrap
 
 Printing is opt-in at deployment time. With the GitHub repository variable
-`PRINT_COMMERCE_ENABLED` unset or `false`, the existing production API deploy
-keeps its original environment/secrets and does not touch a print job. CI also
-checks the current Cloud Run service before applying its full replacement flag
-set: if it finds a manually attached `LULU_*`, `PRINT_*`, or `STRIPE_*` binding
-while the gate is off, it fails instead of silently deleting that binding.
+`PRINT_COMMERCE_ENABLED` unset or `false`, the API reports printing unavailable,
+the mobile app hides its print entry points, and CI does not touch a print job.
+CI checks the current Cloud Run service before applying its full replacement
+flag set: if it finds a manually attached `LULU_*`, `PRINT_*`, or `STRIPE_*`
+binding while the gate is off, it fails instead of silently deleting it.
 
 When the gate is exactly `true`, CI validates every non-secret setting, checks
 that all five Secret Manager entries have an enabled `latest` version, checks
@@ -242,6 +242,9 @@ the bootstrap below (for example VPC or volume settings) remain inherited and
 must be reviewed separately if an operator later adds them.
 This is deliberately stricter than the Discover worker's image-only update:
 reconciliation is part of the payment and fulfillment safety boundary.
+The validated env set also passes `PRINT_COMMERCE_ENABLED=true` into the API and
+worker. Do not add that runtime value manually without the surrounding CI
+checks: it is the server-owned capability returned to clients.
 
 ### Required Secret Manager entries
 

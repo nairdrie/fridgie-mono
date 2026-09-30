@@ -22,7 +22,7 @@ All source, subtitle, and video requests now use bounded public fetching: valida
 
 - `expo-share-intent` is pinned to **4.1.2**, the upstream Expo SDK 53 version. The small upstream `xcode@3.0.1` patch is applied by `patch-package` alongside the existing postinstall patch.
 - The iOS share extension is `com.nairdrie.fridgie.share-extension`, display name **Save to Fridgie**, generated Xcode target `SavetoFridgie`. Both targets use **group.com.nairdrie.fridgie**. Activation accepts one web URL/web page or text; raw image/video sharing is not advertised.
-- Android receives `ACTION_SEND` with `text/*`. Expo Router rewrites the extension’s transport URL and routes the durable shared-link inbox into the import screen.
+- Android receives `ACTION_SEND` with `text/*`. Expo Router rewrites the extension’s transport URL and routes the durable shared-link inbox into the import screen. The share-intent plugin is explicitly configured for `singleTop` (rather than its `singleTask` default) so RevenueCat bank-app verification is not cancelled; the combined launch-mode plugin preserves both the `fridgie` and development-client schemes on that activity.
 - This requires a **new native build**; an OTA JavaScript update or Expo Go cannot add a system share extension. Real-device/release signing must provision the host and extension with the matching Apple App Group. No Apple account configuration was changed here.
 - The Instagram/Supadata backend is deployed to `api.fridgie.ca` as of 2026-09-20. Distributing the share extension still requires a signed native client build.
 
@@ -55,7 +55,7 @@ CI uses the full `preview` profile for iOS, including the share extension. The t
 - A live unauthenticated fetch of [this public Reel](https://www.instagram.com/reel/CV9O_GRrO6t/), linked by [its creator’s recipe page](https://www.zezzacooks.com/tomato-burrata-pasta/), returned caption, creator, cover and video URL. Subsequent authenticated cloud tests verified both providers. A captionless live Reel extraction returned a 16-ingredient, 15-step Pumpkin Cinnamon Roll Honey Buns recipe in 26 seconds, using actual Supadata and Anthropic calls. No user recipe was saved.
 - API TypeScript passes; 373 API tests pass, with two ffmpeg-dependent tests skipped because ffmpeg is unavailable in the local test environment.
 - On the Astra iOS simulator, Safari’s real system share sheet displays Fridgie with its brand icon. Both warm and cold app launches retain the exact public Reel URL and reach the sign-in-to-import screen. The shared App Group payload is cleared after the durable inbox receives it. This validates native handoff; authenticated extraction/save was exercised separately with isolated browser fixtures.
-- TikTok/Instagram application share buttons still need a physical-device pass. Android intent configuration is generated, but Android runtime sharing was not tested. Physical-device release signing/provisioning remains outstanding; API and compatibility-function deployment is complete.
+- TikTok/Instagram application share buttons still need a physical-device pass, including sharing while Fridgie is backgrounded and while another Fridgie activity is visible. Android intent configuration is generated, but Android runtime sharing was not tested. Physical-device release signing/provisioning remains outstanding; API and compatibility-function deployment is complete.
 
 ## Audio transcription provider
 

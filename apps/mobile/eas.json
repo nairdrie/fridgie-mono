@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api"
+        "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api",
+        "FRIDGIE_BUILD_ENV": "development"
       }
     },
     "development-simulator": {
@@ -24,7 +25,8 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api"
+        "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api",
+        "FRIDGIE_BUILD_ENV": "preview"
       }
     },
     "production": {
@@ -33,7 +35,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api"
+        "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api",
+        "FRIDGIE_BUILD_ENV": "production"
       }
     }
   },

@@ -17,5 +17,8 @@ node_modules/
 .env
 .env.*.local
 
+# Temporary Workload Identity credentials written by google-github-actions/auth.
+gha-creds-*.json
+
 # local verification output
 apps/mobile/.expo-export-check/

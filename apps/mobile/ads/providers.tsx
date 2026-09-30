@@ -8,6 +8,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import React, { useEffect, useRef } from 'react';
 import { Dimensions, Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { loadGoogleAdsSdk } from './admobSdk';
 
 type GoogleAdsSdk = typeof import('react-native-google-mobile-ads');
 type GoogleNativeAd = import('react-native-google-mobile-ads').NativeAd;
@@ -219,13 +220,11 @@ async function prepareAdMob(): Promise<{ sdk: GoogleAdsSdk; ready: boolean } | n
   if (admobReady) return admobReady;
   admobReady = (async () => {
     let sdk: GoogleAdsSdk;
-    try {
-      // Expo Go has no native module; a guarded dynamic load converts that to
-      // no-fill instead of breaking Discover or startup.
-      sdk = require('react-native-google-mobile-ads') as GoogleAdsSdk;
-    } catch {
-      return null;
-    }
+    // Expo Go and web have no native module; the platform boundary converts
+    // both to no-fill instead of breaking Discover or the bundle.
+    const loadedSdk = loadGoogleAdsSdk();
+    if (!loadedSdk) return null;
+    sdk = loadedSdk;
     try {
       // UMP is the consent boundary. No SDK initialization or request happens
       // unless the current consent state says ads may be requested.

@@ -11,7 +11,11 @@ import { AuthProvider } from "@/context/AuthContext";
 import { CookbookProvider } from '@/context/CookbookContext';
 import { ListProvider } from '@/context/ListContext';
 import { NotificationProvider } from "@/context/NotificationContext";
-import { ProProvider } from '@/context/ProContext';
+import { ProProvider, usePro } from '@/context/ProContext';
+import {
+  DiscoverAdEntitlementStateProvider,
+  discoverAdEntitlementFromPro,
+} from '@/ads/entitlement';
 import { MEAL_RATING_ENABLED } from '@/constants/features';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -80,6 +84,15 @@ function MotionStack({ children }: { children: React.ReactNode }) {
   return <Stack screenOptions={{ contentStyle: { backgroundColor: canvas }, animation: reduceMotion ? 'none' : 'slide_from_right' }}>{children}</Stack>;
 }
 
+function ProBackedDiscoverAdEntitlement({ children }: { children: React.ReactNode }) {
+  const pro = usePro();
+  return (
+    <DiscoverAdEntitlementStateProvider state={discoverAdEntitlementFromPro(pro)}>
+      {children}
+    </DiscoverAdEntitlementStateProvider>
+  );
+}
+
 export default function RootLayout() {
   return (
     <StripeAppProvider>
@@ -89,6 +102,7 @@ export default function RootLayout() {
         <GlassPreferencesProvider>
         <AuthProvider>
           <ProProvider>
+          <ProBackedDiscoverAdEntitlement>
           <NotificationProvider>
             <ListProvider>
               {/* Which recipes are on YOUR shelf — read from Explore, from a
@@ -208,6 +222,7 @@ export default function RootLayout() {
               </CookbookProvider>
             </ListProvider>
           </NotificationProvider>
+          </ProBackedDiscoverAdEntitlement>
           </ProProvider>
         </AuthProvider>
         </GlassPreferencesProvider>

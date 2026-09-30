@@ -85,10 +85,12 @@
         "expo-build-properties",
         {
           "ios": {
-            "useFrameworks": "static"
+            "useFrameworks": "static",
+            "deploymentTarget": "15.1"
           }
         }
       ],
+      "./plugins/withIosPodDeploymentTarget",
       [
         "expo-share-intent",
         {
@@ -101,7 +103,10 @@
           },
           "androidIntentFilters": [
             "text/*"
-          ]
+          ],
+          "androidMainActivityAttributes": {
+            "android:launchMode": "singleTop"
+          }
         }
       ]
     ],

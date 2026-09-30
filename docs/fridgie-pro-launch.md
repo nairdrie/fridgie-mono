@@ -34,7 +34,9 @@ values below instead of editing paywall code.
    `com.nairdrie.fridgie`, add and activate their base plans, and configure
    license testers. The generated Android manifest is set to `singleTop` by
    `plugins/withRevenueCatAndroidLaunchMode.js` so bank-app verification does
-   not cancel checkout.
+   not cancel checkout. The same plugin preserves app/dev-client deep-link
+   schemes while `expo-share-intent` is explicitly configured for singleTop;
+   device-test purchase return and backgrounded share delivery together.
 4. Do not promise “unlimited.” The backend defaults to 100 accepted suggestion
    generations per UTC week for Pro, configurable with
    `FRIDGIE_PRO_WEEKLY_AI_LIMIT`. Leftovers analysis has a separate default of

@@ -17,12 +17,52 @@ const unavailableAdapter: DiscoverAdEntitlementAdapter = {
   getAdEntitlement: () => 'unknown',
 };
 
-const DiscoverAdEntitlementContext = createContext<DiscoverAdEntitlementAdapter>(unavailableAdapter);
+type DiscoverAdEntitlementSource = DiscoverAdEntitlementAdapter | AdEntitlementState;
+
+const DiscoverAdEntitlementContext = createContext<DiscoverAdEntitlementSource>(unavailableAdapter);
+
+const normalizedEntitlement = (value: unknown): AdEntitlementState => (
+  value === 'ad-supported' || value === 'ad-free' ? value : 'unknown'
+);
+
+export interface ProDiscoverAdState {
+  isPro: boolean;
+  isLoading: boolean;
+  status: {
+    isPro: boolean;
+    entitlement: { status: 'active' | 'inactive' | 'unavailable' };
+  } | null;
+  statusError: string | null;
+  verificationPending: boolean;
+  isBillingStateLoading: boolean;
+  action: 'purchasing' | 'restoring' | null;
+}
+
+/**
+ * Ads are allowed only after the API has positively identified this account as
+ * Free. Every ambiguous transition fails closed, while a verified Pro snapshot
+ * suppresses ads immediately even if purchase recovery is still settling.
+ */
+export function discoverAdEntitlementFromPro(state: ProDiscoverAdState): AdEntitlementState {
+  if (state.isPro && state.status?.isPro === true) return 'ad-free';
+  if (
+    state.isLoading
+    || state.isBillingStateLoading
+    || state.statusError !== null
+    || state.verificationPending
+    || state.action !== null
+    || !state.status
+    || state.isPro !== state.status.isPro
+  ) return 'unknown';
+  return state.status.isPro === false && state.status.entitlement.status === 'inactive'
+    ? 'ad-supported'
+    : 'unknown';
+}
 
 export async function readDiscoverAdEntitlement(adapter: DiscoverAdEntitlementAdapter): Promise<AdEntitlementState> {
   try {
     const value = await adapter.getAdEntitlement();
-    return value === 'ad-supported' || value === 'ad-free' ? value : 'unknown';
+    return normalizedEntitlement(value);
   } catch {
     return 'unknown';
   }
@@ -38,21 +78,37 @@ export function DiscoverAdEntitlementProvider({
   return <DiscoverAdEntitlementContext.Provider value={adapter}>{children}</DiscoverAdEntitlementContext.Provider>;
 }
 
+/** A synchronous source is used by the Pro bridge so account changes cannot
+ * leave the previous Free result visible until an effect runs. */
+export function DiscoverAdEntitlementStateProvider({
+  state,
+  children,
+}: {
+  state: AdEntitlementState;
+  children: React.ReactNode;
+}) {
+  return <DiscoverAdEntitlementContext.Provider value={normalizedEntitlement(state)}>{children}</DiscoverAdEntitlementContext.Provider>;
+}
+
 export function useDiscoverAdEntitlement(): AdEntitlementState {
-  const adapter = useContext(DiscoverAdEntitlementContext);
-  const [state, setState] = useState<AdEntitlementState>('unknown');
+  const source = useContext(DiscoverAdEntitlementContext);
+  const [adapterState, setAdapterState] = useState<AdEntitlementState>('unknown');
 
   useEffect(() => {
+    if (typeof source === 'string') {
+      setAdapterState('unknown');
+      return;
+    }
     let active = true;
-    setState('unknown');
-    void readDiscoverAdEntitlement(adapter).then(value => { if (active) setState(value); });
-    const unsubscribe = adapter.subscribe?.(value => {
-      if (active) setState(value === 'ad-supported' || value === 'ad-free' ? value : 'unknown');
+    setAdapterState('unknown');
+    void readDiscoverAdEntitlement(source).then(value => { if (active) setAdapterState(value); });
+    const unsubscribe = source.subscribe?.(value => {
+      if (active) setAdapterState(normalizedEntitlement(value));
     });
     return () => { active = false; unsubscribe?.(); };
-  }, [adapter]);
+  }, [source]);
 
-  return state;
+  return typeof source === 'string' ? normalizedEntitlement(source) : adapterState;
 }
 
 export const unavailableDiscoverAdEntitlementAdapter = unavailableAdapter;

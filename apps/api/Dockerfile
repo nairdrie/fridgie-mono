@@ -8,7 +8,7 @@
 #
 # The layout inside the image mirrors the repo (apps/api + packages/shared) so
 # the `@fridgie/shared/*` tsconfig path and lexorank resolution both still work.
-FROM oven/bun:1 AS base
+FROM oven/bun:1.3.14 AS base
 WORKDIR /usr/src/app
 
 # install dependencies into temp directory
@@ -26,8 +26,8 @@ RUN cd /temp/prod && bun install --frozen-lockfile --production
 # packages/shared is source-only but declares its own dependency (lexorank),
 # which must be installed for the import to resolve at runtime.
 RUN mkdir -p /temp/shared
-COPY packages/shared/package.json /temp/shared/
-RUN cd /temp/shared && bun install --production
+COPY packages/shared/package.json packages/shared/package-lock.json /temp/shared/
+RUN cd /temp/shared && bun install --production --frozen-lockfile
 
 # copy node_modules from temp directory
 # then copy all (non-ignored) project files into the image

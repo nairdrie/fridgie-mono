@@ -13,7 +13,7 @@ import {
   shouldClearPendingVerification,
   type PendingVerificationKind,
 } from '@/utils/proBilling';
-import type { AccountStatus, AiUsage } from '@/utils/pro';
+import { accountStatusForUid, type AccountStatus, type AiUsage } from '@/utils/pro';
 import React, {
   createContext,
   useCallback,
@@ -186,8 +186,10 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const accountUid = user && !user.isAnonymous ? user.uid : null;
   const [status, setStatus] = useState<AccountStatus | null>(null);
+  const [statusOwnerUid, setStatusOwnerUid] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusErrorOwnerUid, setStatusErrorOwnerUid] = useState<string | null>(null);
   const [offers, setOffers] = useState<ProOffer[]>([]);
   const [isLoadingOffers, setIsLoadingOffers] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
@@ -206,6 +208,7 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
   const billingHydrationVersion = useRef(0);
   const attemptedBoundaryRefresh = useRef<number | null>(null);
   const requestVersion = useRef(0);
+  const statusOwnerUidRef = useRef<string | null>(null);
   accountUidRef.current = accountUid;
 
   const billingConfigured = !!revenueCatKey();
@@ -213,6 +216,16 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
   const verificationPendingForDifferentAccount = verificationPending
     && accountUid !== null
     && pendingVerificationRef.current?.uid !== accountUid;
+  // Auth changes render before the cleanup effect below runs. Associate every
+  // server snapshot/error with its Firebase uid so that first render can never
+  // expose the previous account's plan (or briefly authorize an ad request).
+  const visibleStatus = accountStatusForUid(accountUid, statusOwnerUid, status);
+  const visibleStatusError = statusErrorOwnerUid === accountUid ? statusError : null;
+  const visibleIsLoading = isLoading || (
+    accountUid !== null
+    && visibleStatus === null
+    && visibleStatusError === null
+  );
 
   const visiblePendingMessage = useCallback((): string | null => {
     const pending = pendingVerificationRef.current;
@@ -279,8 +292,11 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
         throw new BillingAccountChangedError();
       }
       if (mounted.current && version === requestVersion.current) {
+        statusOwnerUidRef.current = expectedUid;
         setStatus(next);
+        setStatusOwnerUid(expectedUid);
         setStatusError(null);
+        setStatusErrorOwnerUid(null);
         if (await resolvePendingVerification(expectedUid, next.isPro, false)) {
           setBillingError(null);
         }
@@ -294,6 +310,7 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
         && !(error instanceof BillingAccountChangedError)
       ) {
         setStatusError(errorMessage(error, 'Could not refresh your plan right now.'));
+        setStatusErrorOwnerUid(expectedUid);
       }
       throw error;
     } finally {
@@ -320,10 +337,14 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
   }, [fetchStatus]);
 
   const applyAiUsage = useCallback((usage: AiUsage) => {
+    const uid = accountUidRef.current;
+    if (!uid || statusOwnerUidRef.current !== uid) return;
     setStatus(current => current ? { ...current, aiUsage: usage } : current);
   }, []);
 
   const applyAccountStatus = useCallback((next: AccountStatus) => {
+    const uid = accountUidRef.current;
+    if (!uid || statusOwnerUidRef.current !== uid) return;
     setStatus(current => ({
       ...next,
       // Suggest-quota responses intentionally avoid a second Firestore read
@@ -334,6 +355,7 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
         : next.leftoversScanUsage,
     }));
     setStatusError(null);
+    setStatusErrorOwnerUid(null);
   }, []);
 
   const customerInfoListener = useCallback<CustomerInfoUpdateListener>(() => {
@@ -552,8 +574,11 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
     offersForUid.current = null;
     setOffers([]);
     setIsLoadingOffers(false);
+    statusOwnerUidRef.current = null;
     setStatus(null);
+    setStatusOwnerUid(null);
     setStatusError(null);
+    setStatusErrorOwnerUid(null);
     setBillingError(visiblePendingMessage());
 
     if (!accountUid) {
@@ -583,9 +608,9 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
   // profile, paywall, Suggest Meals and Leftovers all stop showing last week's
   // count at the same moment.
   useEffect(() => {
-    if (!accountUid || !status) return;
+    if (!accountUid || !visibleStatus) return;
     const now = Date.now();
-    const boundaries = [status.aiUsage.windowEndsAt, status.leftoversScanUsage?.windowEndsAt]
+    const boundaries = [visibleStatus.aiUsage.windowEndsAt, visibleStatus.leftoversScanUsage?.windowEndsAt]
       .map(value => value ? Date.parse(value) : NaN)
       .filter(value => Number.isFinite(value));
     if (!boundaries.length) return;
@@ -604,7 +629,7 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
       void refresh();
     }, Math.min(earliest - now + 250, 2_147_000_000));
     return () => clearTimeout(timer);
-  }, [accountUid, refresh, status]);
+  }, [accountUid, refresh, visibleStatus]);
 
   const purchase = useCallback(async (offerId: string): Promise<PurchaseResult> => {
     const purchaseUid = accountUidRef.current;
@@ -825,11 +850,11 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
   ]);
 
   const value = useMemo<ProContextValue>(() => ({
-    isPro: status?.isPro === true,
-    isLoading,
-    status,
-    usage: status?.aiUsage ?? null,
-    statusError,
+    isPro: visibleStatus?.isPro === true,
+    isLoading: visibleIsLoading,
+    status: visibleStatus,
+    usage: visibleStatus?.aiUsage ?? null,
+    statusError: visibleStatusError,
     requiresAccount,
     billingConfigured,
     isLoadingOffers,
@@ -855,7 +880,6 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
     applyAiUsage,
     billingConfigured,
     billingError,
-    isLoading,
     isLoadingOffers,
     isBillingStateLoading,
     hydrateBillingState,
@@ -865,8 +889,9 @@ export function ProProvider({ children }: { children: React.ReactNode }) {
     refresh,
     restore,
     loadOfferings,
-    status,
-    statusError,
+    visibleIsLoading,
+    visibleStatus,
+    visibleStatusError,
     verificationPending,
     verificationPendingForDifferentAccount,
     visiblePendingMessage,

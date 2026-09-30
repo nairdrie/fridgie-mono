@@ -19,6 +19,7 @@ import {
   COOKBOOK_PRINT_POLICY_VERSION,
   canTransitionFulfillment,
   canTransitionPayment,
+  cookbookPrintFeatureAvailable,
   cookbookPrintHash,
   createCookbookPrintSnapshot,
   defaultDraftInput,
@@ -151,7 +152,13 @@ export class CookbookPrintService {
   async eligibility(uid: string): Promise<CookbookPrintEligibilitySummary> {
     const recipes = printableCookbook(uid, await this.dependencies.cookbook(uid));
     const restrictedCount = recipes.filter(recipe => recipe.printRestriction !== 'none').length;
-    return { eligibleCount: recipes.length, restrictedCount, milestoneReached: recipes.length >= COOKBOOK_PRINT_MILESTONE, recipes };
+    return {
+      featureAvailable: cookbookPrintFeatureAvailable(),
+      eligibleCount: recipes.length,
+      restrictedCount,
+      milestoneReached: recipes.length >= COOKBOOK_PRINT_MILESTONE,
+      recipes,
+    };
   }
 
   async getOrCreateDraft(uid: string, requested?: unknown): Promise<StoredDraft> {

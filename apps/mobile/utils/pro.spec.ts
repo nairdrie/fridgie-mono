@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  accountStatusForUid,
   accountStatusFromUnknown,
   aiUsageFromUnknown,
   checkoutState,
@@ -60,6 +61,28 @@ describe('accountStatusFromUnknown', () => {
       entitlement: { ...valid.entitlement, provider: 'revenuecat', verifiedAt: 'not-a-date' },
     })).toBeNull();
     expect(accountStatusFromUnknown({ ...valid, leftoversScanUsage: undefined })).toBeNull();
+  });
+});
+
+describe('accountStatusForUid', () => {
+  test('never exposes the previous account snapshot during an auth switch', () => {
+    const previousFreeStatus = accountStatusFromUnknown({
+      plan: 'free',
+      isPro: false,
+      entitlement: {
+        status: 'inactive',
+        provider: 'revenuecat',
+        expiresAt: null,
+        verifiedAt: '2026-09-29T11:00:00Z',
+        productIdentifier: null,
+      },
+      aiUsage: validUsage,
+      leftoversScanUsage: null,
+    });
+    expect(previousFreeStatus).not.toBeNull();
+    expect(accountStatusForUid('free-user', 'free-user', previousFreeStatus)).toBe(previousFreeStatus);
+    expect(accountStatusForUid('pro-user', 'free-user', previousFreeStatus)).toBeNull();
+    expect(accountStatusForUid(null, 'free-user', previousFreeStatus)).toBeNull();
   });
 });
 
@@ -141,7 +164,7 @@ describe('formatUsageSummary', () => {
       remaining: 1,
       windowStartsAt: '',
       windowEndsAt: '',
-    })).toBe('1 of 10 AI meal suggestion left');
+    })).toBe('1 of 10 AI meal suggestions left');
     expect(formatUsageSummary({
       used: 4,
       limit: 10,
@@ -163,20 +186,34 @@ describe('usageNotice', () => {
 
   test('escalates free warnings at three, one, and zero remaining', () => {
     const now = new Date('2026-09-29T14:00:00-04:00');
+    expect(usageNotice(usage(4), false, now).level).toBe('normal');
     expect(usageNotice(usage(3), false, now).level).toBe('low');
     expect(usageNotice(usage(3), false, now).title).toBe('3 free suggestions remaining this week');
     expect(usageNotice(usage(2), false, now).title).toBe('2 free suggestions remaining this week');
     expect(usageNotice(usage(1), false, now).level).toBe('critical');
     expect(usageNotice(usage(1), false, now).title).toBe('1 free suggestion remaining this week');
-    expect(usageNotice(usage(0), false, now).level).toBe('exhausted');
+    const exhausted = usageNotice(usage(0), false, now);
+    expect(exhausted).toMatchObject({
+      level: 'exhausted',
+      title: 'No free suggestions remaining this week',
+    });
+    expect(exhausted.reset).toMatch(/^Resets /);
   });
 
-  test('warns a Pro user when the fair-use balance is nearly gone', () => {
-    const pro = { ...usage(3), used: 97, limit: 100 };
-    expect(usageNotice(pro, true)).toMatchObject({
-      level: 'low',
-      title: '3 AI suggestions remaining this week',
+  test('warns a Pro user for the last ten percent of a larger allowance', () => {
+    const proUsage = (remaining: number) => ({
+      ...usage(remaining),
+      used: 100 - remaining,
+      limit: 100,
     });
+    expect(usageNotice(proUsage(11), true).level).toBe('normal');
+    expect(usageNotice(proUsage(10), true)).toMatchObject({
+      level: 'low',
+      title: '10 AI suggestions remaining this week',
+    });
+    expect(usageNotice(proUsage(1), true).level).toBe('critical');
+    expect(usageNotice(proUsage(1), true).title).toBe('1 AI suggestion remaining this week');
+    expect(usageNotice(proUsage(0), true).title).toBe('No AI suggestions remaining this week');
   });
 });
 

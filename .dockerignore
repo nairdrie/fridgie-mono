@@ -5,9 +5,15 @@
 **/node_modules
 .git
 .gitignore
+gha-creds-*.json
 
-# the entire mobile app is irrelevant to the API image
-apps/mobile
+# The API image needs the cookbook's licensed print font, but no other mobile
+# source or assets. Re-include that narrow directory for Dockerfile line 61.
+apps/mobile/*
+!apps/mobile/assets
+apps/mobile/assets/*
+!apps/mobile/assets/fonts
+!apps/mobile/assets/fonts/**
 
 # docker meta
 **/Dockerfile*

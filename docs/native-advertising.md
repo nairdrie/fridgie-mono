@@ -15,7 +15,7 @@ Both gates must allow an ad before a provider is called:
 1. `appConfig/discoverAds.enabled` is the server kill switch. A missing document, invalid data, read error, or failed mobile refresh disables the surface.
 2. The Pro entitlement adapter must explicitly return `ad-supported`. `ad-free`, loading, an adapter error, and the default `unknown` state all suppress ads.
 
-The adapter is intentionally narrow:
+The adapter boundary is intentionally narrow:
 
 ```ts
 interface DiscoverAdEntitlementAdapter {
@@ -24,7 +24,11 @@ interface DiscoverAdEntitlementAdapter {
 }
 ```
 
-Wire the subscription implementation by wrapping the app with `DiscoverAdEntitlementProvider`. Do not copy receipt, product, trial, or restoration logic into the advertising layer.
+The root app wires this boundary synchronously beneath `ProProvider`. Only a
+current server-verified inactive entitlement maps to `ad-supported`; Pro,
+loading, unavailable verification, refresh errors, pending store recovery and
+account switches map to `ad-free` or fail-closed `unknown`. Do not copy receipt,
+product, trial, or restoration logic into the advertising layer.
 
 ## Server-controlled house inventory
 
@@ -94,6 +98,7 @@ The repository's root [`app-ads.txt`](../app-ads.txt) intentionally authorizes n
 - [ ] Review and submit Google Play Data safety answers against the exact Mobile Ads SDK/UMP configuration and actual data flows.
 - [ ] Review and submit App Store privacy nutrition labels against those same flows.
 - [ ] Configure and publish the required UMP privacy messages in the AdMob console for served regions.
+- [ ] Add and device-test an in-app UMP privacy-options control so people can revisit consent choices; keep the AdMob provider disabled until this exists.
 - [ ] Confirm the final privacy policy explains house cards, AdMob, non-personalized/contextual mode, Hide/Report, aggregate measurement, and the Pro ad-free benefit.
 - [ ] Run a real production-config EAS build for both platforms and test consent, AdChoices, no-fill, kill switch, and Pro suppression on devices.
 

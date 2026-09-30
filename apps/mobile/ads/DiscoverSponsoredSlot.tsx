@@ -84,7 +84,11 @@ export function DiscoverSponsoredSlot({
     });
   }, [metric, router]);
 
-  if (!loaded) return null;
+  // Effects destroy the provider handle after a transition commits, but the
+  // render itself must already hide the old card. This prevents a one-frame ad
+  // leak while a purchase, refresh error, or account switch turns entitlement
+  // back into a fail-closed state.
+  if (!loaded || !canRequestDiscoverAds(config, entitlement)) return null;
   return <View style={styles.slot}>
     {loaded.render({
       scrollTick,

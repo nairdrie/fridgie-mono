@@ -16,6 +16,7 @@ import {
   assertPrintOwner,
   canTransitionFulfillment,
   canTransitionPayment,
+  cookbookPrintFeatureAvailable,
   createCookbookPrintSnapshot,
   defaultDraftInput,
   layoutCookbook,
@@ -34,6 +35,14 @@ import {
 } from '../utils/cookbookPrintPdf';
 
 const NOW = '2026-09-29T15:00:00.000Z';
+
+describe('cookbook print launch gate', () => {
+  test('stays unavailable unless the validated runtime explicitly enables it', () => {
+    expect(cookbookPrintFeatureAvailable({} as NodeJS.ProcessEnv)).toBe(false);
+    expect(cookbookPrintFeatureAvailable({ PRINT_COMMERCE_ENABLED: 'false' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(cookbookPrintFeatureAvailable({ PRINT_COMMERCE_ENABLED: 'true' } as NodeJS.ProcessEnv)).toBe(true);
+  });
+});
 
 function recipe(id: string, overrides: Partial<Recipe> = {}): Recipe {
   return {

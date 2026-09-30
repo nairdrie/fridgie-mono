@@ -408,6 +408,8 @@ export interface CookbookPrintEligibleRecipe extends Recipe {
 }
 
 export interface CookbookPrintEligibilitySummary {
+  /** Server-owned launch gate. Older/missing values must be treated as false. */
+  featureAvailable: boolean;
   eligibleCount: number;
   restrictedCount: number;
   milestoneReached: boolean;

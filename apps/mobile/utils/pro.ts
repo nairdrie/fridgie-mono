@@ -20,6 +20,15 @@ export interface AccountStatus {
   leftoversScanUsage: AiUsage | null;
 }
 
+/** Return a server snapshot only to the Firebase account it was fetched for. */
+export function accountStatusForUid(
+  accountUid: string | null,
+  ownerUid: string | null,
+  status: AccountStatus | null,
+): AccountStatus | null {
+  return accountUid !== null && ownerUid === accountUid ? status : null;
+}
+
 /** Runtime boundary for quota snapshots arriving in response headers/errors. */
 export function aiUsageFromUnknown(value: unknown): AiUsage | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -180,8 +189,7 @@ export function formatResetLabel(
 }
 
 export function formatUsageSummary(usage: AiUsage): string {
-  const noun = usage.remaining === 1 ? 'AI meal suggestion' : 'AI meal suggestions';
-  return `${usage.remaining} of ${usage.limit} ${noun} left`;
+  return `${usage.remaining} of ${usage.limit} AI meal suggestions left`;
 }
 
 /** A cached zero only blocks locally while its server-owned window is still
@@ -244,12 +252,19 @@ export function usageNotice(
   now = new Date(),
 ): { level: UsageNoticeLevel; title: string; reset: string } {
   const reset = formatResetLabel(usage.windowEndsAt, now);
+  // A fixed "three left" threshold works for Free's ten suggestions, but it
+  // gives a 100-use Pro plan almost no notice. Warn at the last 10% while
+  // preserving three as the useful minimum for ordinary-sized allowances.
+  const lowBalanceThreshold = Math.min(
+    usage.limit,
+    Math.max(3, Math.ceil(usage.limit * 0.1)),
+  );
   if (usage.remaining <= 0) {
     return {
       level: 'exhausted',
       title: isPro
-        ? 'Your current fair-use allowance is used up'
-        : `You’ve used your ${usage.limit} free suggestions this week`,
+        ? 'No AI suggestions remaining this week'
+        : 'No free suggestions remaining this week',
       reset,
     };
   }
@@ -262,7 +277,7 @@ export function usageNotice(
       reset,
     };
   }
-  if (usage.remaining <= 3) {
+  if (usage.remaining <= lowBalanceThreshold) {
     return {
       level: 'low',
       title: isPro
