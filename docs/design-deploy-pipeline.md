@@ -18,7 +18,7 @@ I verified every claim against `/Users/nick/Dev/fridgie-mono` before writing thi
 
 ## 1. What the pipeline does once it is running
 
-On every pull request, GitHub Actions typechecks and tests the Bun/Hono API, typechecks the Expo app and proves Metro can still bundle `packages/shared`, and builds the Docker image from the repo root — no cloud credentials are issued to PR runs at all. On a push to `main`, those same checks run, and if the API job is green a deploy job mints a short-lived GCP token via Workload Identity Federation (no service-account key exists anywhere), builds and pushes `us-central1-docker.pkg.dev/grocerease-5abbb/fridgie/api:<sha>`, asserts no service-account JSON leaked into the image, and deploys a **no-traffic** candidate revision to Cloud Run. It smoke-tests that candidate on its private tag URL — a deep health check that performs real RTDB and Firestore reads (proving Application Default Credentials work), an assertion that the reported `K_REVISION` is the one just built, and a check that `/api/ws/list/*` returns 401 rather than 404 (proving the WebSocket upgrade branch still fires ahead of Hono) — and only then shifts 100% of traffic to it, rolling back to the previously-serving revision if anything fails. In parallel and deliberately not gated on the API deploy, a second job queues an EAS `preview` build for both platforms and writes the install links into the run summary. Idle cost of the whole thing is **$0.00/month**.
+On every pull request, GitHub Actions typechecks and tests the Bun/Hono API, typechecks the Expo app and proves Metro can still bundle `packages/shared`, and builds the Docker image from the repo root — no cloud credentials are issued to PR runs at all. On a push to `main`, those same checks run, and if the API job is green a deploy job mints a short-lived GCP token via Workload Identity Federation (no service-account key exists anywhere), builds and pushes `us-central1-docker.pkg.dev/grocerease-5abbb/fridgie/api:<sha>`, asserts no service-account JSON leaked into the image, and deploys a **no-traffic** candidate revision to Cloud Run. It smoke-tests that candidate on its private tag URL — a deep health check that performs real RTDB and Firestore reads (proving Application Default Credentials work), an assertion that the reported `K_REVISION` is the one just built, and a check that `/api/ws/list/*` returns 401 rather than 404 (proving the WebSocket upgrade branch still fires ahead of Hono) — and only then shifts 100% of traffic to it, rolling back to the previously-serving revision if anything fails. In parallel and deliberately not gated on the API deploy, a second job runs EAS `preview` builds for both platforms, waits for their native results, and writes completion details into the run summary. Idle cost of the whole thing is **$0.00/month**.
 
 ---
 
@@ -775,6 +775,7 @@ jobs:
     needs: [api]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     permissions:
       contents: read
       id-token: write        # ONLY this job may mint a GCP token
@@ -952,33 +953,24 @@ jobs:
         working-directory: apps/mobile
         run: npm ci --no-audit --no-fund
 
-      # --profile preview: Android APK + iOS ad-hoc IPA, both installable
-      # directly on hardware. `production` would emit an AAB, which cannot be
-      # installed on any device at all. See §6.
-      #
-      # --no-wait returns as soon as the build is QUEUED. Free-tier queues run
-      # 10-60+ minutes; waiting here would bill all of it to GitHub Actions.
-      - name: Queue EAS build
+      # Waiting is deliberate: eas-cli exits non-zero if the remote native
+      # build fails, so GitHub cannot go green merely because EAS accepted it.
+      - name: Build Android preview with EAS
         working-directory: apps/mobile
         run: |
-          eas build --profile preview --platform all \
-            --non-interactive --no-wait --json \
-            --message "main@${GITHUB_SHA::7}" > builds.json
-          cat builds.json
+          eas build --profile preview --platform android \
+            --non-interactive --wait \
+            --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME}"
+          echo "### Android APK build completed" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install links → job summary
+      - name: Build iOS preview with EAS
         working-directory: apps/mobile
         run: |
-          {
-            echo "## Install links"
-            echo
-            echo "Open on the device. **iOS must use Safari** (itms-services:// link)."
-            echo "Android: allow \"install unknown apps\" for your browser."
-            echo
-            jq -r '.[] | "- **\(.platform)** — \(.buildDetailsPageUrl // ("https://expo.dev/builds/" + .id))"' builds.json
-            echo
-            echo "_Queued, not finished. A green check here means SUBMITTED, not BUILT._"
-          } >> "$GITHUB_STEP_SUMMARY"
+          eas build --profile preview --platform ios \
+            --non-interactive --wait \
+            --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME}"
+          echo "### iOS IPA build completed (preview, including share extension)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Install links: https://expo.dev/accounts/_/projects/fridgie/builds" >> "$GITHUB_STEP_SUMMARY"
 ```
 
 ### 3h. `apps/mobile/eas.json` — complete replacement
@@ -1012,6 +1004,9 @@ Two additions: `autoIncrement` on `preview` and `production`.
       "android": {
         "buildType": "apk"
       },
+      "ios": {
+        "image": "macos-sequoia-15.6-xcode-26.2"
+      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api"
       }
@@ -1021,6 +1016,9 @@ Two additions: `autoIncrement` on `preview` and `production`.
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
+      },
+      "ios": {
+        "image": "macos-sequoia-15.6-xcode-26.2"
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.fridgie.ca/api"
@@ -1032,6 +1030,12 @@ Two additions: `autoIncrement` on `preview` and `production`.
   }
 }
 ```
+
+Both installable preview builds and production builds pin
+`macos-sequoia-15.6-xcode-26.2`. This keeps CI on a fixed, currently available
+EAS image that satisfies Apple's Xcode 26+ upload requirement, instead of SDK
+53's older moving `auto` selection. Preview therefore exercises the same Xcode
+generation used for a later store artifact.
 
 **Why `autoIncrement` matters, and it's the most likely silent failure here.** Your `cli.appVersionSource` is `"remote"`, which moves `ios.buildNumber` / `android.versionCode` onto EAS's servers. It does **not** turn on auto-increment. Without it every build reuses the same build number, the first submit succeeds, and the second is rejected — App Store Connect: *"an attribute with a value that has already been used"*; Play: *"Version code 1 has already been used"*. The failure appears at submit time, long after the build looked fine. The counter is per app+platform and shared across profiles, so the sequence is globally monotonic and a preview can never collide with a TestFlight build. (`autoIncrement: "version"` is not available to you — it requires `appVersionSource: "local"`.) The marketing `"version": "1.0.0"` in `app.json` stays yours to bump by hand; an accidental auto-bump is worse than a forgotten one.
 
@@ -1183,7 +1187,7 @@ You asked for "an expo production build so we can get the real app installed on 
 
 ### Tier 1 — what runs on push to `main` (this is the answer to your request)
 
-`build-mobile` in `ci.yml` queues `eas build --profile preview --platform all --no-wait`.
+`build-mobile` in `ci.yml` runs Android and iOS `preview` builds and waits for each remote native result. A three-hour job timeout bounds queue and build time; a failed EAS build now fails GitHub rather than leaving a false-green queued result.
 
 - **Android → APK.** Open the build page link from the job summary on the phone, tap Install. You must allow "install unknown apps" for your browser once. Works on any Android device, no registration, no store.
 - **iOS → ad-hoc IPA.** Open the build page link **in Safari** on the iPhone (the install is an `itms-services://` link Chrome won't handle). Only devices registered via `eas device:create` *before the build* can install it. **Register first** — a device registered after cannot install that build, Safari just says "Unable to install", and the only fix is rebuilding.
@@ -1259,7 +1263,7 @@ jobs:
 ### EAS free tier — the numbers and what happens at the limit
 
 - **15 Android + 15 iOS builds/month, 1 concurrency** (per expo.dev/pricing at time of writing — verify, pricing changes). At your stated cadence you'll use under a third; budget 2 extra for the interactive credential-bootstrap builds in runbook steps 21–22.
-- **`--platform all` queues the second platform behind the first** on one concurrency slot. `--no-wait` means the GitHub job exits in ~2 minutes regardless, so this affects wall-clock-to-installable-artifact, not GitHub minutes.
+- **The preview builds are sequential** because the free tier has one concurrency slot. GitHub waits for both results, bounded by the workflow's three-hour timeout.
 - Shared free queue: waits commonly **10–60 minutes**, longer at peak.
 - **When the allowance is exhausted:** `eas build` exits non-zero *immediately* with a plan-limit message. The job goes red fast. Nothing silently skips, and **nothing auto-charges** — the free tier has no card on file. The next tier is **Starter at $19/month**.
 
@@ -1384,13 +1388,13 @@ Ordered by likelihood × pain.
 
 3. **The Cloud Run "container failed to start and listen on the port defined by PORT" error, where PORT is not the problem.** `api/explore/search/index.ts:12-14` throws at module load if either Algolia var is missing, and `index.ts:25` eagerly `import()`s all 28 route files. One empty variable and the process dies before `serve()` ever runs. Reviewer 1 reproduced this exactly. The workflow now asserts the variable before deploying, but if you ever set a secret with `echo` instead of `printf` (trailing newline) or rotate a secret badly, this is the failure you'll see and the error message will send you hunting the wrong thing.
 
-4. **The first EAS build is the first ever test of `expo prebuild`.** `ios/` and `android/` are gitignored and `ci.yml` never runs prebuild, so a plugin problem — most likely the `expo-build-properties` `useFrameworks: "static"` that Google Sign-In needs — surfaces 20 minutes into a queued cloud build. Runbook step 21 makes you do this interactively first, precisely so you find out on your own machine.
+4. **Linux prebuild validation is not an iOS native compile.** `ios/` and `android/` are gitignored, and CI regenerates and validates them before EAS. CocoaPods/Xcode-only failures still surface in the remote build, which is why `build-mobile` now waits for and propagates the EAS result.
 
 5. **Google Sign-In works perfectly in dev and fails on the first real APK.** The debug keystore SHA-1 is registered in Firebase and reproducible; the EAS release keystore's is registered nowhere. Runbook step 23. You *will* hit this if you skip it, and the symptom (sign-in silently returns an error code on release builds only) looks nothing like the cause.
 
 6. **The domain mapping works for HTTP and silently breaks WebSockets.** Different Google Frontend path than `run.app`. Every HTTP route would look perfect while live list sync is dead. If it happens, the fallback is a ~$18.25/month load balancer — a 60× increase on your idle bill — which is a decision you want to make before promising the feature, not after. Checklist item 9.
 
-7. **A green `build-mobile` means SUBMITTED, not BUILT.** `--no-wait` is correct for cost (it keeps a 50-minute EAS queue off GitHub's clock), but a failed EAS build never turns the GitHub run red. Check the build page or wire EAS webhooks.
+7. **A green `build-mobile` means both preview native builds completed.** The job waits for EAS and propagates remote failures, with a three-hour timeout so a stalled queue cannot hold GitHub indefinitely.
 
 8. **Long-lived sockets are billed as in-flight requests for up to an hour.** Reviewer 1 disproved the theory that Bun's `idleTimeout: 30` reaps them — a socket idle for 45s stayed open. So a tablet left on the list screen overnight holds a billable instance until `--timeout=3600` severs it, at ~$0.095/hour against your 50 free instance-hours. `--max-instances=4` is the only thing bounding it. Mobile backgrounding usually kills the socket in practice; watch the request-count metric for a week.
 

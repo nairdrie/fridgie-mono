@@ -109,7 +109,10 @@ jobs:
   deploy-api:
     name: api — deploy to Cloud Run
     needs: [api]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # `always()` keeps this already-running job alive long enough for its
+    # cancellation cleanup step. The explicit needs result preserves the
+    # normal requirement that API validation succeeded before deployment.
+    if: ${{ always() && needs.api.result == 'success' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -463,8 +466,18 @@ jobs:
             echo "::error::service $SERVICE does not exist yet — run the one-time bootstrap deploy first"; exit 1
           fi
 
-          PREV=$(gcloud run services describe "$SERVICE" --region "$REGION" --project "$PROJECT_ID" --format=json \
-                  | jq -r '[.status.traffic[] | select(.percent==100)][0].revisionName // empty')
+          SERVICE_JSON=$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" --project "$PROJECT_ID" --format=json)
+          PREV=$(jq -er '
+            [.status.traffic[]? | select((.percent // 0) > 0)] as $serving
+            | if ($serving | length) == 1
+                and $serving[0].percent == 100
+                and (($serving[0].revisionName // "") | length) > 0
+              then $serving[0].revisionName
+              else error("service traffic is not pinned to one 100% revision")
+              end
+          ' <<< "$SERVICE_JSON") \
+            || { echo "::error::refusing to deploy without one unambiguous 100%-traffic rollback revision"; exit 1; }
           echo "prev=$PREV" >> "$GITHUB_OUTPUT"
 
           # Full flag set on EVERY deploy: `gcloud run deploy` patches and
@@ -521,10 +534,62 @@ jobs:
           ws=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/ws/list/smoketest")
           [ "$ws" = 401 ] || { echo "WS upgrade path returned $ws, expected 401"; exit 1; }
 
-      # Deploy the reconciliation boundary before exposing a print-enabled API.
-      # This replaces every application-level worker setting owned by CI. The
-      # one-time bootstrap deliberately creates the job without optional
-      # networking/volume attachments, which `gcloud run jobs update` preserves.
+      # Print deploys are a transaction across a scheduled worker and API. Save
+      # the complete worker spec and pause its scheduler before either side can
+      # change. The rollback step restores both before returning the scheduler
+      # to its original state.
+      - name: Snapshot and pause print reconciliation
+        id: print_rollout
+        if: env.PRINT_DEPLOY_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          SNAPSHOT="${RUNNER_TEMP}/print-reconciliation-before.yaml"
+
+          gcloud run jobs describe "$PRINT_RECONCILIATION_JOB" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --format=export > "$SNAPSHOT"
+          [ -s "$SNAPSHOT" ] \
+            || { echo "::error::print worker snapshot is empty"; exit 1; }
+
+          SCHEDULER_STATE=$(gcloud scheduler jobs describe "$PRINT_RECONCILIATION_SCHEDULER" \
+            --location="$REGION" --project="$PROJECT_ID" --format='value(state)')
+          case "$SCHEDULER_STATE" in
+            ENABLED|PAUSED) ;;
+            *) echo "::error::unexpected print scheduler state: $SCHEDULER_STATE"; exit 1 ;;
+          esac
+
+          echo "snapshot_path=$SNAPSHOT" >> "$GITHUB_OUTPUT"
+          echo "scheduler_state=$SCHEDULER_STATE" >> "$GITHUB_OUTPUT"
+
+          if [ "$SCHEDULER_STATE" = ENABLED ]; then
+            gcloud scheduler jobs pause "$PRINT_RECONCILIATION_SCHEDULER" \
+              --location="$REGION" --project="$PROJECT_ID" --quiet
+          fi
+          [ "$(gcloud scheduler jobs describe "$PRINT_RECONCILIATION_SCHEDULER" \
+               --location="$REGION" --project="$PROJECT_ID" --format='value(state)')" = PAUSED ] \
+            || { echo "::error::print scheduler did not pause"; exit 1; }
+
+          # Pause prevents new invocations, but an execution that started just
+          # before the pause may still be running. Drain it before changing the
+          # job or API so no worker can straddle the transaction.
+          active_executions=1
+          for attempt in $(seq 1 60); do
+            EXECUTIONS_JSON=$(gcloud run jobs executions list \
+              --job="$PRINT_RECONCILIATION_JOB" --region="$REGION" \
+              --project="$PROJECT_ID" --format=json)
+            active_executions=$(jq '[.[] | select(
+              (((.status.completionTime // .completionTime // "") | length) == 0)
+            )] | length' <<< "$EXECUTIONS_JSON")
+            [ "$active_executions" -eq 0 ] && break
+            echo "waiting for $active_executions active print execution(s) to finish (attempt $attempt/60)"
+            sleep 10
+          done
+          [ "$active_executions" -eq 0 ] \
+            || { echo "::error::print executions did not drain after the scheduler was paused"; exit 1; }
+
+      # Deploy the reconciliation boundary while scheduling is paused, before
+      # exposing a print-enabled API. `jobs update` preserves bootstrap-owned
+      # networking/volume attachments while replacing CI-owned app settings.
       - name: Deploy print reconciliation worker configuration
         if: env.PRINT_DEPLOY_ENABLED == 'true'
         run: |
@@ -555,15 +620,134 @@ jobs:
             --project="$PROJECT_ID" --region="$REGION" \
             --image="${{ steps.image.outputs.ref }}" --quiet
 
-      # This also runs if the worker update fails after API promotion. Rollback
-      # remains API-traffic-only; it does not restore or execute the worker job.
-      - name: Roll back
-        if: failure() && steps.deploy.outputs.prev != ''
+      # No fallible deployment step follows this. If anything above failed, the
+      # scheduler is still paused and the rollback restores worker + API first.
+      - name: Restore print scheduler state
+        if: env.PRINT_DEPLOY_ENABLED == 'true'
+        env:
+          PREVIOUS_SCHEDULER_STATE: ${{ steps.print_rollout.outputs.scheduler_state }}
         run: |
-          echo "Deploy failed — restoring ${{ steps.deploy.outputs.prev }}"
-          gcloud run services update-traffic "$SERVICE" \
-            --project="$PROJECT_ID" --region="$REGION" \
-            --to-revisions="${{ steps.deploy.outputs.prev }}=100" --quiet
+          set -euo pipefail
+          case "$PREVIOUS_SCHEDULER_STATE" in
+            ENABLED)
+              gcloud scheduler jobs resume "$PRINT_RECONCILIATION_SCHEDULER" \
+                --location="$REGION" --project="$PROJECT_ID" --quiet
+              ;;
+            PAUSED) ;;
+            *) echo "::error::missing prior print scheduler state"; exit 1 ;;
+          esac
+          [ "$(gcloud scheduler jobs describe "$PRINT_RECONCILIATION_SCHEDULER" \
+               --location="$REGION" --project="$PROJECT_ID" --format='value(state)')" = "$PREVIOUS_SCHEDULER_STATE" ] \
+            || { echo "::error::print scheduler state was not restored"; exit 1; }
+
+      # Roll back the complete print/API transaction. If a later step fails
+      # after scheduling resumed, pause again first; restore the worker and API
+      # while no reconciliation execution can begin, then restore the original
+      # scheduler state. Attempt every repair even if one command fails.
+      - name: Roll back
+        if: ${{ always() && (failure() || cancelled()) && steps.deploy.outputs.prev != '' }}
+        env:
+          PREVIOUS_PRINT_SCHEDULER_STATE: ${{ steps.print_rollout.outputs.scheduler_state }}
+          PRINT_JOB_SNAPSHOT: ${{ steps.print_rollout.outputs.snapshot_path }}
+        run: |
+          set -uo pipefail
+          rollback_failed=0
+          print_restore_ready=false
+          print_worker_restored=false
+          api_restored=false
+          echo "Deploy failed — restoring the previous API and worker state"
+
+          if [ "${PRINT_DEPLOY_ENABLED:-false}" = true ] && [ -n "$PRINT_JOB_SNAPSHOT" ]; then
+            CURRENT_SCHEDULER_STATE=$(gcloud scheduler jobs describe "$PRINT_RECONCILIATION_SCHEDULER" \
+              --location="$REGION" --project="$PROJECT_ID" --format='value(state)') \
+              || { echo "::error::could not read print scheduler during rollback"; CURRENT_SCHEDULER_STATE=UNKNOWN; rollback_failed=1; }
+            if [ "$CURRENT_SCHEDULER_STATE" = ENABLED ]; then
+              gcloud scheduler jobs pause "$PRINT_RECONCILIATION_SCHEDULER" \
+                --location="$REGION" --project="$PROJECT_ID" --quiet \
+                || { echo "::error::could not pause print scheduler during rollback"; rollback_failed=1; }
+            elif [ "$CURRENT_SCHEDULER_STATE" != PAUSED ]; then
+              echo "::error::unexpected print scheduler state during rollback: $CURRENT_SCHEDULER_STATE"
+              rollback_failed=1
+            fi
+
+            CONFIRMED_SCHEDULER_STATE=$(gcloud scheduler jobs describe "$PRINT_RECONCILIATION_SCHEDULER" \
+              --location="$REGION" --project="$PROJECT_ID" --format='value(state)') \
+              || { echo "::error::could not verify the print scheduler pause"; CONFIRMED_SCHEDULER_STATE=UNKNOWN; rollback_failed=1; }
+            if [ "$CONFIRMED_SCHEDULER_STATE" = PAUSED ]; then
+              # An execution may have started between the earlier successful
+              # resume and this rollback pause. Drain it before changing either
+              # half of the worker/API contract.
+              active_executions=1
+              for attempt in $(seq 1 60); do
+                EXECUTIONS_JSON=$(gcloud run jobs executions list \
+                  --job="$PRINT_RECONCILIATION_JOB" --region="$REGION" \
+                  --project="$PROJECT_ID" --format=json) \
+                  || { echo "::error::could not list print executions during rollback"; active_executions=-1; rollback_failed=1; break; }
+                active_executions=$(jq '[.[] | select(
+                  (((.status.completionTime // .completionTime // "") | length) == 0)
+                )] | length' <<< "$EXECUTIONS_JSON") \
+                  || { echo "::error::could not inspect print executions during rollback"; active_executions=-1; rollback_failed=1; break; }
+                [ "$active_executions" -eq 0 ] && break
+                echo "waiting for $active_executions active print execution(s) before rollback (attempt $attempt/60)"
+                sleep 10
+              done
+              if [ "$active_executions" -eq 0 ]; then
+                print_restore_ready=true
+              else
+                echo "::error::print executions did not drain; worker and API rollback were not started"
+                rollback_failed=1
+              fi
+            else
+              echo "::error::print scheduler is not confirmed paused; worker and API rollback were not started"
+              rollback_failed=1
+            fi
+
+            if [ "$print_restore_ready" = true ]; then
+              if gcloud run jobs replace "$PRINT_JOB_SNAPSHOT" \
+                --project="$PROJECT_ID" --region="$REGION" --quiet; then
+                print_worker_restored=true
+              else
+                echo "::error::could not restore print worker configuration"
+                rollback_failed=1
+              fi
+            fi
+          fi
+
+          if [ "${PRINT_DEPLOY_ENABLED:-false}" != true ] || [ -z "$PRINT_JOB_SNAPSHOT" ] || [ "$print_restore_ready" = true ]; then
+            if gcloud run services update-traffic "$SERVICE" \
+              --project="$PROJECT_ID" --region="$REGION" \
+              --to-revisions="${{ steps.deploy.outputs.prev }}=100" --quiet; then
+              api_restored=true
+            else
+              echo "::error::could not restore API traffic"
+              rollback_failed=1
+            fi
+          fi
+
+          if [ "${PRINT_DEPLOY_ENABLED:-false}" = true ] && [ -n "$PRINT_JOB_SNAPSHOT" ]; then
+            if [ "$print_worker_restored" = true ] && [ "$api_restored" = true ]; then
+              case "$PREVIOUS_PRINT_SCHEDULER_STATE" in
+                ENABLED)
+                  gcloud scheduler jobs resume "$PRINT_RECONCILIATION_SCHEDULER" \
+                    --location="$REGION" --project="$PROJECT_ID" --quiet \
+                    || { echo "::error::could not resume print scheduler after rollback"; rollback_failed=1; }
+                  ;;
+                PAUSED) ;;
+                *) echo "::error::missing prior print scheduler state during rollback"; rollback_failed=1 ;;
+              esac
+
+              FINAL_SCHEDULER_STATE=$(gcloud scheduler jobs describe "$PRINT_RECONCILIATION_SCHEDULER" \
+                --location="$REGION" --project="$PROJECT_ID" --format='value(state)') \
+                || { echo "::error::could not verify print scheduler after rollback"; FINAL_SCHEDULER_STATE=UNKNOWN; rollback_failed=1; }
+              [ "$FINAL_SCHEDULER_STATE" = "$PREVIOUS_PRINT_SCHEDULER_STATE" ] \
+                || { echo "::error::print scheduler state was not restored during rollback"; rollback_failed=1; }
+            else
+              echo "::error::rollback was incomplete; leaving the print scheduler paused"
+              rollback_failed=1
+            fi
+          fi
+
+          [ "$rollback_failed" -eq 0 ]
 
   build-mobile:
     name: mobile — EAS preview builds (installable)
@@ -573,6 +757,9 @@ jobs:
     # shipping a client that talks to the already-deployed API.
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    # EAS queues can be slow, but this job must remain attached long enough to
+    # report the actual Android and iOS native build results back to GitHub.
+    timeout-minutes: 180
     permissions:
       contents: read      # NEVER give this job id-token: write
     steps:
@@ -601,24 +788,24 @@ jobs:
         working-directory: apps/mobile
         run: npm ci --no-audit --no-fund
 
-      # --no-wait returns as soon as the build is QUEUED. Free-tier queues run
-      # 10-60+ minutes; waiting would bill all of it to GitHub Actions minutes.
-      - name: Queue Android EAS build
+      # Waiting is intentional: a successfully queued build is not a successful
+      # native compile. eas-cli exits non-zero if the remote build fails.
+      - name: Build Android preview with EAS
         working-directory: apps/mobile
         run: |
           eas build --profile preview --platform android \
-            --non-interactive --no-wait \
+            --non-interactive --wait \
             --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME}"
-          echo "### Android APK build queued" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Android APK build completed" >> "$GITHUB_STEP_SUMMARY"
 
       # The host app and share extension each need an ad hoc profile, with
       # their shared App Group configured. Bootstrap credentials interactively
       # once as described in docs/recipe-import-sharing.md; CI reuses them.
-      - name: Queue iOS EAS build
+      - name: Build iOS preview with EAS
         working-directory: apps/mobile
         run: |
           eas build --profile preview --platform ios \
-            --non-interactive --no-wait \
+            --non-interactive --wait \
             --message "${GITHUB_SHA::7} ${GITHUB_REF_NAME}"
-          echo "### iOS IPA build queued (preview, including share extension)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### iOS IPA build completed (preview, including share extension)" >> "$GITHUB_STEP_SUMMARY"
           echo "Install links: https://expo.dev/accounts/_/projects/fridgie/builds" >> "$GITHUB_STEP_SUMMARY"

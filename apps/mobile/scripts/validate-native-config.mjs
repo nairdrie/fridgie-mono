@@ -6,6 +6,8 @@ const infoPlist = read('ios/Fridgie/Info.plist');
 const appEntitlements = read('ios/Fridgie/Fridgie.entitlements');
 const shareEntitlements = read('ios/SavetoFridgie/ShareExtension.entitlements');
 const podfile = read('ios/Podfile');
+const stripeInterop = read('node_modules/@stripe/stripe-react-native/ios/StripeSwiftInterop.h');
+const eas = JSON.parse(read('eas.json'));
 
 const requireMatch = (value, pattern, label) => {
   if (!pattern.test(value)) throw new Error(`Generated native config is missing ${label}.`);
@@ -33,5 +35,13 @@ requireMatch(appEntitlements, /<string>group\.com\.nairdrie\.fridgie<\/string>/,
 requireMatch(shareEntitlements, /<string>group\.com\.nairdrie\.fridgie<\/string>/, 'the share-extension app group entitlement');
 requireMatch(podfile, /Fridgie: keep generated pods compatible[\s\S]+minimum_ios = Gem::Version\.new\('15\.1'\)/, 'the CocoaPods iOS 15.1 target floor');
 requireMatch(podfile, /pod_target\.name == 'fmt'[\s\S]+CLANG_CXX_LANGUAGE_STANDARD'\] = 'c\+\+17'/, 'the Apple clang 21 fmt compatibility setting');
+requireMatch(stripeInterop, /typedef NS_ENUM\(NSInteger, STPPaymentStatus\);/, 'the Xcode 26+ Stripe payment-status enum compatibility patch');
 
-console.log('Generated Android/iOS config contains the composed RevenueCat, share-intent, Stripe, and AdMob settings.');
+const requiredIosImage = 'macos-sequoia-15.6-xcode-26.2';
+for (const profile of ['preview', 'production']) {
+  if (eas.build?.[profile]?.ios?.image !== requiredIosImage) {
+    throw new Error(`EAS ${profile} must use the validated ${requiredIosImage} iOS image.`);
+  }
+}
+
+console.log('Generated Android/iOS config contains the composed RevenueCat, share-intent, Stripe, and AdMob settings, including native compiler compatibility patches and the pinned EAS iOS toolchain.');

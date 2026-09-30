@@ -387,11 +387,14 @@ The EAS/native build has a separate configuration boundary. Set
 environment before creating a staff or production build; API Secret Manager
 bindings do not populate Expo build-time variables.
 
-The print worker is updated before API promotion. If that succeeds but a later
-promotion or Discover update fails, API traffic rollback does not roll the
-Cloud Run Job revision back; inspect the job image/config after an ambiguous
-workflow failure before re-running it. CI never executes the reconciliation
-job during deployment.
+When print deployment is enabled, CI snapshots the complete reconciliation-job
+specification, pauses its scheduler, and waits for any in-flight execution to
+finish before changing the worker or API. The scheduler stays paused until the
+new worker, API revision, and Discover worker are all updated. On failure, CI
+restores the saved print-job specification and previous API revision before it
+returns Scheduler to its original state. If either restore fails, CI leaves the
+scheduler paused rather than run a mismatched worker/API pair. CI never
+intentionally executes the reconciliation job during deployment.
 
 ## 6. Live launch checklist
 

@@ -1,0 +1,7 @@
+diff --git a/node_modules/@stripe/stripe-react-native/ios/StripeSwiftInterop.h b/node_modules/@stripe/stripe-react-native/ios/StripeSwiftInterop.h
+index c7a804d..2dfbfdb 100644
+--- a/node_modules/@stripe/stripe-react-native/ios/StripeSwiftInterop.h
++++ b/node_modules/@stripe/stripe-react-native/ios/StripeSwiftInterop.h
+@@ -14 +14 @@
+-typedef NS_ENUM(NSUInteger, STPPaymentStatus);
++typedef NS_ENUM(NSInteger, STPPaymentStatus);
