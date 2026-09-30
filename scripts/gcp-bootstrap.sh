@@ -18,6 +18,7 @@ GH_REPO=nairdrie/fridgie-mono          # exact, case-sensitive
 SERVICE=fridgie-api
 RUNTIME_SA="fridgie-api-run@${PROJECT_ID}.iam.gserviceaccount.com"
 DEPLOY_SA="github-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
+FIREBASE_RULES_SUPPORT_ROLE_ID=fridgieRulesDeploySupport
 
 step() { printf '\n\033[1m▸ %s\033[0m\n' "$1"; }
 skip() { printf '  already exists — skipping\n'; }
@@ -32,7 +33,8 @@ gcloud services enable \
   cloudresourcemanager.googleapis.com \
   run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com \
   iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
-  firebasedatabase.googleapis.com identitytoolkit.googleapis.com firestore.googleapis.com
+  firebasedatabase.googleapis.com identitytoolkit.googleapis.com firestore.googleapis.com \
+  firebaserules.googleapis.com
 
 sleep 20  # enablement is eventually consistent
 
@@ -86,13 +88,40 @@ fi
 # invokable or grant itself standing access.
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${DEPLOY_SA}" --role=roles/run.developer --condition=None >/dev/null
+
+# firebase-tools checks API state with this project as its quota project before
+# compiling Rules. Keep the two Service Usage permissions in a project-owned
+# support role; neither grants document access or lets CI enable/disable APIs.
+if gcloud iam roles describe "$FIREBASE_RULES_SUPPORT_ROLE_ID" \
+     --project="$PROJECT_ID" >/dev/null 2>&1; then
+  gcloud iam roles update "$FIREBASE_RULES_SUPPORT_ROLE_ID" \
+    --project="$PROJECT_ID" \
+    --title="Fridgie Rules Deploy Support" \
+    --description="Minimal Service Usage access required by Firebase CLI for Firestore rules deployment" \
+    --permissions=serviceusage.services.get,serviceusage.services.use \
+    --stage=GA >/dev/null
+else
+  gcloud iam roles create "$FIREBASE_RULES_SUPPORT_ROLE_ID" \
+    --project="$PROJECT_ID" \
+    --title="Fridgie Rules Deploy Support" \
+    --description="Minimal Service Usage access required by Firebase CLI for Firestore rules deployment" \
+    --permissions=serviceusage.services.get,serviceusage.services.use \
+    --stage=GA >/dev/null
+fi
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${DEPLOY_SA}" \
+  --role="projects/${PROJECT_ID}/roles/${FIREBASE_RULES_SUPPORT_ROLE_ID}" \
+  --condition=None >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${DEPLOY_SA}" \
+  --role=roles/firebaserules.admin --condition=None >/dev/null
 gcloud artifacts repositories add-iam-policy-binding fridgie --location="$REGION" \
   --member="serviceAccount:${DEPLOY_SA}" --role=roles/artifactregistry.writer >/dev/null
 # Deploying a service that RUNS AS the runtime SA requires actAs on it. Scoped to
 # that one account — at project level CI could impersonate anything.
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --member="serviceAccount:${DEPLOY_SA}" --role=roles/iam.serviceAccountUser >/dev/null
-echo "  granted: run.developer, artifactregistry.writer, actAs runtime SA"
+echo "  granted: run.developer, Firebase Rules deploy support, artifactregistry.writer, actAs runtime SA"
 
 step "Workload Identity Federation (no JSON key is ever created)"
 if gcloud iam workload-identity-pools describe github --location=global >/dev/null 2>&1; then skip; else

@@ -428,7 +428,24 @@ jobs:
       # Deploy deny-all client rules before a new API revision can ship; the
       # Admin SDK continues to use IAM and bypasses client Security Rules.
       - name: Deploy Firestore client-deny rules
+        env:
+          DEPLOYER_SA: ${{ vars.GCP_DEPLOYER_SA }}
         run: |
+          set -euo pipefail
+
+          # firebase-tools checks API state with the deploy project as its
+          # quota project before compiling Rules. Diagnose that narrow support
+          # role directly instead of surfacing an opaque HTTP 403 from npm.
+          for service_api in firestore.googleapis.com firebaserules.googleapis.com; do
+            if ! state=$(gcloud services describe "$service_api" \
+              --project "$PROJECT_ID" --format='value(state)'); then
+              echo "::error::$DEPLOYER_SA needs the documented Firebase Rules deploy-support role (serviceusage.services.get and serviceusage.services.use)"
+              exit 1
+            fi
+            [ "$state" = ENABLED ] \
+              || { echo "::error::$service_api must be enabled by an owner before CI deploys rules"; exit 1; }
+          done
+
           npx --yes firebase-tools@15.32.0 deploy \
             --only firestore:rules \
             --project "$PROJECT_ID" \

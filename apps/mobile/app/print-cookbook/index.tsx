@@ -64,6 +64,7 @@ import {
 import DraggableFlatList, { type RenderItemParams } from 'react-native-draggable-flatlist';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { initStripe, useStripe } from '@/utils/stripePayment';
+import { stripeWalletConfigFromPublicEnv } from '@/utils/stripeWallets';
 
 type BuilderStep = 'recipes' | 'design' | 'preview' | 'checkout';
 type RecipeMode = 'choose' | 'arrange';
@@ -93,6 +94,8 @@ const PLACEMENTS: { key: CookbookPrintPhotoPlacement; label: string }[] = [
   { key: 'inline', label: 'Inline' },
   { key: 'none', label: 'No photo' },
 ];
+
+const stripeWallets = stripeWalletConfigFromPublicEnv();
 
 const emptyAddress: CookbookPrintAddress = {
   name: '',
@@ -601,7 +604,7 @@ function CheckoutStep({
       </GlassSurface>
       {!!paymentError && <View style={styles.paymentError}><Ionicons name="alert-circle-outline" size={21} color="#A94E48" /><View style={{ flex: 1 }}><Text style={styles.paymentErrorTitle}>Payment was not completed</Text><Text style={styles.paymentErrorText}>{paymentError}</Text>{pendingOrderId && <GlassPressable style={styles.pendingOrderButton} onPress={() => onOpenOrder(pendingOrderId)}><Text style={styles.pendingOrderText}>View the saved order</Text><Ionicons name="arrow-forward" size={15} color={primary} /></GlassPressable>}</View></View>}
       <GlassPressable style={styles.payButton} onPress={onPay} disabled={paying || !quote}>{paying ? <ActivityIndicator color="#fff" /> : <><Ionicons name="lock-closed-outline" size={18} color="#fff" /><Text style={styles.payButtonText}>{quote ? `Continue to payment · ${formatMoney(quote.total)}` : 'Get a quote to continue'}</Text></>}</GlassPressable>
-      <View style={styles.secureNote}><Ionicons name="shield-checkmark-outline" size={16} color={inkMuted} /><Text style={styles.secureText}>Card and Apple Pay details are handled by Stripe. Fridgie never stores your card number.</Text></View>
+      <View style={styles.secureNote}><Ionicons name="shield-checkmark-outline" size={16} color={inkMuted} /><Text style={styles.secureText}>{stripeWallets.applePayEnabled && Platform.OS === 'ios' ? 'Card and Apple Pay details' : Platform.OS === 'android' ? 'Card and Google Pay details' : 'Card details'} are handled by Stripe. Fridgie never stores your card number.</Text></View>
     </ScrollView>
   );
 }
@@ -892,8 +895,13 @@ export default function PrintCookbookBuilder() {
         return;
       }
       if (!session.publishableKey || !session.paymentIntentClientSecret) throw new Error('Secure payment is not configured for this order.');
-      const merchantIdentifier = process.env.EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER ?? 'merchant.com.nairdrie.fridgie';
-      await initStripe({ publishableKey: session.publishableKey, merchantIdentifier, urlScheme: 'fridgie' });
+      await initStripe({
+        publishableKey: session.publishableKey,
+        urlScheme: 'fridgie',
+        ...(stripeWallets.applePayEnabled
+          ? { merchantIdentifier: stripeWallets.merchantIdentifier }
+          : {}),
+      });
       const init = await initPaymentSheet({
         merchantDisplayName: session.merchantDisplayName || 'Fridgie',
         paymentIntentClientSecret: session.paymentIntentClientSecret,
@@ -911,7 +919,9 @@ export default function PrintCookbookBuilder() {
             country: address.country.toUpperCase(),
           },
         },
-        ...(Platform.OS === 'ios' ? { applePay: { merchantCountryCode: process.env.EXPO_PUBLIC_STRIPE_MERCHANT_COUNTRY ?? 'CA' } } : {}),
+        ...(Platform.OS === 'ios' && stripeWallets.applePayEnabled
+          ? { applePay: { merchantCountryCode: stripeWallets.merchantCountryCode } }
+          : {}),
         ...(Platform.OS === 'android' ? { googlePay: { merchantCountryCode: process.env.EXPO_PUBLIC_STRIPE_MERCHANT_COUNTRY ?? 'CA', testEnv: session.publishableKey.startsWith('pk_test_') } } : {}),
         appearance: {
           colors: { primary, background: '#F5F5EF', componentBackground: '#FFFFFF', componentBorder: '#DCE5DC', componentDivider: '#DCE5DC', primaryText: ink, secondaryText: inkMuted, componentText: ink, placeholderText: inkFaint, icon: primary, error: '#A94E48' },

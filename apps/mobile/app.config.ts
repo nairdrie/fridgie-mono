@@ -12,15 +12,33 @@ const { resolveAdMobBuildConfig } = require('./config/admob-build.cjs') as {
     iosNativeUnitId: string;
   };
 };
+const { resolveStripeWalletBuildConfig } = require('./config/stripe-wallets.cjs') as {
+  resolveStripeWalletBuildConfig(env: Record<string, string | undefined>):
+    | { applePayEnabled: false; merchantIdentifier: undefined }
+    | { applePayEnabled: true; merchantIdentifier: string };
+};
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const ads = resolveAdMobBuildConfig(process.env);
+  const stripeWallets = resolveStripeWalletBuildConfig(process.env);
   return {
     ...config,
     name: config.name ?? 'Fridgie',
     slug: config.slug ?? 'fridgie',
     plugins: [
       ...(config.plugins ?? []),
+      ['@stripe/stripe-react-native', {
+        enableGooglePay: true,
+        ...(stripeWallets.applePayEnabled
+          ? { merchantIdentifier: stripeWallets.merchantIdentifier }
+          : {}),
+      }],
+      ['./plugins/withStripeApplePayOptIn', {
+        enabled: stripeWallets.applePayEnabled,
+        ...(stripeWallets.applePayEnabled
+          ? { merchantIdentifier: stripeWallets.merchantIdentifier }
+          : {}),
+      }],
       ['react-native-google-mobile-ads', {
         androidAppId: ads.androidAppId,
         iosAppId: ads.iosAppId,

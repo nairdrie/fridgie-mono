@@ -179,11 +179,29 @@ silently omit retail tax unless an operator explicitly sets
 `PRINT_ALLOW_UNAVAILABLE_TAX=true` after legal review.
 
 On mobile, expose the same publishable key as
-`EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY`. Apple Pay uses merchant identifier
-`merchant.com.nairdrie.fridgie`; create that identifier/certificate in Apple and
-Stripe, enable the entitlement, and rebuild the native app. Enable Google Pay
-in Stripe. Wallets require a dev/EAS/native build and physical-device testing;
-they do not work in Expo Go.
+`EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY`. Card PaymentSheet checkout and Google Pay
+do not require an Apple merchant profile. Apple Pay is deliberately off unless
+the same native build sets all of:
+
+```text
+EXPO_PUBLIC_STRIPE_APPLE_PAY_ENABLED=true
+EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER=merchant.com.nairdrie.fridgie
+EXPO_PUBLIC_STRIPE_MERCHANT_COUNTRY=CA
+```
+
+The single flag coordinates the Stripe config-plugin entitlement, runtime
+merchant initialization, and PaymentSheet `applePay` option. Missing or invalid
+merchant configuration fails app-config evaluation instead of producing an
+unsignable build. These values are public client configuration; store them as
+plain-text or sensitive EAS environment variables, not secret variables that
+dynamic app configuration cannot read locally.
+
+Before enabling the flag, create/attach the Merchant ID and payment-processing
+certificate in Apple and Stripe. Then regenerate the affected development,
+ad-hoc preview, and App Store provisioning profiles for
+`com.nairdrie.fridgie`; the existing distribution certificate can be reused.
+Disabling the flag removes the entitlement on the next prebuild. Rebuild and
+test wallets on physical devices—Apple Pay does not work in Expo Go.
 
 ## 4. Reconciliation, cleanup, and alerts
 
@@ -383,9 +401,11 @@ remove the API bindings in a reviewed manual change, and only then set the gate
 to `false`.
 
 The EAS/native build has a separate configuration boundary. Set
-`EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY` and the wallet variables in the EAS
-environment before creating a staff or production build; API Secret Manager
-bindings do not populate Expo build-time variables.
+`EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY` in its EAS environment. Leave
+`EXPO_PUBLIC_STRIPE_APPLE_PAY_ENABLED` unset/false for card-only builds; set the
+complete Apple Pay trio above only after provider setup and provisioning-profile
+refresh are ready. API Secret Manager bindings do not populate Expo build-time
+variables.
 
 When print deployment is enabled, CI snapshots the complete reconciliation-job
 specification, pauses its scheduler, and waits for any in-flight execution to

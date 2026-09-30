@@ -102,20 +102,44 @@ Admin SDK continues to use IAM. `firebase.json` targets the actual named
 database, `fridgie-db`, rather than silently publishing to `(default)`.
 
 The `main` deployment publishes these rules before it deploys a new API
-revision. Grant the Workload Identity deployer the narrow rules role once:
+revision. The pinned Firebase CLI first reads Service Usage state and attributes
+API quota to this project, then compiles and publishes Rules for the named
+database. Its existing-database metadata probe tolerates denied access, so the
+deployer deliberately receives no Firestore document or metadata role. Run
+`scripts/gcp-bootstrap.sh` as an owner to grant the Workload Identity deployer:
+
+- `roles/firebaserules.admin` for Rules compilation/releases; and
+- `projects/grocerease-5abbb/roles/fridgieRulesDeploySupport`, a custom role
+  containing only `serviceusage.services.get` and `serviceusage.services.use`.
+
+The relevant bootstrap operations are shown below (first role creation shown):
 
 ```sh
-gcloud services enable firebaserules.googleapis.com \
+gcloud services enable firestore.googleapis.com firebaserules.googleapis.com \
   --project=grocerease-5abbb
+gcloud iam roles create fridgieRulesDeploySupport \
+  --project=grocerease-5abbb \
+  --title='Fridgie Rules Deploy Support' \
+  --description='Minimal Service Usage access required by Firebase CLI for Firestore rules deployment' \
+  --permissions=serviceusage.services.get,serviceusage.services.use \
+  --stage=GA
 gcloud projects add-iam-policy-binding grocerease-5abbb \
   --member="serviceAccount:${DEPLOY_SA}" \
   --role=roles/firebaserules.admin \
   --condition=None
+gcloud projects add-iam-policy-binding grocerease-5abbb \
+  --member="serviceAccount:${DEPLOY_SA}" \
+  --role=projects/grocerease-5abbb/roles/fridgieRulesDeploySupport \
+  --condition=None
 ```
 
-Do not replace that with `roles/firebase.admin`; the rules deployer does not
-need access to user documents. A rules deployment failure stops the API release
-before traffic is changed.
+The checked-in bootstrap updates the custom role when it already exists; the
+abridged command above is for a first creation. Do not replace these grants with
+`roles/firebase.admin`, `roles/datastore.user`, Owner, or Editor. The deployer
+does not need user-document access or permission to enable APIs. The custom
+role's `serviceusage.services.use` permits API quota attribution to this project;
+it does not enable or disable services. A rules
+deployment failure stops the API release before traffic is changed.
 
 ## Nutrition provider
 

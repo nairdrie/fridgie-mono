@@ -156,8 +156,11 @@ make docker-build     # docker build -f apps/api/Dockerfile .
 Pushes to `main` run the checked-in GitHub Actions deployment: CI publishes the
 client-deny rules for the named `fridgie-db` Firestore database, builds a Cloud
 Run candidate, smoke-tests it, then promotes it. The Workload Identity deployer
-needs `roles/firebaserules.admin` in addition to the Cloud Run and Artifact
-Registry roles documented in [the deployment design](docs/design-deploy-pipeline.md).
+needs `roles/firebaserules.admin` plus the repository-owned
+`fridgieRulesDeploySupport` custom role. The latter contains only
+`serviceusage.services.get` and `serviceusage.services.use`, the API-state and
+quota-project prerequisites of the pinned Firebase CLI. See the
+[deployment design](docs/design-deploy-pipeline.md).
 
 **Mobile** — via EAS, parameterised by platform:
 
@@ -168,4 +171,6 @@ make build-prod    PLATFORM=all       # store builds
 make submit        PLATFORM=ios
 ```
 
-`eas.json` sets `EXPO_PUBLIC_API_URL` explicitly per profile.
+`eas.json` sets `EXPO_PUBLIC_API_URL` explicitly per profile. iOS builds are
+card-capable without Apple Pay by default; the print-commerce runbook documents
+the coordinated native/runtime Apple Pay opt-in and required profile refresh.

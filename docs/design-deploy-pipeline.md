@@ -185,6 +185,20 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${DEPLOY_SA}" --role=roles/firebaserules.admin --condition=None
 
+# firebase-tools reads API state and sends this project as its quota project
+# before compiling Rules. Keep those checks in a two-permission custom role
+# instead of granting Firestore data access or Service Usage administration.
+gcloud iam roles create fridgieRulesDeploySupport \
+  --project=$PROJECT_ID \
+  --title="Fridgie Rules Deploy Support" \
+  --description="Minimal Service Usage access required by Firebase CLI for Firestore rules deployment" \
+  --permissions=serviceusage.services.get,serviceusage.services.use \
+  --stage=GA
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${DEPLOY_SA}" \
+  --role="projects/${PROJECT_ID}/roles/fridgieRulesDeploySupport" \
+  --condition=None
+
 gcloud artifacts repositories add-iam-policy-binding fridgie --location=$REGION \
   --member="serviceAccount:${DEPLOY_SA}" --role=roles/artifactregistry.writer
 
@@ -1110,7 +1124,16 @@ gcloud run deploy fridgie-api \
 | `roles/datastore.user` | `getFirestore('fridgie-db')`. Note this is broader than "the named database" — it also covers `(default)` and any database created later. An IAM condition on `resource.name.endsWith("/databases/fridgie-db")` can tighten it, but condition support on Firestore data-plane calls is uneven and a silently-denied read is worse than a broad grant. **LATER**, and only with testing. |
 | `roles/firebaseauth.admin` | `adminAuth.createSessionCookie` at `api/authentication/index.ts:57`, which is live (`AuthContext.tsx:105`). Note `verifyIdToken` needs **no** credential at all — it validates offline against Google's public certs. **LATER tightening:** this role also permits deleting every user in the project. A custom role with just `identitytoolkit.sessionCookies.create` is the correct long-term answer: `gcloud iam roles create fridgieSessionCookies --project=grocerease-5abbb --permissions=identitytoolkit.sessionCookies.create --stage=GA`. |
 
-Deliberately **not** granted: `roles/editor`, `roles/firebase.admin`, any Storage role (`getStorage()` appears only in `scripts/`, which the Dockerfile never copies), `roles/iam.serviceAccountTokenCreator` (needed only for `createCustomToken` / signed URLs — you call neither). The deployer has the narrower `roles/firebaserules.admin` role so CI can publish the committed client-deny Firestore policy without receiving document-data access.
+Deliberately **not** granted: `roles/editor`, `roles/firebase.admin`, a Firestore
+document-data role for the deployer, any Storage role (`getStorage()` appears
+only in `scripts/`, which the Dockerfile never copies), or
+`roles/iam.serviceAccountTokenCreator` (needed only for `createCustomToken` /
+signed URLs — you call neither). The deployer has
+`roles/firebaserules.admin` plus the custom
+`fridgieRulesDeploySupport` role containing only
+`serviceusage.services.get` and `serviceusage.services.use`. This lets CI
+publish the committed client-deny policy without reading documents or enabling
+services.
 
 ### The bill
 
