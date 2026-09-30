@@ -1,6 +1,8 @@
 import AddEditRecipeModal from '@/components/AddEditRecipeModal';
 import RecipeCard from '@/components/RecipeCard';
 import ViewRecipeModal from '@/components/ViewRecipeModal';
+import { DiscoverSponsoredSlot } from '@/ads/DiscoverSponsoredSlot';
+import { useDiscoverAdEntitlement } from '@/ads/entitlement';
 import { DiscoverCreatorCard, discoveryAccents, FeatureRecipeCard, RecipeGrid } from '@/components/discover/DiscoverCards';
 import { BrandWordmark } from '@/components/ui/Brand';
 import { AmbientBackground, GlassPressable, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
@@ -8,6 +10,7 @@ import { useCookbook } from '@/context/CookbookContext';
 import type { ExploreCollection, ExploreContent, Item, Meal, Recipe, UserSearchResult } from '@/types/types';
 import { getExploreContent, searchAll } from '@/utils/api';
 import { discoverCollections, discoverEditionLabel, discoverRecipes, surpriseRecipe } from '@/utils/discover';
+import { appendDiscoverAdSlots, canRequestDiscoverAds, DiscoverAdSession, DISABLED_DISCOVER_ADS, initialDiscoverAdPlanningState, normalizeDiscoverAdvertising, type PlannedDiscoverRow } from '@/utils/discoverAds';
 import { ink, inkMuted, primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -25,10 +28,14 @@ export default function ExploreScreen() {
     const router = useRouter();
     const { addRecipe } = useCookbook();
     const { reduceMotion } = useGlassPreferences();
+    const adEntitlement = useDiscoverAdEntitlement();
+    const adSession = useRef(new DiscoverAdSession()).current;
     const [searchQuery, setSearchQuery] = useState('');
     const [topic, setTopic] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [exploreData, setExploreData] = useState<ExploreContent | null>(null);
+    const [advertising, setAdvertising] = useState(DISABLED_DISCOVER_ADS);
+    const [adScrollTick, setAdScrollTick] = useState(0);
     const [loadError, setLoadError] = useState(false);
     const [recipeToViewId, setRecipeToViewId] = useState<string | null>(null);
     const [recipeToEdit, setRecipeToEdit] = useState<Recipe | null>(null);
@@ -56,14 +63,21 @@ export default function ExploreScreen() {
 
     const fetchContent = useCallback((): Promise<void> => {
         if (fetchInFlight.current) return fetchInFlight.current;
+        // Treat every refresh as an untrusted window until the server returns a
+        // fresh kill-switch/config value. Organic content may remain cached.
+        setAdvertising(DISABLED_DISCOVER_ADS);
         const task = (async () => {
             try {
                 const content = await getExploreContent();
                 if (!mounted.current) return;
                 setExploreData(content);
+                setAdvertising(normalizeDiscoverAdvertising(content.advertising));
                 setLoadError(false);
             } catch (error) {
-                if (mounted.current) setLoadError(true);
+                if (mounted.current) {
+                    setAdvertising(DISABLED_DISCOVER_ADS);
+                    setLoadError(true);
+                }
                 console.error('Could not load inspiration:', error);
             } finally {
                 if (mounted.current) setIsLoading(false);
@@ -165,6 +179,7 @@ export default function ExploreScreen() {
     const hero = exploreData?.heroRecipe ?? allRecipes[0];
     const creators = exploreData?.featuredCreators ?? [];
     const hasContent = allRecipes.length > 0 || creators.length > 0;
+    const adsEligible = canRequestDiscoverAds(advertising, adEntitlement);
     const chooseTopic = (id: string | null) => { setTopic(id); scroll.current?.scrollTo({ y: 0, animated: !reduceMotion }); };
     const surprise = () => {
         const recipe = surpriseRecipe(activeCollection?.recipes ?? allRecipes, lastOpenedRecipe.current);
@@ -176,12 +191,47 @@ export default function ExploreScreen() {
             {creators.map(creator => <DiscoverCreatorCard key={creator.uid} creator={creator} onPress={() => router.push({ pathname: '/profile/[uid]', params: { uid: creator.uid } })} />)}
         </ScrollView>
     </View>;
-    const renderCollection = (collection: ExploreCollection, index: number) => {
-        const recipes = collection.recipes.filter(recipe => recipe.id !== hero?.id).slice(0, 4);
+    const collectionPlans = useMemo(() => {
+        let state = initialDiscoverAdPlanningState(advertising.cadence);
+        if (hero) state.organicCount = 1;
+        return collections.map((collection, index) => {
+            const recipes = collection.recipes.filter(recipe => recipe.id !== hero?.id).slice(0, 4);
+            const planned = appendDiscoverAdSlots(recipes, state, { ...advertising.cadence, maxPerSession: adsEligible ? advertising.cadence.maxPerSession : 0 });
+            state = planned.state;
+            return { collection, index, recipes, rows: planned.rows };
+        });
+    }, [advertising.cadence, adsEligible, collections, hero]);
+    const activeRows = useMemo(() => {
+        if (!activeCollection) return [];
+        return appendDiscoverAdSlots(activeCollection.recipes, initialDiscoverAdPlanningState(advertising.cadence), {
+            ...advertising.cadence,
+            maxPerSession: adsEligible ? advertising.cadence.maxPerSession : 0,
+        }).rows;
+    }, [activeCollection, advertising.cadence, adsEligible]);
+    const renderRecipeRows = (rows: PlannedDiscoverRow<Recipe>[], accent: ExploreCollection['accent'], keyPrefix: string) => {
+        const rendered: React.ReactNode[] = [];
+        let recipes: Recipe[] = [];
+        const flush = () => {
+            if (!recipes.length) return;
+            const batch = recipes;
+            recipes = [];
+            rendered.push(<RecipeGrid key={`${keyPrefix}-recipes-${rendered.length}`} recipes={batch} accent={accent} onView={openRecipe} />);
+        };
+        for (const row of rows) {
+            if (row.kind === 'organic') recipes.push(row.item);
+            else {
+                flush();
+                rendered.push(<DiscoverSponsoredSlot key={`${keyPrefix}-ad-${row.afterOrganic}`} config={advertising} entitlement={adEntitlement} session={adSession} scrollTick={adScrollTick} />);
+            }
+        }
+        flush();
+        return rendered;
+    };
+    const renderCollection = ({ collection, index, recipes, rows }: (typeof collectionPlans)[number]) => {
         if (!recipes.length) return null;
         return <Animated.View key={collection.id} entering={FadeInDown.delay(Math.min(index, 3) * 70).duration(450).reduceMotion(ReduceMotion.System)} style={styles.collection}>
             <SectionHeading title={collection.title} subtitle={collection.subtitle} onSeeAll={collection.recipes.length > recipes.length ? () => chooseTopic(collection.id) : undefined} />
-            <RecipeGrid recipes={recipes} accent={collection.accent} onView={openRecipe} />
+            {renderRecipeRows(rows, collection.accent, collection.id)}
         </Animated.View>;
     };
 
@@ -196,7 +246,7 @@ export default function ExploreScreen() {
                 <GlassPressable style={[styles.topic, !activeCollection && styles.topicSelected]} onPress={() => chooseTopic(null)} accessibilityLabel="Show all recipe collections" accessibilityState={{ selected: !activeCollection }}><Ionicons name="grid-outline" size={13} color={!activeCollection ? '#FFF' : primary} /><Text style={[styles.topicText, !activeCollection && styles.topicTextSelected]}>All</Text></GlassPressable>
                 {collections.map(collection => <GlassPressable key={collection.id} style={[styles.topic, activeCollection?.id === collection.id && styles.topicSelected]} onPress={() => chooseTopic(collection.id)} accessibilityLabel={`Browse ${collection.title}`} accessibilityState={{ selected: activeCollection?.id === collection.id }}><View style={[styles.topicDot, { backgroundColor: discoveryAccents[collection.accent].detail }]} /><Text style={[styles.topicText, activeCollection?.id === collection.id && styles.topicTextSelected]}>{collection.title}</Text></GlassPressable>)}
             </ScrollView></View>}
-            {isLoading || (searching && isSearching) ? <View style={styles.loading}><ActivityIndicator size="large" color={primary} /><Text style={styles.loadingText}>{searching ? 'Finding something delicious…' : 'Opening today’s menu…'}</Text></View> : <ScrollView ref={scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" refreshControl={!searching ? <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={primary} /> : undefined}>
+            {isLoading || (searching && isSearching) ? <View style={styles.loading}><ActivityIndicator size="large" color={primary} /><Text style={styles.loadingText}>{searching ? 'Finding something delicious…' : 'Opening today’s menu…'}</Text></View> : <ScrollView ref={scroll} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" onScroll={adsEligible ? () => setAdScrollTick(tick => tick + 1) : undefined} scrollEventThrottle={200} refreshControl={!searching ? <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={primary} /> : undefined}>
                 {searching ? <View style={styles.inset}>
                     {searchResults.users.length > 0 && <><SectionHeading title="Kitchens" />{searchResults.users.map(user => <View key={user.objectID} style={{ marginBottom: 12 }}><DiscoverCreatorCard fullWidth creator={{ ...user, uid: user.objectID, followerCount: user.followerCount ?? 0, recipeCount: user.recipeCount ?? 0 }} onPress={() => router.push({ pathname: '/profile/[uid]', params: { uid: user.objectID } })} /></View>)}</>}
                     {searchResults.recipes.length > 0 && <><SectionHeading title="Recipes" subtitle={`${searchResults.recipes.length} to explore`} />{searchResults.recipes.map(recipe => <RecipeCard key={recipe.id} recipe={recipe} onView={openRecipe} onAddToMealPlan={() => {}} />)}</>}
@@ -204,13 +254,13 @@ export default function ExploreScreen() {
                 </View> : <>
                     {loadError && hasContent && <GlassPressable style={styles.refreshNotice} onPress={onRefresh}><Ionicons name="cloud-offline-outline" size={16} color={inkMuted} /><Text style={styles.refreshNoticeText}>Couldn’t refresh. Your last edition is here.</Text><Ionicons name="refresh-outline" size={16} color={primary} /></GlassPressable>}
                     {hasContent && <View style={styles.editionToolbar}><Text style={styles.editionLabel}>{discoverEditionLabel(exploreData?.edition?.publishedAt)}</Text><GlassPressable style={styles.surpriseButton} onPress={surprise} disabled={!allRecipes.length} accessibilityLabel="Surprise me with a recipe"><Ionicons name="shuffle-outline" size={16} color={primary} /><Text style={styles.surpriseText}>Surprise me</Text></GlassPressable></View>}
-                    {activeCollection ? <View style={styles.collection}><SectionHeading title={activeCollection.title} subtitle={activeCollection.subtitle} /><RecipeGrid recipes={activeCollection.recipes} accent={activeCollection.accent} onView={openRecipe} /></View> : <>
+                    {activeCollection ? <View style={styles.collection}><SectionHeading title={activeCollection.title} subtitle={activeCollection.subtitle} />{renderRecipeRows(activeRows, activeCollection.accent, activeCollection.id)}</View> : <>
                         {!!hero && <Animated.View entering={FadeInDown.duration(450).reduceMotion(ReduceMotion.System)} style={styles.heroSection}>
                             <FeatureRecipeCard recipe={hero} label={exploreData?.edition ? 'The daily pick' : 'On our radar'} onView={openRecipe} />
                         </Animated.View>}
-                        {collections[0] && renderCollection(collections[0], 0)}
+                        {collectionPlans[0] && renderCollection(collectionPlans[0])}
                         {renderCreators()}
-                        {collections.slice(1).map((collection, index) => renderCollection(collection, index + 1))}
+                        {collectionPlans.slice(1).map(renderCollection)}
                     </>}
                     {!hasContent && <View style={styles.empty}><Ionicons name={loadError ? 'cloud-offline-outline' : 'restaurant-outline'} size={34} color={primary} /><Text style={styles.emptyTitle}>{loadError ? 'A little connection hiccup' : 'A fresh menu is on its way'}</Text><Text style={styles.emptyText}>{loadError ? 'Your inspiration will be here when you reconnect.' : 'Search for a favourite recipe or check back for a new edition.'}</Text><GlassPressable style={styles.retry} onPress={onRefresh}><Ionicons name="refresh-outline" size={16} color={primary} /><Text style={styles.retryText}>Refresh Discover</Text></GlassPressable></View>}
                 </>}

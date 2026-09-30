@@ -574,6 +574,41 @@ export interface ExploreCollection {
   accent: ExploreAccent;
   recipes: Recipe[];
 }
+
+/**
+ * Server-owned controls for the optional, low-frequency Discover ad surface.
+ *
+ * This deliberately contains no user or recipe context. The mobile client may
+ * choose a provider from `providerOrder`, but it must never add search terms,
+ * dietary preferences, grocery data, or household data to an ad request.
+ */
+export type DiscoverAdProviderName = 'house' | 'admob';
+export interface DiscoverAdCadence {
+  firstAfter: number;
+  interval: number;
+  maxPerSession: number;
+}
+export interface DiscoverHouseAd {
+  id: string;
+  /** Always `Fridgie`; the API does not accept third-party house-card brands. */
+  brand: 'Fridgie';
+  headline: string;
+  body: string;
+  ctaLabel: string;
+  destinationUrl: string;
+  imageUrl?: string;
+  logoUrl?: string;
+}
+export interface DiscoverAdvertisingConfig {
+  /** Global remote kill switch. Missing/false means no ad requests at all. */
+  enabled: boolean;
+  /** Ordered provider fallback chain; `house` is the safe default. */
+  providerOrder: DiscoverAdProviderName[];
+  cadence: DiscoverAdCadence;
+  houseAds: DiscoverHouseAd[];
+  /** The only targeting mode supported by this client. */
+  targetingMode: 'contextual';
+}
 export interface ExploreContent {
   edition?: ExploreEdition;
   heroRecipe?: Recipe;
@@ -581,6 +616,7 @@ export interface ExploreContent {
   trending?: Recipe[];
   newest?: Recipe[];
   featuredCreators?: ExploreCreator[];
+  advertising?: DiscoverAdvertisingConfig;
 }
 
 /** The raw invitation document as stored. */

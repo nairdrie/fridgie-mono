@@ -54,6 +54,7 @@
     "react-native-draggable-flatlist": "^4.0.3",
     "react-native-fbsdk-next": "^13.4.3",
     "react-native-gesture-handler": "~2.24.0",
+    "react-native-google-mobile-ads": "15.8.3",
     "react-native-modal": "^14.0.0-rc.1",
     "react-native-purchases": "^10.10.2",
     "react-native-reanimated": "~3.17.4",

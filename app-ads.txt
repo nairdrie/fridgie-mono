@@ -1,0 +1,6 @@
+# No advertising seller is authorized yet.
+#
+# Before the AdMob production pilot is enabled, replace this comment-only file
+# with the real publisher record from Fridgie's AdMob account, publish it at
+# https://fridgie.ca/app-ads.txt, and verify it in AdMob. Do not use a sample or
+# guessed publisher ID.
