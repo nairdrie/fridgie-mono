@@ -14,6 +14,7 @@ import { useCookbook } from '@/context/CookbookContext';
 import { useLists } from '@/context/ListContext';
 import { Item, List, ListView, Meal, Recipe } from '@/types/types';
 import { ink, inkMuted, primary } from '@/utils/styles';
+import { auth } from '@/utils/firebase';
 import { AmbientBackground, GlassPressable, useGlassPreferences } from '@/components/ui/Glass';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -151,6 +152,23 @@ export default function HomeScreen() {
     useEffect(() => {
         setIsFabMenuOpen(false);
     }, [showFab, selectedList?.id]);
+
+    const openMealSuggestions = useCallback(async () => {
+        setIsFabMenuOpen(false);
+        if (!user || user.isAnonymous) {
+            // The AI endpoint needs a durable account for its cross-device,
+            // server-owned weekly allowance. Preserve the exact action so the
+            // list reopens this sheet as soon as sign-in/profile setup ends.
+            try {
+                await AsyncStorage.setItem('pendingAction', 'suggest-meals');
+            } catch (error) {
+                console.error('Could not preserve the Suggest Meals sign-in intent:', error);
+            }
+            router.navigate({ pathname: '/login', params: { returnTo: 'suggest-meals' } });
+            return;
+        }
+        setSuggestionModalVisible(true);
+    }, [router, user]);
 
     // Whose shelf a recipe is on is one fact the whole app shares — see
     // CookbookContext. This screen used to keep its own copy, fetched on every
@@ -948,6 +966,10 @@ export default function HomeScreen() {
                     const pendingAction = await AsyncStorage.getItem('pendingAction');
                     if (pendingAction === 'suggest-meals') {
                         await AsyncStorage.removeItem('pendingAction');
+                        // Returning with a guest still active means sign-in was
+                        // cancelled. Consume the intent without reopening a
+                        // modal that can only send them straight back to login.
+                        if (!auth.currentUser || auth.currentUser.isAnonymous) return;
                         setSuggestionModalVisible(true); 
                     }
                 } catch (e) { console.error("Failed to check for pending action:", e); }
@@ -1090,7 +1112,7 @@ export default function HomeScreen() {
                         onDeleteMeal={handleDeleteMeal}
                         onAddMeal={handleAddMeal}
                         onAddFromCookbook={() => setCookbookModalVisible(true)}
-                        onSuggestMeal={() => setSuggestionModalVisible(true)}
+                        onSuggestMeal={() => { void openMealSuggestions(); }}
                         onViewRecipe={handleViewRecipe}
                         onAddRecipe={handleAddRecipe}
                         collapsedMeals={collapsedMeals}
@@ -1122,7 +1144,7 @@ export default function HomeScreen() {
                         // quickest action, the furthest is the most involved.
                         <>
                             <Animated.View style={[styles.secondaryFabContainer, fabStyle2]}>
-                                <GlassPressable style={styles.secondaryButton} onPress={() => { setSuggestionModalVisible(true); setIsFabMenuOpen(false); }}>
+                                <GlassPressable style={styles.secondaryButton} onPress={() => { void openMealSuggestions(); }}>
                                     <Ionicons name="sparkles" size={20} color={primary} style={styles.secondaryButtonIcon}/>
                                     <Text style={styles.secondaryButtonText}>Suggest Meal</Text>
                                 </GlassPressable>

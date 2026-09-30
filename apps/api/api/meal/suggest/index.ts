@@ -7,6 +7,19 @@ import { normalizeIngredients } from '@/utils/quantity';
 import { normalizeRecipeServings } from '@/utils/servings';
 import { completeJson, models } from '@/utils/claude';
 import {
+  completeAccountAiUse,
+  consumeMealSuggestionAttempt,
+  refundAccountAiUse,
+  reserveAccountAiUse,
+} from '@/utils/aiQuota';
+import { retryAfterSeconds } from '@/utils/aiQuotaCore';
+import { boundedPromptStrings, mealConstraintLines } from '@/utils/mealSuggestionPrompt';
+import {
+  isBodyLimitError,
+  suggestionBodyLimit,
+  suggestionRequestTooLarge,
+} from '@/utils/requestLimits';
+import {
   categoryVocabulary,
   quantityFormatRules,
   servingsRules,
@@ -53,6 +66,7 @@ interface SuggestionRequestBody {
     dislikedIngredients?: string;
   };
   hints?: string[];
+  leftoversIngredients?: string[];
   query?: string;
   conversation?: SuggestionTurn[];
 }
@@ -263,7 +277,7 @@ them off a source, so "servings" is never null here — write for 4 and say 4.
 
 route.use('*', auth, requireAccount);
 
-route.post('/', async (c) => {
+route.post('/', suggestionBodyLimit, async (c) => {
   const uid = c.get('uid') as string;
 
   // Only the parse is guarded. Anything else inside this try would have its
@@ -271,7 +285,10 @@ route.post('/', async (c) => {
   let body: SuggestionRequestBody | null = null;
   try {
     body = await c.req.json<SuggestionRequestBody>();
-  } catch {
+  } catch (error) {
+    // The streaming body limiter throws while a chunked request is consumed.
+    // Preserve the same stable 413 returned for a declared oversized body.
+    if (isBodyLimitError(error)) return suggestionRequestTooLarge(c);
     // Empty or invalid body is fine — there just aren't any vetoes.
   }
 
@@ -280,13 +297,9 @@ route.post('/', async (c) => {
   // unbounded list is somebody else's token bill.
   // Everything below is client-supplied and goes straight into the prompt, so
   // each field is bounded — an unbounded list is somebody else's token bill.
-  const strings = (v: unknown, max: number, len: number): string[] =>
-    Array.isArray(v)
-      ? v.filter((t): t is string => typeof t === 'string' && t.length > 0).slice(0, max).map((t) => t.slice(0, len))
-      : [];
-
-  const sessionVetoes = strings(body?.vetoedTitles, 60, 200);
-  const hints = strings(body?.hints, 12, 60);
+  const sessionVetoes = boundedPromptStrings(body?.vetoedTitles, 60, 200);
+  const hints = boundedPromptStrings(body?.hints, 12, 60);
+  const leftoversIngredients = boundedPromptStrings(body?.leftoversIngredients, 80, 100);
   const query = typeof body?.query === 'string' ? body.query.trim().slice(0, 500) : '';
 
   const conversation: SuggestionTurn[] = Array.isArray(body?.conversation)
@@ -315,12 +328,15 @@ route.post('/', async (c) => {
   // vegan, but tonight I'm cooking for my family" reaches the model.
   const overrides = body?.overrides;
   const dietaryNeeds = overrides && 'dietaryNeeds' in overrides
-    ? strings(overrides.dietaryNeeds, 12, 60)
-    : (stored.dietaryNeeds ?? []);
+    ? boundedPromptStrings(overrides.dietaryNeeds, 12, 60)
+    : boundedPromptStrings(stored.dietaryNeeds, 12, 60);
 
-  const storedDisliked = Array.isArray(stored.dislikedIngredients)
+  const storedDislikedRaw = Array.isArray(stored.dislikedIngredients)
     ? stored.dislikedIngredients.join(', ')
     : stored.dislikedIngredients;
+  const storedDisliked = typeof storedDislikedRaw === 'string'
+    ? storedDislikedRaw.trim().slice(0, 500)
+    : undefined;
   const disliked = overrides && 'dislikedIngredients' in overrides
     ? String(overrides.dislikedIngredients ?? '').trim().slice(0, 500)
     : storedDisliked;
@@ -393,8 +409,7 @@ route.post('/', async (c) => {
     );
   }
 
-  if (dietaryNeeds.length) parts.push(`Dietary needs (hard constraints): ${dietaryNeeds.join(', ')}.`);
-  if (disliked) parts.push(`Must NOT contain: ${disliked}.`);
+  parts.push(...mealConstraintLines({ dietaryNeeds, disliked, leftoversIngredients }));
 
   // Hints and the typed request are what the person wants TONIGHT, so they are
   // stated last and stated loudest — a stored preference should never outrank
@@ -425,6 +440,67 @@ route.post('/', async (c) => {
     parts.push('', `Recently suggested to this person — do not repeat or closely echo: ${avoid.join(', ')}.`);
   }
 
+  // Reserve only now: parsing, account/preference checks and all supporting
+  // reads have succeeded, and the next meaningful action is the billed model
+  // call. The Firestore transaction prevents concurrent requests overspending
+  // the same weekly allowance.
+  let quota: Awaited<ReturnType<typeof reserveAccountAiUse>>;
+  try {
+    quota = await reserveAccountAiUse(uid);
+  } catch (error) {
+    console.error('AI quota reservation failed:', error instanceof Error ? error.name : 'unknown');
+    return c.json({
+      error: 'ai_quota_unavailable',
+      message: 'Meal suggestions are temporarily unavailable. Please try again.',
+    }, 503);
+  }
+
+  if (!quota.accepted || !quota.reservationId) {
+    if (quota.accountStatus.entitlement.status === 'unavailable') {
+      return c.json({
+        error: 'entitlement_unavailable',
+        message: 'We could not verify your current AI allowance. Please try again.',
+        ...quota.accountStatus,
+      }, 503);
+    }
+    return c.json({
+      error: 'ai_quota_exceeded',
+      message: 'You have used this week’s meal suggestions. Your allowance will reset automatically.',
+      ...quota.accountStatus,
+    }, 429);
+  }
+
+  const reservationId = quota.reservationId;
+
+  // The visible weekly allowance refunds provider/validation failures. Keep a
+  // separate consume-only hourly guard so repeated refundable failures cannot
+  // result in unbounded paid provider calls.
+  let attempt: Awaited<ReturnType<typeof consumeMealSuggestionAttempt>>;
+  try {
+    attempt = await consumeMealSuggestionAttempt(uid);
+  } catch (error) {
+    await refundAccountAiUse(uid, reservationId).catch((refundError) => {
+      console.error('Failed to refund AI quota after attempt-ledger failure:', refundError instanceof Error ? refundError.name : 'unknown');
+    });
+    console.error('AI attempt reservation failed:', error instanceof Error ? error.name : 'unknown');
+    return c.json({
+      error: 'ai_attempt_limit_unavailable',
+      message: 'Meal suggestions are temporarily unavailable. Please try again.',
+    }, 503);
+  }
+
+  if (!attempt.accepted) {
+    await refundAccountAiUse(uid, reservationId).catch((refundError) => {
+      console.error('Failed to refund rate-limited AI quota reservation:', refundError instanceof Error ? refundError.name : 'unknown');
+    });
+    c.header('Retry-After', String(retryAfterSeconds(attempt.usage)));
+    return c.json({
+      error: 'ai_attempt_rate_exceeded',
+      message: 'Too many meal-suggestion attempts right now. Please try again after this short cooldown.',
+      attemptUsage: attempt.usage,
+    }, 429);
+  }
+
   try {
     const result = await completeJson<{ recipes: Omit<Recipe, 'id'>[] }>({
       model: models.mealSuggest,
@@ -432,6 +508,11 @@ route.post('/', async (c) => {
       user: parts.join('\n'),
       schema: suggestionsSchema,
       effort: 'medium',
+      // Finish (or fail and refund) inside Bun/mobile's 120s request window.
+      // User-driven retries are quota-safe; hidden SDK retries can multiply
+      // model cost after the person has already left the screen.
+      timeoutMs: 100_000,
+      maxRetries: 0,
     });
 
     const recipes = (result.recipes ?? []).map((r) => normalizeRecipeServings({
@@ -448,8 +529,28 @@ route.post('/', async (c) => {
       .set({ mealSuggestions: { recentTitles: nextRecent } }, { merge: true })
       .catch((e) => console.error('Failed to persist suggestion history:', e));
 
+    try {
+      await completeAccountAiUse(uid, reservationId);
+    } catch (error) {
+      // The use is already counted. Cleanup only removes the now-unneeded
+      // rollback marker, so a cleanup outage must not discard good recipes.
+      console.error('Failed to finalize AI quota reservation:', error instanceof Error ? error.name : 'unknown');
+    }
+
+    c.header('X-AI-Usage-Remaining', String(quota.accountStatus.aiUsage.remaining));
+    c.header('X-AI-Usage-Limit', String(quota.accountStatus.aiUsage.limit));
+    c.header('X-AI-Usage-Window-Start', quota.accountStatus.aiUsage.windowStartsAt);
+    c.header('X-AI-Usage-Reset', quota.accountStatus.aiUsage.windowEndsAt);
+
     return c.json(recipes);
   } catch (error) {
+    try {
+      await refundAccountAiUse(uid, reservationId);
+    } catch (refundError) {
+      // The request was accepted and may have reached the provider, so failing
+      // closed is safer than decrementing without a successful transaction.
+      console.error('Failed to refund AI quota reservation:', refundError instanceof Error ? refundError.name : 'unknown');
+    }
     console.error('AI suggestion failed:', error);
     return c.json({ error: 'Failed to generate a meal suggestion.' }, 500);
   }

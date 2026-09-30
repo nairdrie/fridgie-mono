@@ -1,0 +1,12 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Fridgie's mobile clients do not access Firestore directly. Entitlements,
+    // quota ledgers, nutrition caches, and all other documents are owned by the
+    // API, whose Admin SDK credentials bypass these client-facing rules.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

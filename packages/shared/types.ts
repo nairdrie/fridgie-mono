@@ -243,6 +243,8 @@ export interface SuggestionRequest {
   };
   /** Cuisine / style / mood tags chosen for this generation only. */
   hints?: string[];
+  /** User-reviewed inventory from Pro Leftovers Mode; transient per request. */
+  leftoversIngredients?: string[];
   /** Free text from the chat box. */
   query?: string;
   /** Prior turns, oldest first, so a follow-up knows what it follows up on. */

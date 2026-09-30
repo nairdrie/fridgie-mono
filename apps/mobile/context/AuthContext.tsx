@@ -82,6 +82,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
 
   const router = useRouter();
+  const pathname = usePathname();
 
   // Main Auth State Listener
   useEffect(() => {
@@ -98,11 +99,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               photoURL: randomPhotoURL
             });
         }
-        if(!authUser.isAnonymous && !authUser.displayName) {
-          console.log("COMPLETE PROFILE FROM AUTH")
-          router.replace('/complete-profile');
-        }
-
         try {
           const token = await authUser.getIdToken(true);
           // await loginWithToken(token, setProfile);
@@ -132,6 +128,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => unsubscribe();
   }, []);
+
+  // Login owns post-auth routing while its screen is active because it carries
+  // narrow intents such as returning to Pro or reopening Suggest Meals. A
+  // competing redirect inside onAuthStateChanged could strip those params.
+  // Outside Login, this still catches an incomplete account on cold start or
+  // any other entry path.
+  useEffect(() => {
+    if (
+      loading
+      || !user
+      || user.isAnonymous
+      || user.displayName
+      || pathname === '/login'
+      || pathname === '/complete-profile'
+    ) return;
+    router.replace('/complete-profile');
+  }, [loading, pathname, router, user]);
 
   // Effect to load the stored group ID on mount
   useEffect(() => {

@@ -10,6 +10,7 @@ import ViewRecipeModal from '@/components/ViewRecipeModal';
 import { useAuth } from '@/context/AuthContext';
 import { useCookbook } from '@/context/CookbookContext';
 import { useNotifications } from '@/context/NotificationContext';
+import { usePro } from '@/context/ProContext';
 import { useCookbookFilter } from '@/hooks/useCookbookFilter';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
 import { Item, Meal, Recipe } from '@/types/types';
@@ -17,12 +18,13 @@ import { getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { clearCache } from '@/utils/listCache';
 import { flushAllDirty, resetSyncEngines } from '@/utils/listSync';
+import { usageNotice } from '@/utils/pro';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
 import { toReadablePhone } from '@/utils/utils';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { updateEmail, updateProfile, User } from 'firebase/auth';
 import React, { useCallback, useRef, useState } from 'react';
@@ -99,10 +101,13 @@ const EditableInfoRow = ({ label, value, onSave, showLabel = true, size = 16, bo
     );
 };
 
-const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisible: boolean; onClose: () => void; onNavigate: (path: string) => void; onDismiss: () => void }) => {
+const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss, returnToProAfterSignOut = false }: { isVisible: boolean; onClose: () => void; onNavigate: (path: string) => void; onDismiss: () => void; returnToProAfterSignOut?: boolean }) => {
     const { reduceMotion } = useGlassPreferences();
     const router = useRouter();
     const { user, refreshAuthUser } = useAuth();
+    const { isPro, isLoading: isLoadingPlan, usage } = usePro();
+    const [isSigningOut, setIsSigningOut] = useState(false);
+    const planUsage = usage ? usageNotice(usage, isPro) : null;
     // A row only grows a text field once you tap Edit, so which of them is being
     // typed into is not known ahead of time — the scroller hears all of them.
     const keyboard = useKeyboardAwareScroll({ enabled: isVisible });
@@ -115,6 +120,32 @@ const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisibl
             refreshAuthUser();
         } catch (error) {
             throw new Error("Failed to update email. You may need to sign out and sign back in.");
+        }
+    };
+
+    const handleSignOut = async () => {
+        if (isSigningOut) return;
+        setIsSigningOut(true);
+        // Give pending list edits a chance to reach the server, then clear the
+        // account-scoped device mirror regardless of network outcome.
+        void flushAllDirty()
+            .catch(() => {})
+            .finally(() => {
+                resetSyncEngines();
+                void clearCache();
+            });
+        try {
+            await auth.signOut();
+            onClose();
+            if (returnToProAfterSignOut) {
+                router.replace({ pathname: '/login', params: { returnTo: 'pro', proSource: 'recovery' } });
+            } else {
+                router.replace('/list');
+            }
+        } catch {
+            Alert.alert('Could not sign out', 'Please try again.');
+        } finally {
+            setIsSigningOut(false);
         }
     };
 
@@ -167,6 +198,37 @@ const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisibl
                             onSave={handleEmailSave}
                         />
                     }
+                    <Text style={styles.sectionTitle}>Fridgie Pro</Text>
+                    <TouchableOpacity
+                        style={styles.proSettingsCard}
+                        onPress={() => onNavigate('/pro?source=settings')}
+                        accessibilityLabel={`${isPro ? 'Fridgie Pro is active' : 'Learn about Fridgie Pro'}${planUsage ? `. ${planUsage.title}. ${planUsage.reset}.` : ''}`}
+                        accessibilityLiveRegion={planUsage && planUsage.level !== 'normal' ? 'polite' : 'none'}
+                    >
+                        <View style={styles.proSettingsIcon}>
+                            <Ionicons name="sparkles" size={18} color={primary} />
+                        </View>
+                        <View style={styles.proSettingsCopy}>
+                            <View style={styles.proSettingsTitleRow}>
+                                <Text style={styles.proSettingsTitle}>Fridgie Pro</Text>
+                                <View style={[styles.planBadge, isPro && styles.planBadgeActive]}>
+                                    <Text style={[styles.planBadgeText, isPro && styles.planBadgeTextActive]}>
+                                        {isLoadingPlan ? 'CHECKING' : isPro ? 'ACTIVE' : 'FREE'}
+                                    </Text>
+                                </View>
+                            </View>
+                            {planUsage && (
+                                <Text style={[
+                                    styles.proSettingsDetail,
+                                    (planUsage.level === 'low' || planUsage.level === 'critical' || planUsage.level === 'exhausted')
+                                        && styles.proSettingsWarning,
+                                ]}>
+                                    {planUsage.title} · {planUsage.reset}
+                                </Text>
+                            )}
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color="#8CA095" />
+                    </TouchableOpacity>
                     <Text style={styles.sectionTitle}>Preferences</Text>
                     <TouchableOpacity style={styles.manageGroups} onPress={() => onNavigate('/groups')}>
                         <Ionicons name="people" size={16} color={primary}></Ionicons>
@@ -180,28 +242,13 @@ const SettingsModal = ({ isVisible, onClose, onNavigate, onDismiss }: { isVisibl
                         <Ionicons name="sparkles-outline" size={16} color={primary}></Ionicons>
                         <Text style={styles.editMealPreferencesText}>Connect Claude</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.primaryButton, { marginTop: 30, width: '100%' }]} onPress={() => {
-                        // Push anything still owed to the server BEFORE signing
-                        // out, then wipe the on-device mirror. Both halves
-                        // matter: skipping the flush throws away edits made
-                        // offline, and skipping the clear leaves one account's
-                        // groceries on the phone for whoever signs in next.
-                        //
-                        // Not awaited — sign-out should not hang on a network
-                        // the user may well not have. The flush gets its chance;
-                        // if it fails, the clear takes the edits with it, which
-                        // is the correct trade for an explicit sign-out.
-                        void flushAllDirty()
-                            .catch(() => {})
-                            .finally(() => {
-                                resetSyncEngines();
-                                void clearCache();
-                            });
-                        auth.signOut();
-                        router.navigate('/list');
-                        onClose();
-                    }}>
-                        <Text style={styles.primaryButtonText}>Sign Out</Text>
+                    <TouchableOpacity style={[styles.editMealPreferences, { marginTop: 10 }]} onPress={() => onNavigate('/nutrition')}>
+                        <Ionicons name="analytics-outline" size={16} color={primary}></Ionicons>
+                        <Text style={styles.editMealPreferencesText}>Nutrition Goals & Weekly Analysis</Text>
+                        {!isPro && <Text style={styles.inlineProLabel}>PRO</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.primaryButton, { marginTop: 30, width: '100%' }]} onPress={() => { void handleSignOut(); }} disabled={isSigningOut}>
+                        <Text style={styles.primaryButtonText}>{isSigningOut ? 'Signing Out…' : returnToProAfterSignOut ? 'Sign Out & Switch Account' : 'Sign Out'}</Text>
                     </TouchableOpacity>
                 </ScrollView>
             </SafeAreaView>
@@ -270,6 +317,7 @@ export default function UserProfile() {
     const { user: authUser, refreshAuthUser } = useAuth();
     const { addRecipe, removeRecipe } = useCookbook();
     const router = useRouter();
+    const params = useLocalSearchParams<{ openSettings?: string }>();
 
     const [editPhotoModalVisible, setEditPhotoModalVisible] = useState(false);
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
@@ -315,6 +363,7 @@ export default function UserProfile() {
     // the nav stack and back returns to it.
     const pendingSettingsRoute = useRef<string | null>(null);
     const shouldReopenSettings = useRef(false);
+    const handledRecoverySettings = useRef(false);
 
     const flushPendingSettingsRoute = useCallback(() => {
         const path = pendingSettingsRoute.current;
@@ -336,12 +385,16 @@ export default function UserProfile() {
     useFocusEffect(
         useCallback(() => {
             setIsFocused(true);
+            if (params.openSettings === 'pro-recovery' && !handledRecoverySettings.current) {
+                handledRecoverySettings.current = true;
+                setSettingsModalVisible(true);
+            }
             if (shouldReopenSettings.current) {
                 shouldReopenSettings.current = false;
                 setSettingsModalVisible(true);
             }
             return () => setIsFocused(false);
-        }, [])
+        }, [params.openSettings])
     );
 
     const fetchProfileData = useCallback(async (options?: { refresh?: boolean; quiet?: boolean }) => {
@@ -671,6 +724,7 @@ export default function UserProfile() {
                     onClose={() => setSettingsModalVisible(false)}
                     onNavigate={handleSettingsNavigate}
                     onDismiss={flushPendingSettingsRoute}
+                    returnToProAfterSignOut={params.openSettings === 'pro-recovery'}
                 />
                 <NotificationsModal
                     isVisible={isNotificationsVisible}
@@ -765,6 +819,18 @@ const styles = StyleSheet.create({
     editMealPreferences: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, padding: 20, backgroundColor: '#FFFFFF' },
     manageGroups: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, marginBottom: 10, padding: 20, backgroundColor: '#FFFFFF' },
     editMealPreferencesText: { color: '#173F35', fontSize: 15, fontWeight: '600', marginLeft: 12 },
+    proSettingsCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, padding: 16, backgroundColor: '#FFFFFF' },
+    proSettingsIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: '#DCEDE2', alignItems: 'center', justifyContent: 'center' },
+    proSettingsCopy: { flex: 1, marginLeft: 12, marginRight: 8 },
+    proSettingsTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    proSettingsTitle: { color: '#173F35', fontSize: 16, fontWeight: '700' },
+    proSettingsDetail: { color: '#687A70', fontSize: 11, lineHeight: 16, marginTop: 4 },
+    proSettingsWarning: { color: '#A75532', fontWeight: '600' },
+    planBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3, backgroundColor: '#EDF2EB' },
+    planBadgeActive: { backgroundColor: '#DCEDE2' },
+    planBadgeText: { fontSize: 8, fontWeight: '800', letterSpacing: 0.6, color: '#687A70' },
+    planBadgeTextActive: { color: primary },
+    inlineProLabel: { marginLeft: 'auto', color: primary, fontSize: 9, fontWeight: '800', letterSpacing: 0.7 },
     infoRow: { padding: 18, backgroundColor: '#FFFFFF', borderRadius: 20, marginBottom: 10 },
     infoLabel: { fontSize: 12, color: '#78857D', marginBottom: 7 },
     viewContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

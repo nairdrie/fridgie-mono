@@ -28,6 +28,7 @@ import {
 
 // --- Your Project's Imports ---
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
+import { useAuth } from '@/context/AuthContext';
 import { auth } from '@/utils/firebase';
 import {
   SocialAuthError,
@@ -37,7 +38,7 @@ import {
 } from '@/utils/socialAuth';
 import { primary } from '@/utils/styles';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import { AmbientBackground, GlassPressable as TouchableOpacity, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
@@ -67,8 +68,10 @@ const providerButtonLabel = (providerId: string) => `Continue with ${providerLab
 
 
 export default function LoginScreen() {
-    const { reduceMotion } = useGlassPreferences();
+  const { reduceMotion } = useGlassPreferences();
+  const { refreshAuthUser } = useAuth();
   const router = useRouter();
+  const params = useLocalSearchParams<{ returnTo?: string; proSource?: string }>();
   const keyboard = useKeyboardAwareScroll();
 
   // --- State Management ---
@@ -81,6 +84,41 @@ export default function LoginScreen() {
   const [confirmPassword, setConfirmPassword] = useState(""); // Added for create password flow
 
   const [pendingCredential, setPendingCredential] = useState<AuthCredential | null>(null);
+
+  const returnToPro = params.returnTo === 'pro';
+  const returnToSuggestions = params.returnTo === 'suggest-meals';
+  const proSource = typeof params.proSource === 'string' ? params.proSource : undefined;
+
+  /** Preserve the action that prompted sign-in without accepting an arbitrary
+   * redirect URL from route params. New accounts carry the same intent through
+   * required profile completion. */
+  const finishAuthentication = (displayName: string | null) => {
+    // Linking a credential upgrades an anonymous Firebase user in place and
+    // keeps the same uid. Firebase therefore need not emit another auth-state
+    // event, so publish the updated isAnonymous/provider state ourselves before
+    // returning to a gated screen such as the Pro paywall.
+    refreshAuthUser();
+    if (!displayName) {
+      router.replace({
+        pathname: '/complete-profile',
+        params: returnToPro
+          ? { returnTo: 'pro', ...(proSource ? { proSource } : {}) }
+          : returnToSuggestions
+            ? { returnTo: 'suggest-meals' }
+            : {},
+      });
+      return;
+    }
+    if (returnToPro) {
+      router.replace({ pathname: '/pro', params: proSource ? { source: proSource } : {} });
+      return;
+    }
+    if (returnToSuggestions) {
+      router.replace('/list');
+      return;
+    }
+    router.replace('/profile');
+  };
 
   // --- New component for password validation feedback ---
   const PasswordStrengthIndicator = ({ password }: { password: string }) => {
@@ -145,13 +183,10 @@ export default function LoginScreen() {
       const anonymousUser = auth.currentUser;
       if (anonymousUser && anonymousUser.isAnonymous) {
         const userCredential = await linkWithCredential(anonymousUser, credential);
-        if (!userCredential.user.displayName) {
-          router.replace('/complete-profile');
-        } else {
-          router.replace('/profile');
-        }
+        finishAuthentication(userCredential.user.displayName);
       } else {
-        await signInWithCredential(auth, credential);
+        const userCredential = await signInWithCredential(auth, credential);
+        finishAuthentication(userCredential.user.displayName);
       }
     } catch (err: any) {
       if (err.code === 'auth/credential-already-in-use') {
@@ -220,11 +255,7 @@ export default function LoginScreen() {
     setError(null);
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-       if (!userCredential.user.displayName) {
-          router.replace('/complete-profile');
-        } else {
-          router.replace('/profile');
-        }
+      finishAuthentication(userCredential.user.displayName);
     } catch (err: any) {
       if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
         setError("Invalid email or password.");
@@ -260,12 +291,7 @@ export default function LoginScreen() {
 
         // 3. Link the credential to the anonymous account, upgrading it
         const userCredential = await linkWithCredential(anonymousUser, credential);
-
-        if (!userCredential.user.displayName) {
-          router.replace('/complete-profile');
-        } else {
-          router.replace('/profile');
-        }
+        finishAuthentication(userCredential.user.displayName);
       } else {
         // This is a fallback case in case there is no anonymous user.
         throw new Error("No anonymous user session found to link.");
@@ -291,11 +317,7 @@ export default function LoginScreen() {
     setShowConflictModal(false);
     try {
       const userCredential = await signInWithCredential(auth, pendingCredential);
-      if (!userCredential.user.displayName) {
-        router.replace('/complete-profile');
-      } else {
-        router.replace('/profile');
-      }
+      finishAuthentication(userCredential.user.displayName);
     } catch (err: any) {
       console.error("Sign-in to existing account failed:", err);
       setError('Failed to sign in. Please try again.');
