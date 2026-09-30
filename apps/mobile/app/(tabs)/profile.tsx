@@ -13,8 +13,8 @@ import { useNotifications } from '@/context/NotificationContext';
 import { usePro } from '@/context/ProContext';
 import { useCookbookFilter } from '@/hooks/useCookbookFilter';
 import { useKeyboardAwareScroll } from '@/hooks/useKeyboardAwareScroll';
-import { Item, Meal, Recipe } from '@/types/types';
-import { getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
+import type { CookbookPrintEligibilitySummary, Item, Meal, Recipe } from '@/types/types';
+import { getCookbookPrintEligibility, getUserCookbook, getUserProfile, uploadUserPhoto } from '@/utils/api';
 import { defaultAvatars } from '@/utils/defaultAvatars';
 import { clearCache } from '@/utils/listCache';
 import { flushAllDirty, resetSyncEngines } from '@/utils/listSync';
@@ -22,6 +22,7 @@ import { usageNotice } from '@/utils/pro';
 import { auth } from '@/utils/firebase';
 import { primary } from '@/utils/styles';
 import { toReadablePhone } from '@/utils/utils';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -48,6 +49,8 @@ import {
     TextInput,
     View
 } from 'react-native';
+
+const printMilestoneDismissalKey = (uid: string) => `print-cookbook:milestone-dismissed:${uid}`;
 
 // --- Sub-components for Modals (kept here for completeness) ---
 
@@ -344,6 +347,10 @@ export default function UserProfile() {
     const [isDataLoading, setIsDataLoading] = useState(true);
     const profileRequestVersion = useRef(0);
     const loadedProfileUid = useRef<string | null>(null);
+    const [printEligibility, setPrintEligibility] = useState<CookbookPrintEligibilitySummary | null>(null);
+    const [isPrintMilestoneDismissed, setIsPrintMilestoneDismissed] = useState(true);
+    const printEligibilityRequestVersion = useRef(0);
+    const loadedPrintEligibilityUid = useRef<string | null>(null);
     const profileUid = authUser?.uid;
     const isAnonymous = authUser?.isAnonymous;
 
@@ -441,12 +448,56 @@ export default function UserProfile() {
         }
     }, [profileUid, isAnonymous]);
 
-    const loadData = useCallback((isRefresh = false) => fetchProfileData({ refresh: isRefresh }), [fetchProfileData]);
+    const fetchPrintEligibility = useCallback(async () => {
+        const requestVersion = ++printEligibilityRequestVersion.current;
+        if (!profileUid || isAnonymous) {
+            loadedPrintEligibilityUid.current = null;
+            setPrintEligibility(null);
+            setIsPrintMilestoneDismissed(true);
+            return;
+        }
+
+        if (loadedPrintEligibilityUid.current !== profileUid) {
+            loadedPrintEligibilityUid.current = profileUid;
+            setPrintEligibility(null);
+            // Avoid briefly showing one account's prompt while the dismissal
+            // preference for another account is still being read.
+            setIsPrintMilestoneDismissed(true);
+        }
+
+        const [dismissal, eligibility] = await Promise.allSettled([
+            AsyncStorage.getItem(printMilestoneDismissalKey(profileUid)),
+            getCookbookPrintEligibility(),
+        ]);
+        if (requestVersion !== printEligibilityRequestVersion.current) return;
+
+        setIsPrintMilestoneDismissed(dismissal.status === 'fulfilled' && dismissal.value === '1');
+        if (eligibility.status === 'fulfilled') {
+            setPrintEligibility(eligibility.value);
+        }
+        // Eligibility is intentionally best-effort. A print promotion should
+        // never turn a healthy profile screen into an error state.
+    }, [profileUid, isAnonymous]);
+
+    const dismissPrintMilestone = useCallback(() => {
+        if (!profileUid) return;
+        setIsPrintMilestoneDismissed(true);
+        void AsyncStorage.setItem(printMilestoneDismissalKey(profileUid), '1').catch(() => {});
+    }, [profileUid]);
+
+    const loadData = useCallback((isRefresh = false) => {
+        void fetchPrintEligibility();
+        return fetchProfileData({ refresh: isRefresh });
+    }, [fetchPrintEligibility, fetchProfileData]);
 
     useFocusEffect(useCallback(() => {
         void fetchProfileData({ quiet: true });
-        return () => { profileRequestVersion.current += 1; };
-    }, [fetchProfileData]));
+        void fetchPrintEligibility();
+        return () => {
+            profileRequestVersion.current += 1;
+            printEligibilityRequestVersion.current += 1;
+        };
+    }, [fetchPrintEligibility, fetchProfileData]));
 
     const filter = useCookbookFilter(cookbook);
 
@@ -500,6 +551,7 @@ export default function UserProfile() {
             throw error;
         }
         void fetchProfileData();
+        void fetchPrintEligibility();
     };
 
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -594,6 +646,10 @@ export default function UserProfile() {
     }
 
     if(!authUser) return <></>;
+    const showPrintMilestone = !!printEligibility
+        && printEligibility.milestoneReached
+        && printEligibility.eligibleCount >= 12
+        && !isPrintMilestoneDismissed;
 
     return (
         <AmbientBackground>
@@ -611,23 +667,73 @@ export default function UserProfile() {
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 126 }}
                     ListHeaderComponent={
-                        <ProfileHeader
-                            authUser={authUser}
-                            cookbook={cookbook}
-                            openPhotoModal={openPhotoModal}
-                            openNotifications={openNotifications}
-                            setSettingsModalVisible={setSettingsModalVisible}
-                            followingCount={profileData?.followingCount || 0}
-                            followerCount={profileData?.followerCount || 0}
-                            onOpenConnections={(kind) => router.push({ pathname: '/profile/connections', params: { uid: authUser.uid, kind } })}
-                        />
+                        <View>
+                            <ProfileHeader
+                                authUser={authUser}
+                                cookbook={cookbook}
+                                openPhotoModal={openPhotoModal}
+                                openNotifications={openNotifications}
+                                setSettingsModalVisible={setSettingsModalVisible}
+                                followingCount={profileData?.followingCount || 0}
+                                followerCount={profileData?.followerCount || 0}
+                                onOpenConnections={(kind) => router.push({ pathname: '/profile/connections', params: { uid: authUser.uid, kind } })}
+                            />
+                            {showPrintMilestone && (
+                                <Animated.View entering={FadeInDown.duration(450).reduceMotion(ReduceMotion.System)}>
+                                    <GlassSurface style={styles.printMilestoneCard} intensity={45}>
+                                        <View style={styles.printMilestoneIcon}>
+                                            <Ionicons name="book-outline" size={23} color="#8B6845" />
+                                        </View>
+                                        <View style={styles.printMilestoneCopy}>
+                                            <Text style={styles.printMilestoneEyebrow}>A LITTLE MILESTONE</Text>
+                                            <Text style={styles.printMilestoneTitle}>Your cookbook is ready for the page</Text>
+                                            <Text style={styles.printMilestoneBody}>
+                                                Turn {printEligibility.eligibleCount} eligible recipes into a keepsake you can hold.
+                                            </Text>
+                                            <TouchableOpacity
+                                                style={styles.printMilestoneAction}
+                                                onPress={() => router.push('/print-cookbook' as any)}
+                                                accessibilityRole="button"
+                                                accessibilityLabel="Start a printed cookbook"
+                                            >
+                                                <Text style={styles.printMilestoneActionText}>Make a printed cookbook</Text>
+                                                <Ionicons name="arrow-forward" size={16} color={primary} />
+                                            </TouchableOpacity>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.printMilestoneDismiss}
+                                            onPress={dismissPrintMilestone}
+                                            accessibilityRole="button"
+                                            accessibilityLabel="Dismiss printed cookbook suggestion"
+                                            hitSlop={8}
+                                        >
+                                            <Ionicons name="close" size={18} color="#78857D" />
+                                        </TouchableOpacity>
+                                    </GlassSurface>
+                                </Animated.View>
+                            )}
+                        </View>
                     }
                     refreshControl={
                         <RefreshControl refreshing={isRefreshing} onRefresh={() => loadData(true)} tintColor={primary}/>
                     }
                     renderSectionHeader={() => (
                         <View style={styles.stickyHeaderContainer}>
-                            <View style={styles.cookbookTitleRow}><Text style={styles.cookbookTitle}>Your cookbook</Text><Text style={styles.recipeCount}>{cookbook.length} recipes</Text></View>
+                            <View style={styles.cookbookTitleRow}>
+                                <Text style={styles.cookbookTitle}>Your cookbook</Text>
+                                <View style={styles.cookbookTitleActions}>
+                                    <Text style={styles.recipeCount}>{cookbook.length} recipes</Text>
+                                    <TouchableOpacity
+                                        style={styles.quietPrintAction}
+                                        onPress={() => router.push('/print-cookbook' as any)}
+                                        accessibilityRole="button"
+                                        accessibilityLabel="Make a printed cookbook"
+                                    >
+                                        <Ionicons name="print-outline" size={15} color={primary} />
+                                        <Text style={styles.quietPrintActionText}>Print</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
                             <View style={styles.searchRow}>
                                 <View style={styles.searchContainer}>
                                     <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
@@ -782,10 +888,22 @@ const styles = StyleSheet.create({
     statDivider: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#E1E8DC' },
     statNumber: { fontSize: 23, fontWeight: '700', letterSpacing: -0.6, color: '#173F35' },
     statLabel: { fontSize: 11, color: '#78857D', marginTop: 5, fontWeight: '500' },
+    printMilestoneCard: { marginTop: 18, borderRadius: 26, padding: 18, paddingRight: 38, flexDirection: 'row', alignItems: 'flex-start', overflow: 'hidden' },
+    printMilestoneIcon: { width: 46, height: 46, borderRadius: 17, backgroundColor: '#F4E9D9', alignItems: 'center', justifyContent: 'center', marginRight: 13 },
+    printMilestoneCopy: { flex: 1 },
+    printMilestoneEyebrow: { fontSize: 9, fontWeight: '800', letterSpacing: 1.25, color: '#9A7752', marginBottom: 5 },
+    printMilestoneTitle: { fontSize: 18, lineHeight: 23, fontWeight: '700', letterSpacing: -0.35, color: '#173F35' },
+    printMilestoneBody: { fontSize: 12, lineHeight: 18, color: '#667970', marginTop: 5 },
+    printMilestoneAction: { minHeight: 38, marginTop: 9, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6 },
+    printMilestoneActionText: { fontSize: 13, fontWeight: '700', color: primary },
+    printMilestoneDismiss: { position: 'absolute', top: 11, right: 11, width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
     stickyHeaderContainer: { backgroundColor: '#F5F5EF', paddingTop: 26 },
     cookbookTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
     cookbookTitle: { fontSize: 25, fontWeight: '700', letterSpacing: -0.8, color: '#173F35' },
+    cookbookTitleActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     recipeCount: { fontSize: 12, color: '#78857D' },
+    quietPrintAction: { minHeight: 36, paddingHorizontal: 10, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#E6EEE7' },
+    quietPrintActionText: { fontSize: 12, fontWeight: '700', color: primary },
     searchRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 14 },
     searchContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 18, paddingHorizontal: 15, borderWidth: 1, borderColor: '#E6EBE1' },
     addRecipeButton: { width: 50, height: 50, borderRadius: 18, backgroundColor: primary, alignItems: 'center', justifyContent: 'center' },

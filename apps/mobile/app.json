@@ -36,6 +36,13 @@
     "plugins": [
       "expo-apple-authentication",
       [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.nairdrie.fridgie",
+          "enableGooglePay": true
+        }
+      ],
+      [
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.598650352064-t8n659ud33kd09jfagcas0akr8j0r3kj"

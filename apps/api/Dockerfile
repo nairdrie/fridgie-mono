@@ -45,7 +45,7 @@ FROM base AS release
 # needs root. Costs roughly 250MB of image; the importer degrades to
 # caption-and-transcript rather than failing if it is ever dropped.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=install /temp/prod/node_modules ./apps/api/node_modules
@@ -58,6 +58,7 @@ COPY --from=prerelease /usr/src/app/apps/api/jobs ./apps/api/jobs
 COPY --from=prerelease /usr/src/app/apps/api/middleware ./apps/api/middleware
 COPY --from=prerelease /usr/src/app/apps/api/api ./apps/api/api
 COPY --from=prerelease /usr/src/app/apps/api/mcp ./apps/api/mcp
+COPY --from=prerelease /usr/src/app/apps/mobile/assets/fonts ./apps/mobile/assets/fonts
 COPY --from=prerelease /usr/src/app/packages/shared ./packages/shared
 
 WORKDIR /usr/src/app/apps/api

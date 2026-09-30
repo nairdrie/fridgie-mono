@@ -91,6 +91,14 @@ serve({
       server.timeout(req, 120)
     }
 
+    // A print preview rasterizes the exact interior and cover PDFs, and may
+    // safely need more than the ordinary 30-second request window for a large
+    // photo-heavy cookbook. Quote/checkout stay short; only artifact rendering
+    // gets the extended ceiling.
+    if (req.method === 'POST' && /^\/api\/print\/draft\/[^/]+\/preview\/?$/.test(url.pathname)) {
+      server.timeout(req, 240)
+    }
+
     // If this is our WS path, do the upgrade
     if (url.pathname.startsWith('/api/ws/list/')) {
       // The token arrives as a WebSocket subprotocol, not a query parameter.

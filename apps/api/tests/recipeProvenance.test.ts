@@ -36,6 +36,12 @@ describe('recipe curation provenance HTTP contract', () => {
     expect((await request({ name: 'Own recipe', contentOrigin: 'ai-curated', curatedCreatorUid: 'curated-maya-green', publishedAt: 'Yesterday', imageKind: 'ai-generated', imageAttribution: { label: 'Fake', url: 'https://example.test' } })).status).toBe(201);
     for (const field of ['contentOrigin', 'curatedCreatorUid', 'publishedAt', 'imageKind', 'imageAttribution']) expect(written()?.[field]).toBeUndefined();
   });
+  test('photo imports retain their conservative print provenance without gaining a curation badge', async () => {
+    const { request, written } = setup(null);
+    expect((await request({ name: 'Grandma card', contentOrigin: 'photo-imported', visibility: 'private' })).status).toBe(201);
+    expect(written()).toMatchObject({ contentOrigin: 'photo-imported', visibility: 'private', createdBy: 'real-user' });
+    expect(written()?.curatedCreatorUid).toBeUndefined();
+  });
   test('replacing the image removes inherited image provenance from fork and owner edits', async () => {
     for (const createdBy of ['curated-maya-green', 'real-user']) {
       const { request } = setup({ ...base, createdBy });

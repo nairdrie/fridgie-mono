@@ -106,7 +106,50 @@ jobs:
       REGION: us-central1
       SERVICE: fridgie-api
       DISCOVERY_JOB: fridgie-discover-publish
+      PRINT_RECONCILIATION_JOB: fridgie-print-reconciliation
+      PRINT_RECONCILIATION_SCHEDULER: fridgie-print-reconciliation
       RUNTIME_SA: fridgie-api-run@grocerease-5abbb.iam.gserviceaccount.com
+      PRINT_SCHEDULER_SA: fridgie-print-scheduler@grocerease-5abbb.iam.gserviceaccount.com
+
+      # Pro and nutrition stay off until their external contracts, credentials,
+      # and repository configuration are deliberately provisioned. Because the
+      # deploy below replaces the complete env/secret sets, the validation step
+      # also refuses to erase any manually attached configuration.
+      PRO_SERVER_CONFIG_ENABLED: ${{ vars.PRO_SERVER_CONFIG_ENABLED }}
+      REVENUECAT_ENTITLEMENT_ID: ${{ vars.REVENUECAT_ENTITLEMENT_ID }}
+      REVENUECAT_CACHE_TTL_SECONDS: ${{ vars.REVENUECAT_CACHE_TTL_SECONDS }}
+      FRIDGIE_FREE_WEEKLY_AI_LIMIT: ${{ vars.FRIDGIE_FREE_WEEKLY_AI_LIMIT }}
+      FRIDGIE_PRO_WEEKLY_AI_LIMIT: ${{ vars.FRIDGIE_PRO_WEEKLY_AI_LIMIT }}
+      FRIDGIE_PRO_WEEKLY_LEFTOVERS_SCAN_LIMIT: ${{ vars.FRIDGIE_PRO_WEEKLY_LEFTOVERS_SCAN_LIMIT }}
+      FRIDGIE_MAX_CONCURRENT_LEFTOVERS_SCANS: ${{ vars.FRIDGIE_MAX_CONCURRENT_LEFTOVERS_SCANS }}
+      FRIDGIE_SUGGEST_HOURLY_ATTEMPT_LIMIT: ${{ vars.FRIDGIE_SUGGEST_HOURLY_ATTEMPT_LIMIT }}
+      FRIDGIE_LEFTOVERS_HOURLY_ATTEMPT_LIMIT: ${{ vars.FRIDGIE_LEFTOVERS_HOURLY_ATTEMPT_LIMIT }}
+      NUTRITION_PROVIDER_ENABLED: ${{ vars.NUTRITION_PROVIDER_ENABLED }}
+      NUTRITION_MAX_NEW_ANALYSES_PER_REQUEST: ${{ vars.NUTRITION_MAX_NEW_ANALYSES_PER_REQUEST }}
+      NUTRITION_ANALYSIS_CONCURRENCY: ${{ vars.NUTRITION_ANALYSIS_CONCURRENCY }}
+
+      # Printed-book commerce is deliberately absent from existing production
+      # deploys. Setting this repository variable to exactly `true` opts into
+      # the complete, validated configuration below; empty/false requires that
+      # no print bindings exist and does not touch the print worker.
+      PRINT_COMMERCE_ENABLED: ${{ vars.PRINT_COMMERCE_ENABLED }}
+      LULU_ENV: ${{ vars.LULU_ENV }}
+      LULU_SOFTCOVER_POD_PACKAGE_ID: ${{ vars.LULU_SOFTCOVER_POD_PACKAGE_ID }}
+      LULU_HARDCOVER_POD_PACKAGE_ID: ${{ vars.LULU_HARDCOVER_POD_PACKAGE_ID }}
+      LULU_COST_SHIPPING_FIELD: ${{ vars.LULU_COST_SHIPPING_FIELD }}
+      LULU_PRODUCTION_DELAY_MINUTES: ${{ vars.LULU_PRODUCTION_DELAY_MINUTES }}
+      PRINT_STORAGE_BUCKET: ${{ vars.PRINT_STORAGE_BUCKET }}
+      PRINT_ORDER_ARTIFACT_RETENTION_DAYS: ${{ vars.PRINT_ORDER_ARTIFACT_RETENTION_DAYS }}
+      PRINT_SUPPORT_EMAIL: ${{ vars.PRINT_SUPPORT_EMAIL }}
+      PRINT_MARKUP_BPS: ${{ vars.PRINT_MARKUP_BPS }}
+      PRINT_QUOTE_CURRENCY: ${{ vars.PRINT_QUOTE_CURRENCY }}
+      STRIPE_TAX_ENABLED: ${{ vars.STRIPE_TAX_ENABLED }}
+      STRIPE_PRINTED_BOOK_TAX_CODE: ${{ vars.STRIPE_PRINTED_BOOK_TAX_CODE }}
+      STRIPE_SHIPPING_TAX_CODE: ${{ vars.STRIPE_SHIPPING_TAX_CODE }}
+      PRINT_ALLOW_UNAVAILABLE_TAX: ${{ vars.PRINT_ALLOW_UNAVAILABLE_TAX }}
+      PRINT_PRODUCTION_ENABLED: ${{ vars.PRINT_PRODUCTION_ENABLED }}
+      PRINT_LULU_VALIDATION_ACKNOWLEDGED: ${{ vars.PRINT_LULU_VALIDATION_ACKNOWLEDGED }}
+      PRINT_ALLOW_SANDBOX_IN_PRODUCTION: ${{ vars.PRINT_ALLOW_SANDBOX_IN_PRODUCTION }}
     steps:
       - uses: actions/checkout@v4
 
@@ -126,6 +169,240 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
 
       - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Prepare and validate deployment configuration
+        run: |
+          set -euo pipefail
+
+          API_ENV_VARS="NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}"
+          API_SECRETS="ANTHROPIC_API_KEY=fridgie-anthropic-api-key:latest,SUPADATA_API_KEY=fridgie-supadata-api-key:latest"
+
+          # The service is already a bootstrap prerequisite later in this job.
+          # Read it once here and fail on *any* error: treating an IAM/network
+          # failure as "no existing config" could erase manually attached print
+          # bindings when the full replacement flags are applied.
+          SERVICE_JSON=$(gcloud run services describe "$SERVICE" \
+            --region "$REGION" --project "$PROJECT_ID" --format=json) \
+            || { echo "::error::cannot describe existing service $SERVICE; do not deploy until the preservation check can run"; exit 1; }
+
+          require_var() {
+            local name="$1"
+            if [ -z "${!name:-}" ]; then
+              echo "::error::repository variable $name is required by the enabled deployment configuration"
+              exit 1
+            fi
+          }
+          require_bool() {
+            local name="$1"
+            require_var "$name"
+            case "${!name}" in true|false) ;; *) echo "::error::repository variable $name must be true or false"; exit 1 ;; esac
+          }
+          require_integer_range() {
+            local name="$1" minimum="$2" maximum="$3"
+            require_var "$name"
+            [[ "${!name}" =~ ^[0-9]+$ ]] \
+              && [ "${!name}" -ge "$minimum" ] \
+              && [ "${!name}" -le "$maximum" ] \
+              || { echo "::error::repository variable $name must be an integer from $minimum through $maximum"; exit 1; }
+          }
+          assert_secret_enabled() {
+            local secret="$1"
+            local state
+            state=$(gcloud secrets versions describe latest --secret "$secret" \
+              --project "$PROJECT_ID" --format='value(state)') \
+              || { echo "::error::Secret Manager secret $secret has no latest version"; exit 1; }
+            [ "$state" = ENABLED ] \
+              || { echo "::error::Secret Manager secret $secret latest version is not enabled"; exit 1; }
+          }
+
+          case "${PRO_SERVER_CONFIG_ENABLED:-}" in
+            ""|false)
+              EXISTING_PRO_NAMES=$(jq -r \
+                '.spec.template.spec.containers[0].env[]?.name | select(test("^(REVENUECAT_|FRIDGIE_)"))' \
+                <<< "$SERVICE_JSON" | sort -u)
+              if [ -n "$EXISTING_PRO_NAMES" ]; then
+                echo "::error::PRO_SERVER_CONFIG_ENABLED is not true, but the deployed service has Pro configuration: $(echo "$EXISTING_PRO_NAMES" | paste -sd, -). Refusing to erase it."
+                exit 1
+              fi
+              ;;
+            true)
+              require_var REVENUECAT_ENTITLEMENT_ID
+              [[ "$REVENUECAT_ENTITLEMENT_ID" =~ ^[A-Za-z0-9._-]+$ ]] \
+                || { echo "::error::invalid REVENUECAT_ENTITLEMENT_ID"; exit 1; }
+              require_integer_range REVENUECAT_CACHE_TTL_SECONDS 60 86400
+              require_integer_range FRIDGIE_FREE_WEEKLY_AI_LIMIT 1 10
+              require_integer_range FRIDGIE_PRO_WEEKLY_AI_LIMIT 11 10000
+              require_integer_range FRIDGIE_PRO_WEEKLY_LEFTOVERS_SCAN_LIMIT 1 1000
+              require_integer_range FRIDGIE_MAX_CONCURRENT_LEFTOVERS_SCANS 1 5
+              require_integer_range FRIDGIE_SUGGEST_HOURLY_ATTEMPT_LIMIT 1 500
+              require_integer_range FRIDGIE_LEFTOVERS_HOURLY_ATTEMPT_LIMIT 1 100
+              assert_secret_enabled fridgie-revenuecat-secret-api-key
+
+              PRO_ENV_VARS="REVENUECAT_ENTITLEMENT_ID=${REVENUECAT_ENTITLEMENT_ID},REVENUECAT_CACHE_TTL_SECONDS=${REVENUECAT_CACHE_TTL_SECONDS},FRIDGIE_FREE_WEEKLY_AI_LIMIT=${FRIDGIE_FREE_WEEKLY_AI_LIMIT},FRIDGIE_PRO_WEEKLY_AI_LIMIT=${FRIDGIE_PRO_WEEKLY_AI_LIMIT},FRIDGIE_PRO_WEEKLY_LEFTOVERS_SCAN_LIMIT=${FRIDGIE_PRO_WEEKLY_LEFTOVERS_SCAN_LIMIT},FRIDGIE_MAX_CONCURRENT_LEFTOVERS_SCANS=${FRIDGIE_MAX_CONCURRENT_LEFTOVERS_SCANS},FRIDGIE_SUGGEST_HOURLY_ATTEMPT_LIMIT=${FRIDGIE_SUGGEST_HOURLY_ATTEMPT_LIMIT},FRIDGIE_LEFTOVERS_HOURLY_ATTEMPT_LIMIT=${FRIDGIE_LEFTOVERS_HOURLY_ATTEMPT_LIMIT}"
+              API_ENV_VARS="${API_ENV_VARS},${PRO_ENV_VARS}"
+              API_SECRETS="${API_SECRETS},REVENUECAT_SECRET_API_KEY=fridgie-revenuecat-secret-api-key:latest"
+              ;;
+            *)
+              echo "::error::PRO_SERVER_CONFIG_ENABLED must be unset, false, or true"
+              exit 1
+              ;;
+          esac
+
+          case "${NUTRITION_PROVIDER_ENABLED:-}" in
+            ""|false)
+              EXISTING_NUTRITION_NAMES=$(jq -r '
+                .spec.template.spec.containers[0].env[]?
+                | select((.name | test("^(NUTRITION_|EDAMAM_)"))
+                  and (.name != "NUTRITION_PROVIDER_ENABLED" or .value != "false"))
+                | .name
+              ' <<< "$SERVICE_JSON" | sort -u)
+              if [ -n "$EXISTING_NUTRITION_NAMES" ]; then
+                echo "::error::NUTRITION_PROVIDER_ENABLED is not true, but the deployed service has nutrition configuration: $(echo "$EXISTING_NUTRITION_NAMES" | paste -sd, -). Refusing to erase it."
+                exit 1
+              fi
+              ;;
+            true)
+              require_integer_range NUTRITION_MAX_NEW_ANALYSES_PER_REQUEST 1 30
+              require_integer_range NUTRITION_ANALYSIS_CONCURRENCY 1 5
+              assert_secret_enabled fridgie-edamam-nutrition-app-id
+              assert_secret_enabled fridgie-edamam-nutrition-app-key
+
+              API_ENV_VARS="${API_ENV_VARS},NUTRITION_PROVIDER_ENABLED=true,NUTRITION_MAX_NEW_ANALYSES_PER_REQUEST=${NUTRITION_MAX_NEW_ANALYSES_PER_REQUEST},NUTRITION_ANALYSIS_CONCURRENCY=${NUTRITION_ANALYSIS_CONCURRENCY}"
+              API_SECRETS="${API_SECRETS},EDAMAM_NUTRITION_APP_ID=fridgie-edamam-nutrition-app-id:latest,EDAMAM_NUTRITION_APP_KEY=fridgie-edamam-nutrition-app-key:latest"
+              ;;
+            *)
+              echo "::error::NUTRITION_PROVIDER_ENABLED must be unset, false, or true"
+              exit 1
+              ;;
+          esac
+
+          case "${PRINT_COMMERCE_ENABLED:-}" in
+            ""|false)
+              # --set-env-vars and --set-secrets replace the complete sets. A
+              # manual print binding would otherwise disappear unnoticed when
+              # the opt-in variable is missing or misspelled.
+              EXISTING_PRINT_NAMES=$(jq -r \
+                '.spec.template.spec.containers[0].env[]?.name | select(test("^(LULU_|PRINT_|STRIPE_)"))' \
+                <<< "$SERVICE_JSON" | sort -u)
+              if [ -n "$EXISTING_PRINT_NAMES" ]; then
+                echo "::error::PRINT_COMMERCE_ENABLED is not true, but the deployed service has print configuration: $(echo "$EXISTING_PRINT_NAMES" | paste -sd, -). Refusing to erase it."
+                exit 1
+              fi
+              echo "PRINT_DEPLOY_ENABLED=false" >> "$GITHUB_ENV"
+              ;;
+            true)
+              for name in \
+                LULU_ENV LULU_SOFTCOVER_POD_PACKAGE_ID LULU_HARDCOVER_POD_PACKAGE_ID \
+                LULU_COST_SHIPPING_FIELD LULU_PRODUCTION_DELAY_MINUTES PRINT_STORAGE_BUCKET \
+                PRINT_ORDER_ARTIFACT_RETENTION_DAYS PRINT_SUPPORT_EMAIL PRINT_MARKUP_BPS \
+                PRINT_QUOTE_CURRENCY STRIPE_PRINTED_BOOK_TAX_CODE STRIPE_SHIPPING_TAX_CODE; do
+                require_var "$name"
+              done
+              for name in STRIPE_TAX_ENABLED PRINT_ALLOW_UNAVAILABLE_TAX \
+                PRINT_PRODUCTION_ENABLED PRINT_LULU_VALIDATION_ACKNOWLEDGED \
+                PRINT_ALLOW_SANDBOX_IN_PRODUCTION; do
+                require_bool "$name"
+              done
+
+              case "$LULU_ENV" in sandbox|production) ;; *) echo "::error::LULU_ENV must be sandbox or production"; exit 1 ;; esac
+              case "$LULU_COST_SHIPPING_FIELD" in shipping_option|shipping_level) ;; *) echo "::error::LULU_COST_SHIPPING_FIELD must be shipping_option or shipping_level"; exit 1 ;; esac
+              [[ "$LULU_SOFTCOVER_POD_PACKAGE_ID" =~ ^[A-Za-z0-9.]+$ ]] || { echo "::error::invalid LULU_SOFTCOVER_POD_PACKAGE_ID"; exit 1; }
+              [[ "$LULU_HARDCOVER_POD_PACKAGE_ID" =~ ^[A-Za-z0-9.]+$ ]] || { echo "::error::invalid LULU_HARDCOVER_POD_PACKAGE_ID"; exit 1; }
+              [[ "$PRINT_STORAGE_BUCKET" =~ ^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$ ]] || { echo "::error::invalid PRINT_STORAGE_BUCKET"; exit 1; }
+              [[ "$PRINT_SUPPORT_EMAIL" =~ ^[^,@[:space:]]+@[^,@[:space:]]+\.[^,@[:space:]]+$ ]] || { echo "::error::invalid PRINT_SUPPORT_EMAIL"; exit 1; }
+              [[ "$PRINT_MARKUP_BPS" =~ ^[0-9]+$ ]] && [ "$PRINT_MARKUP_BPS" -le 100000 ] || { echo "::error::PRINT_MARKUP_BPS must be an integer from 0 through 100000"; exit 1; }
+              [[ "$PRINT_QUOTE_CURRENCY" =~ ^[A-Z]{3}$ ]] || { echo "::error::PRINT_QUOTE_CURRENCY must be a three-letter uppercase code"; exit 1; }
+              [[ "$STRIPE_PRINTED_BOOK_TAX_CODE" =~ ^txcd_[0-9]+$ ]] || { echo "::error::invalid STRIPE_PRINTED_BOOK_TAX_CODE"; exit 1; }
+              [[ "$STRIPE_SHIPPING_TAX_CODE" =~ ^txcd_[0-9]+$ ]] || { echo "::error::invalid STRIPE_SHIPPING_TAX_CODE"; exit 1; }
+              [[ "$LULU_PRODUCTION_DELAY_MINUTES" =~ ^[0-9]+$ ]] \
+                && [ "$LULU_PRODUCTION_DELAY_MINUTES" -ge 60 ] \
+                && [ "$LULU_PRODUCTION_DELAY_MINUTES" -le 1440 ] \
+                || { echo "::error::LULU_PRODUCTION_DELAY_MINUTES must be 60 through 1440"; exit 1; }
+              [[ "$PRINT_ORDER_ARTIFACT_RETENTION_DAYS" =~ ^[0-9]+$ ]] \
+                && [ "$PRINT_ORDER_ARTIFACT_RETENTION_DAYS" -ge 1 ] \
+                && [ "$PRINT_ORDER_ARTIFACT_RETENTION_DAYS" -le 3650 ] \
+                || { echo "::error::PRINT_ORDER_ARTIFACT_RETENTION_DAYS must be 1 through 3650"; exit 1; }
+
+              if [ "$LULU_ENV" = production ]; then
+                [ "$PRINT_ALLOW_SANDBOX_IN_PRODUCTION" = false ] || { echo "::error::PRINT_ALLOW_SANDBOX_IN_PRODUCTION must be false with Lulu production"; exit 1; }
+                if [ "$PRINT_PRODUCTION_ENABLED" = true ]; then
+                  [ "$PRINT_LULU_VALIDATION_ACKNOWLEDGED" = true ] || { echo "::error::enabling Lulu production requires PRINT_LULU_VALIDATION_ACKNOWLEDGED=true"; exit 1; }
+                fi
+              else
+                [ "$PRINT_PRODUCTION_ENABLED" = false ] || { echo "::error::PRINT_PRODUCTION_ENABLED must be false with Lulu sandbox"; exit 1; }
+                [ "$PRINT_ALLOW_SANDBOX_IN_PRODUCTION" = true ] || { echo "::error::the production API needs PRINT_ALLOW_SANDBOX_IN_PRODUCTION=true to host the staff sandbox"; exit 1; }
+              fi
+              if [ "$STRIPE_TAX_ENABLED" != true ] && [ "$PRINT_ALLOW_UNAVAILABLE_TAX" != true ]; then
+                echo "::error::enable Stripe Tax or explicitly acknowledge unavailable retail tax"
+                exit 1
+              fi
+
+              # These fixed Secret Manager names are bindings, never secret
+              # values. Checking versions catches an incomplete bootstrap before
+              # a candidate revision or worker is changed.
+              for secret in \
+                fridgie-lulu-client-key fridgie-lulu-client-secret \
+                fridgie-stripe-secret-key fridgie-stripe-publishable-key \
+                fridgie-stripe-webhook-secret; do
+                assert_secret_enabled "$secret"
+              done
+              gcloud storage buckets describe "gs://${PRINT_STORAGE_BUCKET}" --project "$PROJECT_ID" >/dev/null \
+                || { echo "::error::print bucket gs://${PRINT_STORAGE_BUCKET} is missing or inaccessible to the deployer"; exit 1; }
+              BUCKET_POLICY=$(gcloud storage buckets get-iam-policy "gs://${PRINT_STORAGE_BUCKET}" \
+                --project "$PROJECT_ID" --format=json)
+              jq -e --arg member "serviceAccount:${RUNTIME_SA}" \
+                'any(.bindings[]?; .role == "roles/storage.objectAdmin" and any(.members[]?; . == $member))' \
+                <<< "$BUCKET_POLICY" >/dev/null \
+                || { echo "::error::$RUNTIME_SA needs a direct roles/storage.objectAdmin grant on the print bucket"; exit 1; }
+              SIGNING_POLICY=$(gcloud iam service-accounts get-iam-policy "$RUNTIME_SA" \
+                --project "$PROJECT_ID" --format=json)
+              jq -e --arg member "serviceAccount:${RUNTIME_SA}" \
+                'any(.bindings[]?; .role == "roles/iam.serviceAccountTokenCreator" and any(.members[]?; . == $member))' \
+                <<< "$SIGNING_POLICY" >/dev/null \
+                || { echo "::error::$RUNTIME_SA needs roles/iam.serviceAccountTokenCreator on itself for V4 URL signing"; exit 1; }
+
+              # Bootstrap remains a deliberate operator action because the
+              # scheduler identity needs job-level IAM. CI verifies the entire
+              # contract before it changes the API, then deploys full job config.
+              gcloud run jobs describe "$PRINT_RECONCILIATION_JOB" --region "$REGION" --project "$PROJECT_ID" >/dev/null \
+                || { echo "::error::Cloud Run Job $PRINT_RECONCILIATION_JOB is missing; complete the print bootstrap runbook"; exit 1; }
+              JOB_POLICY=$(gcloud run jobs get-iam-policy "$PRINT_RECONCILIATION_JOB" --region "$REGION" --project "$PROJECT_ID" --format=json)
+              jq -e --arg member "serviceAccount:${PRINT_SCHEDULER_SA}" \
+                'any(.bindings[]?; .role == "roles/run.invoker" and any(.members[]?; . == $member))' \
+                <<< "$JOB_POLICY" >/dev/null \
+                || { echo "::error::$PRINT_SCHEDULER_SA needs roles/run.invoker on $PRINT_RECONCILIATION_JOB"; exit 1; }
+
+              SCHEDULER_JSON=$(gcloud scheduler jobs describe "$PRINT_RECONCILIATION_SCHEDULER" \
+                --location "$REGION" --project "$PROJECT_ID" --format=json) \
+                || { echo "::error::Cloud Scheduler job $PRINT_RECONCILIATION_SCHEDULER is missing; complete the print bootstrap runbook"; exit 1; }
+              EXPECTED_URI="https://run.googleapis.com/v2/projects/${PROJECT_ID}/locations/${REGION}/jobs/${PRINT_RECONCILIATION_JOB}:run"
+              jq -e --arg uri "$EXPECTED_URI" --arg sa "$PRINT_SCHEDULER_SA" '
+                .state == "ENABLED"
+                and .schedule == "*/15 * * * *"
+                and (.timeZone == "Etc/UTC" or .timeZone == "UTC")
+                and .httpTarget.uri == $uri
+                and .httpTarget.httpMethod == "POST"
+                and .httpTarget.oauthToken.serviceAccountEmail == $sa
+                and ((.retryConfig.retryCount // 0) == 0)
+              ' <<< "$SCHEDULER_JSON" >/dev/null \
+                || { echo "::error::print scheduler must be enabled, run every 15 minutes in UTC, POST to the v2 job :run URI with the documented service account, and have zero retries"; exit 1; }
+
+              PRINT_ENV_VARS="LULU_ENV=${LULU_ENV},LULU_SOFTCOVER_POD_PACKAGE_ID=${LULU_SOFTCOVER_POD_PACKAGE_ID},LULU_HARDCOVER_POD_PACKAGE_ID=${LULU_HARDCOVER_POD_PACKAGE_ID},LULU_COST_SHIPPING_FIELD=${LULU_COST_SHIPPING_FIELD},LULU_PRODUCTION_DELAY_MINUTES=${LULU_PRODUCTION_DELAY_MINUTES},PRINT_AMBIGUOUS_RETRY_MINUTES=15,PRINT_STORAGE_BUCKET=${PRINT_STORAGE_BUCKET},PRINT_ORDER_ARTIFACT_RETENTION_DAYS=${PRINT_ORDER_ARTIFACT_RETENTION_DAYS},PRINT_REPRINT_EXECUTION_ENABLED=false,PRINT_SUPPORT_EMAIL=${PRINT_SUPPORT_EMAIL},PRINT_MARKUP_BPS=${PRINT_MARKUP_BPS},PRINT_QUOTE_CURRENCY=${PRINT_QUOTE_CURRENCY},STRIPE_TAX_ENABLED=${STRIPE_TAX_ENABLED},STRIPE_PRINTED_BOOK_TAX_CODE=${STRIPE_PRINTED_BOOK_TAX_CODE},STRIPE_SHIPPING_TAX_CODE=${STRIPE_SHIPPING_TAX_CODE},PRINT_ALLOW_UNAVAILABLE_TAX=${PRINT_ALLOW_UNAVAILABLE_TAX},PRINT_PRODUCTION_ENABLED=${PRINT_PRODUCTION_ENABLED},PRINT_LULU_VALIDATION_ACKNOWLEDGED=${PRINT_LULU_VALIDATION_ACKNOWLEDGED},PRINT_ALLOW_SANDBOX_IN_PRODUCTION=${PRINT_ALLOW_SANDBOX_IN_PRODUCTION}"
+              PRINT_SECRETS="LULU_CLIENT_KEY=fridgie-lulu-client-key:latest,LULU_CLIENT_SECRET=fridgie-lulu-client-secret:latest,STRIPE_SECRET_KEY=fridgie-stripe-secret-key:latest,STRIPE_PUBLISHABLE_KEY=fridgie-stripe-publishable-key:latest,STRIPE_WEBHOOK_SECRET=fridgie-stripe-webhook-secret:latest"
+              API_ENV_VARS="${API_ENV_VARS},${PRINT_ENV_VARS}"
+              API_SECRETS="${API_SECRETS},${PRINT_SECRETS}"
+              echo "PRINT_DEPLOY_ENABLED=true" >> "$GITHUB_ENV"
+              echo "PRINT_JOB_ENV_VARS=NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},${PRINT_ENV_VARS}" >> "$GITHUB_ENV"
+              echo "PRINT_JOB_SECRETS=${PRINT_SECRETS}" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "::error::PRINT_COMMERCE_ENABLED must be unset, false, or true"
+              exit 1
+              ;;
+          esac
+
+          echo "API_ENV_VARS=${API_ENV_VARS}" >> "$GITHUB_ENV"
+          echo "API_SECRETS=${API_SECRETS}" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:
@@ -188,8 +465,8 @@ jobs:
             --min-instances=0 --max-instances=4 --concurrency=20 \
             --cpu=1 --memory=1Gi --timeout=3600 \
             --execution-environment=gen2 --cpu-boost --cpu-throttling \
-            --set-env-vars="NODE_ENV=production,GOOGLE_CLOUD_PROJECT=${PROJECT_ID}" \
-            --set-secrets="ANTHROPIC_API_KEY=fridgie-anthropic-api-key:latest,SUPADATA_API_KEY=fridgie-supadata-api-key:latest" \
+            --set-env-vars="$API_ENV_VARS" \
+            --set-secrets="$API_SECRETS" \
             --revision-suffix="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" \
             --no-traffic --tag=candidate --quiet
 
@@ -230,6 +507,24 @@ jobs:
           # while every HTTP route still looks perfectly healthy.
           ws=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/ws/list/smoketest")
           [ "$ws" = 401 ] || { echo "WS upgrade path returned $ws, expected 401"; exit 1; }
+
+      # Deploy the reconciliation boundary before exposing a print-enabled API.
+      # This replaces every application-level worker setting owned by CI. The
+      # one-time bootstrap deliberately creates the job without optional
+      # networking/volume attachments, which `gcloud run jobs update` preserves.
+      - name: Deploy print reconciliation worker configuration
+        if: env.PRINT_DEPLOY_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          gcloud run jobs update "$PRINT_RECONCILIATION_JOB" \
+            --project="$PROJECT_ID" --region="$REGION" \
+            --image="${{ steps.image.outputs.ref }}" \
+            --command=bun --args=run,jobs/printReconciliation.ts \
+            --service-account="$RUNTIME_SA" \
+            --tasks=1 --parallelism=1 --max-retries=0 --task-timeout=10m \
+            --cpu=1 --memory=1Gi \
+            --set-env-vars="$PRINT_JOB_ENV_VARS" \
+            --set-secrets="$PRINT_JOB_SECRETS" --quiet
 
       - name: Promote candidate to 100% traffic
         run: |

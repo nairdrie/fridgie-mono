@@ -142,9 +142,13 @@ export function createRecipeSaveHandler(database: typeof fs = fs) {
     imageAttribution: _ia,
     ...recipeDetails
   } = await c.req.json()
+  // The AI badge fields remain server-only. `photo-imported` grants no
+  // privilege (it only makes print handling more conservative), so preserving
+  // that importer-supplied marker cannot be used to impersonate curation.
+  const printProvenance = _co === 'photo-imported' ? { contentOrigin: 'photo-imported' as const } : {}
 
   if (!id) {
-    const data = { ...toStored(recipeDetails, true), createdBy: uid, createdAt: new Date() }
+    const data = { ...toStored(recipeDetails, true), ...printProvenance, createdBy: uid, createdAt: new Date() }
     const docRef = await database.collection('recipes').add(data)
     countImport(data)
     invalidateSearchIndex()  // new recipe -> searchable now, not in <=5 min
@@ -156,7 +160,7 @@ export function createRecipeSaveHandler(database: typeof fs = fs) {
 
   if (!recipeDoc.exists) {
     if (String(id).startsWith('curated-')) return c.json({ error: 'That recipe identifier is reserved.' }, 400)
-    const data = { ...toStored(recipeDetails, true), createdBy: uid, createdAt: new Date() }
+    const data = { ...toStored(recipeDetails, true), ...printProvenance, createdBy: uid, createdAt: new Date() }
     await docRef.set(data)
     countImport(data)
     invalidateSearchIndex()

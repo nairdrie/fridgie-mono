@@ -89,6 +89,10 @@ route.post('/', async (c) => {
     // no public original behind it. Nothing on this path may reach Explore
     // unless its owner later says so.
     recipe.visibility = 'private';
+    // Preserve the one fact needed for conservative physical-print rights.
+    // Unlike URL imports this path has no durable public source URL to derive
+    // later, so the reviewed recipe must carry its photo-import provenance.
+    recipe.contentOrigin = 'photo-imported';
     recipe.ingredients = normalizeIngredients(recipe.ingredients);
     return c.json(recipe);
   } catch (error) {

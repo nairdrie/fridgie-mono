@@ -10,7 +10,29 @@ import {
 } from "firebase/auth";
 import { Platform } from 'react-native';
 import uuid from 'react-native-uuid';
-import { ConnectionKind, ExploreContent, Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, SuggestionRequest, UserConnectionsPage, UserProfile, UserSearchResult } from "../types/types";
+import {
+  ConnectionKind,
+  CookbookPrintAddress,
+  CookbookPrintCheckoutSession,
+  CookbookPrintDraft,
+  CookbookPrintDraftInput,
+  CookbookPrintEligibilitySummary,
+  CookbookPrintOrder,
+  CookbookPrintPreview,
+  CookbookPrintQuote,
+  ExploreContent,
+  Group,
+  Item,
+  List,
+  Meal,
+  MealPreferences,
+  PendingInvitation,
+  Recipe,
+  SuggestionRequest,
+  UserConnectionsPage,
+  UserProfile,
+  UserSearchResult,
+} from "../types/types";
 import type { NutritionGoals, WeeklyNutritionAnalysis } from '@fridgie/shared/nutrition';
 import { authStatePromise } from "./authState";
 import { reportReachable, reportUnreachable } from "./connectivity";
@@ -47,10 +69,17 @@ const AI_TIMEOUT_MS = 120_000
 /** Social video imports may also wait for speech transcription before parsing. */
 const URL_RECIPE_IMPORT_TIMEOUT_MS = 240_000
 
+/** The print server permits preview rendering for 240s; leave response headroom. */
+const PRINT_PREVIEW_TIMEOUT_MS = 250_000
+
+export type ApiErrorBody = Readonly<Record<string, unknown>>;
+
 export class ApiError extends Error {
   status: number;
   /** Parsed JSON error response, when the API returned one. */
   data?: unknown;
+  /** Object-shaped alias retained for print quote/recovery helpers. */
+  body?: ApiErrorBody;
   /** Stable machine-readable API error code, when provided. */
   code?: string;
 
@@ -59,8 +88,10 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = status;
     this.data = data;
-    if (data && typeof data === 'object' && 'error' in data) {
-      const code = (data as { error?: unknown }).error;
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      this.body = data as ApiErrorBody;
+      const code = (data as { error?: unknown; code?: unknown }).error
+        ?? (data as { code?: unknown }).code;
       if (typeof code === 'string') this.code = code;
     }
   }
@@ -181,9 +212,14 @@ async function authorizedFetch(
     const structuredMessage = errorData && typeof errorData === 'object'
       ? (errorData as { message?: unknown }).message
       : undefined;
-    const errorMessage = typeof structuredMessage === 'string'
+    const structuredError = errorData && typeof errorData === 'object'
+      ? (errorData as { error?: unknown }).error
+      : undefined;
+    const errorMessage = typeof structuredMessage === 'string' && structuredMessage.trim()
       ? structuredMessage
-      : errorBody || `Request failed with status ${res.status}`;
+      : typeof structuredError === 'string' && structuredError.trim()
+        ? structuredError
+        : errorBody || `Request failed with status ${res.status}`;
     throw new ApiError(errorMessage, res.status, errorData);
   }
 
@@ -1026,6 +1062,123 @@ export async function getUserCookbook(uid: string): Promise<Recipe[]> {
   const res = await authorizedFetch(`${BASE_URL}/cookbook/${uid}`);
   return res.json();
 }
+
+// ─────── PRINTED COOKBOOKS ───────────────────────────────────────────
+
+export async function getCookbookPrintEligibility(): Promise<CookbookPrintEligibilitySummary> {
+  const res = await authorizedFetch(`${BASE_URL}/print/eligibility`);
+  return res.json();
+}
+
+/**
+ * Active drafts for the signed-in cook. The normal response is `{ drafts }`;
+ * accepting an array or a single draft keeps the client compatible with the
+ * earliest test server without weakening any mutation contract.
+ */
+export async function getCookbookPrintDrafts(): Promise<CookbookPrintDraft[]> {
+  const res = await authorizedFetch(`${BASE_URL}/print/draft`, {}, [404]);
+  if (res.status === 404) return [];
+  const body = await res.json();
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.drafts)) return body.drafts;
+  return body?.id ? [body as CookbookPrintDraft] : [];
+}
+
+export async function createCookbookPrintDraft(input: CookbookPrintDraftInput): Promise<CookbookPrintDraft> {
+  const res = await authorizedFetch(`${BASE_URL}/print/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return res.json();
+}
+
+export async function getCookbookPrintDraft(draftId: string): Promise<CookbookPrintDraft> {
+  const res = await authorizedFetch(`${BASE_URL}/print/draft/${encodeURIComponent(draftId)}`);
+  return res.json();
+}
+
+export async function updateCookbookPrintDraft(
+  draftId: string,
+  input: CookbookPrintDraftInput,
+  revision: number,
+): Promise<CookbookPrintDraft> {
+  const res = await authorizedFetch(`${BASE_URL}/print/draft/${encodeURIComponent(draftId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, revision }),
+  });
+  return res.json();
+}
+
+export async function generateCookbookPrintPreview(draftId: string): Promise<CookbookPrintPreview> {
+  const res = await authorizedFetch(`${BASE_URL}/print/draft/${encodeURIComponent(draftId)}/preview`, {
+    method: 'POST',
+  }, [], PRINT_PREVIEW_TIMEOUT_MS);
+  return res.json();
+}
+
+export async function quoteCookbookPrintDraft(
+  draftId: string,
+  address: CookbookPrintAddress,
+): Promise<CookbookPrintQuote> {
+  const res = await authorizedFetch(`${BASE_URL}/print/draft/${encodeURIComponent(draftId)}/quote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address }),
+  });
+  return res.json();
+}
+
+export interface CookbookPrintCheckoutRequest {
+  quoteId: string;
+  address: CookbookPrintAddress;
+  checkoutKey: string;
+  rightsConfirmed: boolean;
+  reviewedEveryPage: boolean;
+  providerConsent: boolean;
+}
+
+export async function checkoutCookbookPrintDraft(
+  draftId: string,
+  request: CookbookPrintCheckoutRequest,
+): Promise<CookbookPrintCheckoutSession> {
+  const res = await authorizedFetch(`${BASE_URL}/print/draft/${encodeURIComponent(draftId)}/checkout`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  }, [], 60_000);
+  return res.json();
+}
+
+export async function getCookbookPrintOrders(): Promise<CookbookPrintOrder[]> {
+  const res = await authorizedFetch(`${BASE_URL}/print/orders`);
+  const body = await res.json();
+  return Array.isArray(body) ? body : Array.isArray(body?.orders) ? body.orders : [];
+}
+
+export async function getCookbookPrintOrder(orderId: string): Promise<CookbookPrintOrder> {
+  const res = await authorizedFetch(`${BASE_URL}/print/orders/${encodeURIComponent(orderId)}`);
+  return res.json();
+}
+
+async function mutateCookbookPrintOrder(
+  orderId: string,
+  action: 'retry' | 'cancel' | 'reprint',
+): Promise<CookbookPrintOrder> {
+  const res = await authorizedFetch(
+    `${BASE_URL}/print/orders/${encodeURIComponent(orderId)}/${action}`,
+    { method: 'POST' },
+    [],
+    60_000,
+  );
+  const body = await res.json();
+  return body?.order ?? body;
+}
+
+export const retryCookbookPrintOrder = (orderId: string) => mutateCookbookPrintOrder(orderId, 'retry');
+export const cancelCookbookPrintOrder = (orderId: string) => mutateCookbookPrintOrder(orderId, 'cancel');
+export const reprintCookbookPrintOrder = (orderId: string) => mutateCookbookPrintOrder(orderId, 'reprint');
 
 export async function addRecipeToList(groupId: string, listId: string, recipe: Recipe): Promise<Meal> {
   console.log(groupId)
