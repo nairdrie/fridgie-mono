@@ -295,7 +295,7 @@ export interface Recipe {
   createdBy?: string;
   forkedFromId?: string;
   /** Server-managed provenance; curated recipes have no invented source URL. */
-  contentOrigin?: 'ai-curated' | 'ai-adapted';
+  contentOrigin?: 'ai-curated' | 'ai-adapted' | 'photo-imported';
   curatedCreatorUid?: string;
   publishedAt?: string;
   totalMinutes?: number;
@@ -344,6 +344,211 @@ export interface Recipe {
    * the same recipe has a different one for everybody who saved it.
    */
   addedAt?: string;
+}
+
+// ── Printed cookbooks ───────────────────────────────────────────────────────────────
+
+export type CookbookPrintTheme = 'classic' | 'modern' | 'photo-forward';
+export type CookbookPrintSku = 'matte-softcover' | 'matte-hardcover';
+export type CookbookPrintPhotoPlacement = 'auto' | 'hero' | 'inline' | 'none';
+export type CookbookPrintRightsMode = 'original-or-licensed' | 'source-only' | 'rights-confirmed';
+
+/** Crop values are normalized so a choice survives a later image resize. */
+export interface CookbookPrintCrop {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface CookbookPrintRecipeSelection {
+  recipeId: string;
+  included: boolean;
+  /** Stable user order. Removed rows keep their position so Restore is lossless. */
+  position: number;
+  section?: string;
+  photoPlacement: CookbookPrintPhotoPlacement;
+  rightsMode: CookbookPrintRightsMode;
+  /** User-authored copy that may be printed on a source-only page. */
+  notes?: string;
+  rightsConfirmedAt?: string;
+}
+
+export interface CookbookPrintDraftInput {
+  title: string;
+  subtitle?: string;
+  dedication?: string;
+  byline: string;
+  theme: CookbookPrintTheme;
+  sku: CookbookPrintSku;
+  coverRecipeId?: string;
+  coverCrop: CookbookPrintCrop;
+  includeTableOfContents: boolean;
+  includeIndex: boolean;
+  recipes: CookbookPrintRecipeSelection[];
+}
+
+export interface CookbookPrintDraft extends CookbookPrintDraftInput {
+  id: string;
+  revision: number;
+  status: 'active' | 'ordered' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  lastPreviewRevision?: number;
+}
+
+export type CookbookPrintRestriction = 'none' | 'external-source' | 'photo-import' | 'contributor-permission';
+
+export interface CookbookPrintEligibleRecipe extends Recipe {
+  printRestriction: CookbookPrintRestriction;
+  printRestrictionMessage?: string;
+  defaultRightsMode: CookbookPrintRightsMode;
+  photoPrintAllowedByDefault: boolean;
+}
+
+export interface CookbookPrintEligibilitySummary {
+  eligibleCount: number;
+  restrictedCount: number;
+  milestoneReached: boolean;
+  recipes: CookbookPrintEligibleRecipe[];
+}
+
+export type CookbookPrintIssueSeverity = 'info' | 'warning' | 'error';
+
+export interface CookbookPrintIssue {
+  code:
+    | 'missing-image'
+    | 'low-resolution-image'
+    | 'text-overflow'
+    | 'awkward-pagination'
+    | 'orphaned-block'
+    | 'empty-page'
+    | 'page-count'
+    | 'spine-width'
+    | 'rights-confirmation'
+    | 'provider-validation';
+  severity: CookbookPrintIssueSeverity;
+  message: string;
+  recipeId?: string;
+  pageNumber?: number;
+}
+
+export interface CookbookPrintPreviewPage {
+  pageNumber: number;
+  kind: 'title' | 'dedication' | 'contents' | 'section' | 'recipe' | 'source' | 'index' | 'notes';
+  label: string;
+  recipeId?: string;
+  section?: string;
+  /** A short-lived, private image rendered from the exact interior PDF page. */
+  imageUrl?: string;
+  imageExpiresAt?: string;
+}
+
+export interface CookbookPrintPreview {
+  draftId: string;
+  revision: number;
+  generatedAt: string;
+  pageCount: number;
+  spineWidthInches: number;
+  coverImageUrl?: string;
+  interiorPdfUrl?: string;
+  coverPdfUrl?: string;
+  urlExpiresAt?: string;
+  pages: CookbookPrintPreviewPage[];
+  issues: CookbookPrintIssue[];
+  canOrder: boolean;
+}
+
+export interface CookbookPrintAddress {
+  name: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  stateOrProvince: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+}
+
+export interface CookbookPrintMoney {
+  amountMinor: number;
+  currency: string;
+}
+
+export interface CookbookPrintQuote {
+  id: string;
+  draftId: string;
+  sku: CookbookPrintSku;
+  quantity: 1;
+  printing: CookbookPrintMoney;
+  shipping: CookbookPrintMoney;
+  tax: CookbookPrintMoney;
+  discount: CookbookPrintMoney;
+  total: CookbookPrintMoney;
+  taxStatus: 'included' | 'estimated' | 'unavailable';
+  shippingMethod: string;
+  provider: 'lulu';
+  providerName: string;
+  productionEstimate?: string;
+  deliveryEstimate?: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export type CookbookPrintPaymentStatus =
+  | 'requires-payment'
+  | 'processing'
+  | 'paid'
+  | 'refund-pending'
+  | 'refunded'
+  | 'failed';
+
+export type CookbookPrintFulfillmentStatus =
+  | 'awaiting-payment'
+  | 'submitting'
+  | 'submission-failed'
+  | 'submission-unknown'
+  | 'submitted'
+  | 'in-production'
+  | 'shipped'
+  | 'delivered'
+  | 'cancelled'
+  | 'reprint-requested'
+  | 'reprinting'
+  | 'failed';
+
+export interface CookbookPrintTracking {
+  carrier?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  shippedAt?: string;
+  estimatedDelivery?: string;
+}
+
+export interface CookbookPrintOrder {
+  id: string;
+  draftId: string;
+  snapshotId: string;
+  quoteId: string;
+  title: string;
+  sku: CookbookPrintSku;
+  quantity: 1;
+  total: CookbookPrintMoney;
+  paymentStatus: CookbookPrintPaymentStatus;
+  fulfillmentStatus: CookbookPrintFulfillmentStatus;
+  provider: 'lulu';
+  providerName: string;
+  providerStatus?: string;
+  tracking?: CookbookPrintTracking;
+  lastFailure?: { code: string; message: string; retryable: boolean };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CookbookPrintCheckoutSession {
+  order: CookbookPrintOrder;
+  paymentIntentClientSecret: string;
+  publishableKey: string;
+  merchantDisplayName: string;
 }
 
 export type ExploreAccent = 'sage' | 'peach' | 'lemon';

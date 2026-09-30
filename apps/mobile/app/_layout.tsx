@@ -19,6 +19,7 @@ import { canvas } from '@/utils/styles';
 import { ShareIntentProvider } from 'expo-share-intent';
 import { SharedRecipeProvider } from '@/context/SharedRecipeContext';
 import SharedRecipeRouter from '@/components/SharedRecipeRouter';
+import StripeAppProvider from '@/components/StripeAppProvider';
 
 // Without a handler, a notification that arrives while the app is open is
 // swallowed silently — the OS assumes a foregrounded app will present it itself.
@@ -80,6 +81,7 @@ function MotionStack({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   return (
+    <StripeAppProvider>
       <ShareIntentProvider options={{ scheme: 'fridgie', resetOnBackground: false, disabled: Platform.OS === 'web' }}>
       <SharedRecipeProvider>
       <SafeAreaProvider>
@@ -160,6 +162,7 @@ export default function RootLayout() {
                       }}
                     />
                     <Stack.Screen name="profile/connections" options={{ headerShown: false, fullScreenGestureEnabled: true }} />
+                    <Stack.Screen name="print-cookbook" options={{ headerShown: false }} />
                     <Stack.Screen name="import-recipe" options={{ headerShown: false, gestureEnabled: false }} />
                     <Stack.Screen
                         name="profile/[uid]"
@@ -192,5 +195,6 @@ export default function RootLayout() {
       </SafeAreaProvider>
       </SharedRecipeProvider>
       </ShareIntentProvider>
+    </StripeAppProvider>
   );
 }

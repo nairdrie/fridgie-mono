@@ -18,6 +18,7 @@
     "@react-native-google-signin/google-signin": "^15.0.0",
     "@react-navigation/bottom-tabs": "^7.3.10",
     "@react-navigation/elements": "^2.3.8",
+    "@stripe/stripe-react-native": "0.45.0",
     "date-fns": "^4.1.0",
     "expo": "53.0.22",
     "expo-apple-authentication": "~7.2.4",
