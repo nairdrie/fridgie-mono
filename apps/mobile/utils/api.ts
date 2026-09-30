@@ -626,6 +626,21 @@ export async function getExploreContent(): Promise<ExploreContent> {
   return res.json();
 }
 
+export type DiscoverAdEvent = 'impression' | 'click' | 'hide' | 'report';
+export type DiscoverAdEventProvider = 'house' | 'admob';
+
+/**
+ * Records only a provider/event aggregate. Creative text, user identifiers,
+ * recipe context, searches, diets, and household data never enter the payload.
+ */
+export async function recordDiscoverAdEvent(event: DiscoverAdEvent, provider: DiscoverAdEventProvider): Promise<void> {
+  await authorizedFetch(`${BASE_URL}/explore/ads/event`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event, provider }),
+  });
+}
+
 
 // ─────── REAL-TIME UPDATES ──────────────────────────────────────────────────
 

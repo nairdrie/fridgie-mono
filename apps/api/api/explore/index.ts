@@ -8,6 +8,7 @@ import { hiddenRecipeIds } from '@/utils/moderation';
 import { sourceDocId } from '@/utils/recipeSource';
 import { publishedDiscovery } from '@/utils/discoveryRead';
 import { curatedProfileFields } from '@/utils/publicProfiles';
+import { materializeDiscoverAdvertising } from '@/utils/discoverAdvertising';
 
 interface Creator {
     uid: string;
@@ -97,11 +98,22 @@ async function withImportCounts(recipes: any[]): Promise<any[]> {
 }
 
 const route = new Hono();
-route.use('*', auth);
 
 // GET /api/explore
-route.get('/', async (c) => {
+// Keep auth on the exact route: this module is mounted at `/explore`, and a
+// wildcard middleware here would also re-verify nested `/explore/*` routes.
+route.get('/', auth, async (c) => {
     try {
+        // Remote advertising controls are an independent, optional boundary:
+        // a missing document or Firestore failure must disable ads, never take
+        // the organic Discover feed down with it.
+        const advertisingPromise = fs.collection('appConfig').doc('discoverAds').get()
+            .then(snapshot => materializeDiscoverAdvertising(snapshot.exists ? snapshot.data() : undefined))
+            .catch(() => {
+                console.warn('Discover advertising config failed closed.');
+                return materializeDiscoverAdvertising(undefined);
+            });
+
         // Nothing below may show a recipe its owner kept private, or one this
         // particular viewer has hidden or reported. Both filters run over the
         // fetched candidates rather than in the query — see OVERFETCH.
@@ -217,9 +229,10 @@ route.get('/', async (c) => {
 
 
         // --- 5. Assemble the payload for the client ---
-        const [trendingWithCounts, newestWithCounts] = await Promise.all([
+        const [trendingWithCounts, newestWithCounts, advertising] = await Promise.all([
             withImportCounts(trending),
             withImportCounts(newest),
+            advertisingPromise,
         ]);
 
         const exploreData = {
@@ -227,6 +240,7 @@ route.get('/', async (c) => {
             newest: newestWithCounts,
             featuredCreators,
             ...(editorial ?? {}),
+            advertising,
         };
 
         return c.json(exploreData);

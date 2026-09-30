@@ -57,6 +57,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/mobile/package-lock.json
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
 
       - name: Install shared
         working-directory: packages/shared
@@ -69,6 +72,10 @@ jobs:
       - name: Typecheck
         working-directory: apps/mobile
         run: npx tsc --noEmit
+
+      - name: Test
+        working-directory: apps/mobile
+        run: bun test
 
       # Typechecking alone would not catch a broken Metro resolution of
       # packages/shared — apps/mobile/package.json does NOT depend on
