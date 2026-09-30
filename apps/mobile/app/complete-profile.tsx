@@ -6,7 +6,7 @@ import { defaultAvatars } from '@/utils/defaultAvatars';
 import { auth, storage } from '@/utils/firebase';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { updateProfile } from 'firebase/auth';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import React, { useRef, useState } from 'react';
@@ -66,6 +66,7 @@ async function updateUserProfile(data: { name: string; photoURL: string }) {
 
 export default function CompleteProfileScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ returnTo?: string; proSource?: string }>();
   const { user, refreshAuthUser } = useAuth();
   // Wider than the default: the Continue button sits directly under the name
   // field, and lifting the field alone would leave the button behind the keyboard.
@@ -135,8 +136,19 @@ export default function CompleteProfileScreen() {
 
       refreshAuthUser();
 
-      // await refetchProfile(); // Refresh the profile in the context
-      router.replace('/profile'); // Use replace to prevent going back
+      // Preserve a narrow, validated post-auth intent. In particular, someone
+      // who was asked to sign in from checkout should not have to find the
+      // paywall all over again after completing their profile.
+      if (params.returnTo === 'pro') {
+        router.replace({
+          pathname: '/pro',
+          params: typeof params.proSource === 'string' ? { source: params.proSource } : {},
+        });
+      } else if (params.returnTo === 'suggest-meals') {
+        router.replace('/list');
+      } else {
+        router.replace('/profile'); // Use replace to prevent going back
+      }
     } catch (error) {
       console.error('Failed to save profile:', error);
       Alert.alert('Error', 'Could not save your profile. Please try again.');

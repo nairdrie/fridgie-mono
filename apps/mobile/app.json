@@ -57,13 +57,14 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Fridgie uses your photos to import a recipe from a picture of one, and to add a photo to a recipe you save.",
-          "cameraPermission": "Fridgie uses the camera to photograph a cookbook page or recipe card and read the recipe off it.",
+          "photosPermission": "Fridgie uses photos you choose to import recipes, add recipe photos, or identify ingredients for Leftovers Mode.",
+          "cameraPermission": "Fridgie uses the camera to photograph recipe pages or identify visible fridge and pantry ingredients for Leftovers Mode.",
           "microphonePermission": false
         }
       ],
       "expo-dev-client",
       "expo-router",
+      "./plugins/withRevenueCatAndroidLaunchMode",
       [
         "expo-splash-screen",
         {

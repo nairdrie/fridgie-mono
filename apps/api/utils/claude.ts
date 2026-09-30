@@ -42,6 +42,10 @@ export const models = {
   /** Creative work under real constraints (diet, protein slots, vetoes). The
    *  most quality-sensitive route, and the first to raise if output slips. */
   mealSuggest: 'claude-sonnet-5',
+  /** Multi-photo fridge/pantry perception. This is intentionally separate from
+   *  mealSuggest so cost or vision quality can be tuned without changing the
+   *  recipe-writing path. */
+  leftoversIdentify: 'claude-sonnet-5',
   /** Writing a whole recipe from nothing but its title. Same creative work as
    *  mealSuggest, with none of the input to lean on — quantities that balance
    *  and steps in a workable order are entirely on the model here. */

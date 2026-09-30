@@ -129,7 +129,8 @@ gcloud services enable \
   cloudresourcemanager.googleapis.com \
   run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com \
   iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com \
-  firebasedatabase.googleapis.com identitytoolkit.googleapis.com firestore.googleapis.com
+  firebasedatabase.googleapis.com identitytoolkit.googleapis.com firestore.googleapis.com \
+  firebaserules.googleapis.com
 
 echo "waiting 30s for API enablement to propagate…"; sleep 30
 
@@ -178,6 +179,11 @@ sleep 10
 # PROJECT scope, so there is no bootstrap problem.
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:${DEPLOY_SA}" --role=roles/run.developer --condition=None
+
+# Least-privilege permission to compile and publish the committed Firestore
+# rules. This cannot read or write document data.
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${DEPLOY_SA}" --role=roles/firebaserules.admin --condition=None
 
 gcloud artifacts repositories add-iam-policy-binding fridgie --location=$REGION \
   --member="serviceAccount:${DEPLOY_SA}" --role=roles/artifactregistry.writer
@@ -406,7 +412,7 @@ Upload all of these **to EAS** via `npx eas-cli credentials`, never to GitHub, t
 
 ### Phase 5 — LATER, but real
 
-**25. LATER — Commit and deploy Firestore + Storage rules.** `firebase.json` declares only `database`. The mobile client writes **directly** to Storage (`app/complete-profile.tsx:46` and `utils/api.ts:372`, both `uploadBytes`) and reads/writes RTDB `/status/{uid}` directly. Authorization for Storage is entirely rules-based, those rules exist only in the console, and nothing in CI deploys any of them — so the committed RTDB rules and production RTDB rules can silently diverge. Add `firestore` and `storage` blocks to `firebase.json`, commit the rules files, and add a `firebase deploy --only database,firestore:rules,storage` step.
+**25. LATER — Commit Storage rules and deploy Storage + RTDB rules.** Firestore is now covered: `firebase.json` targets `fridgie-db`, `firestore.rules` denies all client access, and CI publishes it before the API. The mobile client still writes **directly** to Storage (`app/complete-profile.tsx:46` and `utils/api.ts:372`, both `uploadBytes`) and reads/writes RTDB `/status/{uid}` directly. Authorization for Storage is entirely rules-based, those rules exist only in the console, and CI still does not deploy Storage or the committed RTDB rules — so those two production policies can silently diverge. Add a committed `storage.rules` block, verify it against the direct-client flows, then extend the deploy to `database,firestore:rules,storage`.
 
 **26. LATER — Move the WebSocket token out of the URL.** See §9 risk 1 — this one is genuinely important, and there's an interim one-liner below.
 
@@ -1100,7 +1106,7 @@ gcloud run deploy fridgie-api \
 | `roles/datastore.user` | `getFirestore('fridgie-db')`. Note this is broader than "the named database" — it also covers `(default)` and any database created later. An IAM condition on `resource.name.endsWith("/databases/fridgie-db")` can tighten it, but condition support on Firestore data-plane calls is uneven and a silently-denied read is worse than a broad grant. **LATER**, and only with testing. |
 | `roles/firebaseauth.admin` | `adminAuth.createSessionCookie` at `api/authentication/index.ts:57`, which is live (`AuthContext.tsx:105`). Note `verifyIdToken` needs **no** credential at all — it validates offline against Google's public certs. **LATER tightening:** this role also permits deleting every user in the project. A custom role with just `identitytoolkit.sessionCookies.create` is the correct long-term answer: `gcloud iam roles create fridgieSessionCookies --project=grocerease-5abbb --permissions=identitytoolkit.sessionCookies.create --stage=GA`. |
 
-Deliberately **not** granted: `roles/editor`, `roles/firebase.admin` (can rewrite your security rules), any Storage role (`getStorage()` appears only in `scripts/`, which the Dockerfile never copies), `roles/iam.serviceAccountTokenCreator` (needed only for `createCustomToken` / signed URLs — you call neither).
+Deliberately **not** granted: `roles/editor`, `roles/firebase.admin`, any Storage role (`getStorage()` appears only in `scripts/`, which the Dockerfile never copies), `roles/iam.serviceAccountTokenCreator` (needed only for `createCustomToken` / signed URLs — you call neither). The deployer has the narrower `roles/firebaserules.admin` role so CI can publish the committed client-deny Firestore policy without receiving document-data access.
 
 ### The bill
 

@@ -1,5 +1,11 @@
 {
   "database": {
     "rules": "database.rules.json"
-  }
+  },
+  "firestore": [
+    {
+      "database": "fridgie-db",
+      "rules": "firestore.rules"
+    }
+  ]
 }

@@ -11,6 +11,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { CookbookProvider } from '@/context/CookbookContext';
 import { ListProvider } from '@/context/ListContext';
 import { NotificationProvider } from "@/context/NotificationContext";
+import { ProProvider } from '@/context/ProContext';
 import { MEAL_RATING_ENABLED } from '@/constants/features';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -85,6 +86,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <GlassPreferencesProvider>
         <AuthProvider>
+          <ProProvider>
           <NotificationProvider>
             <ListProvider>
               {/* Which recipes are on YOUR shelf — read from Explore, from a
@@ -147,6 +149,22 @@ export default function RootLayout() {
                       }}
                     />
                     <Stack.Screen
+                      name="pro"
+                      options={{
+                        title: 'Fridgie Pro',
+                        headerShown: false,
+                        presentation: 'modal',
+                      }}
+                    />
+                    <Stack.Screen
+                      name="nutrition"
+                      options={{
+                        title: 'Nutrition',
+                        headerShown: false,
+                        fullScreenGestureEnabled: true,
+                      }}
+                    />
+                    <Stack.Screen
                       name="rate-meal"
                       options={{ 
                         title: 'Rate Meal',
@@ -187,6 +205,7 @@ export default function RootLayout() {
               </CookbookProvider>
             </ListProvider>
           </NotificationProvider>
+          </ProProvider>
         </AuthProvider>
         </GlassPreferencesProvider>
       </SafeAreaProvider>

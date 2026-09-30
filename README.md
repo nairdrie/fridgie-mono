@@ -140,6 +140,12 @@ unit aliases, trailing periods, and rounding.
 
 ## Deploying
 
+Fridgie Pro requires store products, RevenueCat client/server keys, and an
+optional nutrition provider that cannot live in source control. Before a Pro
+release, follow [the launch checklist](docs/fridgie-pro-launch.md), the
+[backend entitlement notes](apps/api/docs/fridgie-pro.md), and the
+[nutrition provider setup](docs/nutrition-provider.md).
+
 **API** — build from the **repo root**, not from `apps/api`. The image needs
 `packages/shared`, so a build scoped to `apps/api` fails:
 
@@ -147,9 +153,11 @@ unit aliases, trailing periods, and rounding.
 make docker-build     # docker build -f apps/api/Dockerfile .
 ```
 
-There is currently **no deploy target and no deploy config in this repo**.
-`api.fridgie.ca` resolves to an EC2 instance in `ca-central-1` that was set up
-outside version control. Wiring up a real deploy path is outstanding work.
+Pushes to `main` run the checked-in GitHub Actions deployment: CI publishes the
+client-deny rules for the named `fridgie-db` Firestore database, builds a Cloud
+Run candidate, smoke-tests it, then promotes it. The Workload Identity deployer
+needs `roles/firebaserules.admin` in addition to the Cloud Run and Artifact
+Registry roles documented in [the deployment design](docs/design-deploy-pipeline.md).
 
 **Mobile** — via EAS, parameterised by platform:
 

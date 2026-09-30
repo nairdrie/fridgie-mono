@@ -11,9 +11,11 @@ import {
 import { Platform } from 'react-native';
 import uuid from 'react-native-uuid';
 import { ConnectionKind, ExploreContent, Group, Item, List, Meal, MealPreferences, PendingInvitation, Recipe, SuggestionRequest, UserConnectionsPage, UserProfile, UserSearchResult } from "../types/types";
+import type { NutritionGoals, WeeklyNutritionAnalysis } from '@fridgie/shared/nutrition';
 import { authStatePromise } from "./authState";
 import { reportReachable, reportUnreachable } from "./connectivity";
 import { auth } from "./firebase";
+import { aiUsageFromUnknown, type AccountStatus, type AiUsage } from "./pro";
 
 // API root. Configure per environment via EXPO_PUBLIC_API_URL
 // (e.g. in .env / eas.json build profiles):
@@ -47,11 +49,20 @@ const URL_RECIPE_IMPORT_TIMEOUT_MS = 240_000
 
 export class ApiError extends Error {
   status: number;
+  /** Parsed JSON error response, when the API returned one. */
+  data?: unknown;
+  /** Stable machine-readable API error code, when provided. */
+  code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.data = data;
+    if (data && typeof data === 'object' && 'error' in data) {
+      const code = (data as { error?: unknown }).error;
+      if (typeof code === 'string') this.code = code;
+    }
   }
 }
 
@@ -115,7 +126,11 @@ async function authorizedFetch(
   }
   const token = await getIdToken(user, true)
 
+  const callerSignal = init.signal
   const controller = new AbortController()
+  const abortForCaller = () => controller.abort()
+  if (callerSignal?.aborted) controller.abort()
+  else callerSignal?.addEventListener('abort', abortForCaller, { once: true })
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   let res: Response
@@ -129,7 +144,10 @@ async function authorizedFetch(
       },
     })
   } catch (err: any) {
-    // An abort and a genuine network failure are the same thing to a caller:
+    // A caller-initiated abort is intentional (for example closing Leftovers
+    // Mode) and must not make the app believe the network went offline.
+    if (callerSignal?.aborted) throw err
+    // A timeout abort and a genuine network failure are the same thing to a caller:
     // the server could not be reached. Say so, rather than surfacing
     // "Aborted", which reads like the user cancelled something.
     //
@@ -144,6 +162,7 @@ async function authorizedFetch(
     throw new ApiError(err?.message || 'Could not reach the server.', 0)
   } finally {
     clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', abortForCaller)
   }
 
   // Any answer at all — including a 4xx — proves the server is reachable, and
@@ -153,12 +172,46 @@ async function authorizedFetch(
   if (!res.ok && !allowStatus.includes(res.status)) {
     // Try to get a more specific error message from the response body
     const errorBody = await res.text();
-    const errorMessage = errorBody || `Request failed with status ${res.status}`;
-    throw new ApiError(errorMessage, res.status);
+    let errorData: unknown;
+    try {
+      errorData = errorBody ? JSON.parse(errorBody) : undefined;
+    } catch {
+      // Plain-text errors are still supported by older endpoints.
+    }
+    const structuredMessage = errorData && typeof errorData === 'object'
+      ? (errorData as { message?: unknown }).message
+      : undefined;
+    const errorMessage = typeof structuredMessage === 'string'
+      ? structuredMessage
+      : errorBody || `Request failed with status ${res.status}`;
+    throw new ApiError(errorMessage, res.status, errorData);
   }
 
 
   return res;
+}
+
+// ─────── ACCOUNT / FRIDGIE PRO ─────────────────────────────────────────────
+
+/**
+ * The backend is authoritative for both entitlement and AI allowance. Store
+ * SDK state is intentionally not enough to unlock a server-funded feature.
+ */
+export async function getAccountStatus(): Promise<AccountStatus> {
+  const res = await authorizedFetch(`${BASE_URL}/account/status`);
+  return res.json();
+}
+
+/**
+ * Forces a fresh RevenueCat lookup after a user-driven purchase or restore.
+ * This is never called merely because the local SDK says an entitlement is
+ * active; the response is what unlocks Pro in the app.
+ */
+export async function refreshAccountStatus(): Promise<AccountStatus> {
+  const res = await authorizedFetch(`${BASE_URL}/account/status/refresh`, {
+    method: 'POST',
+  }, [], AI_TIMEOUT_MS);
+  return res.json();
 }
 
 // ─────── LISTS ───────────────────────────────────────────────────────────────
@@ -322,6 +375,52 @@ export async function getStaples(groupId: string): Promise<StapleEntry[]> {
 export async function alwaysShowStaple(groupId: string, key: string): Promise<void> {
   await authorizedFetch(`${BASE_URL}/staples/${encodeURIComponent(key)}?groupId=${groupId}`, {
     method: 'DELETE',
+  });
+}
+
+// --- Fridgie Pro nutrition ---
+
+export async function getNutritionGoals(): Promise<NutritionGoals | null> {
+  const res = await authorizedFetch(`${BASE_URL}/nutrition/goals`);
+  const body = await res.json();
+  return body?.goals ?? null;
+}
+
+export async function saveNutritionGoals(goals: NutritionGoals): Promise<NutritionGoals> {
+  const res = await authorizedFetch(`${BASE_URL}/nutrition/goals`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ goals }),
+  });
+  const body = await res.json();
+  return body.goals;
+}
+
+export async function getWeeklyNutrition(
+  groupId: string,
+  listId: string,
+): Promise<WeeklyNutritionAnalysis> {
+  const query = new URLSearchParams({ groupId, listId });
+  const res = await authorizedFetch(
+    `${BASE_URL}/nutrition/weekly?${query}`,
+    {},
+    [],
+    AI_TIMEOUT_MS,
+  );
+  return res.json();
+}
+
+export async function setMealConsumed(
+  groupId: string,
+  listId: string,
+  mealId: string,
+  consumed: boolean,
+): Promise<void> {
+  const query = new URLSearchParams({ groupId, listId });
+  await authorizedFetch(`${BASE_URL}/nutrition/consumed?${query}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mealId, consumed }),
   });
 }
 
@@ -549,11 +648,61 @@ export async function getRecipe(recipeId: string): Promise<Recipe> {
  * is never persisted — `overrides` is how a saved dietary need gets switched
  * off for one evening without editing the saved profile.
  */
-export async function getMealSuggestions(request: SuggestionRequest = {}): Promise<Recipe[]> {
+export interface MealSuggestionsResponse {
+  recipes: Recipe[];
+  /** Authoritative post-reservation count from the successful response. */
+  aiUsage: AiUsage | null;
+}
+
+export async function getMealSuggestions(
+  request: SuggestionRequest = {},
+  signal?: AbortSignal,
+): Promise<MealSuggestionsResponse> {
   const res = await authorizedFetch(`${BASE_URL}/meal/suggest`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
+    signal,
+  }, [], AI_TIMEOUT_MS);
+  const recipes = await res.json() as Recipe[];
+  const limit = Number(res.headers.get('X-AI-Usage-Limit'));
+  const remaining = Number(res.headers.get('X-AI-Usage-Remaining'));
+  const aiUsage = aiUsageFromUnknown({
+    limit,
+    remaining,
+    used: limit - remaining,
+    windowStartsAt: res.headers.get('X-AI-Usage-Window-Start'),
+    windowEndsAt: res.headers.get('X-AI-Usage-Reset'),
+  });
+  return { recipes, aiUsage };
+}
+
+export interface DetectedLeftoversIngredient {
+  name: string;
+  confidence: 'high' | 'medium';
+}
+
+export interface IdentifyLeftoversResponse {
+  ingredients: DetectedLeftoversIngredient[];
+  /** Non-fatal photo problems; valid neighbors were still analyzed. */
+  warnings: string[];
+  /** Authoritative allowance after this successful scan reservation. */
+  scanUsage?: AiUsage;
+}
+
+/**
+ * Identifies ingredients without creating a Storage object. The data URLs live
+ * only for this authenticated request and are released when confirmation opens.
+ */
+export async function identifyLeftovers(
+  images: string[],
+  signal?: AbortSignal,
+): Promise<IdentifyLeftoversResponse> {
+  const res = await authorizedFetch(`${BASE_URL}/meal/leftovers/identify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ images }),
+    signal,
   }, [], AI_TIMEOUT_MS);
   return res.json();
 }

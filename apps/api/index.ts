@@ -12,7 +12,17 @@ import type { DataSnapshot } from 'firebase-admin/database'
 const app = new Hono()
 // `X-List-Rev` carries the revision a categorize write committed at; a browser
 // build cannot read a custom response header unless it is exposed here.
-app.use('/api/*', cors({ origin: '*', exposeHeaders: ['X-List-Rev'] }))
+app.use('/api/*', cors({
+  origin: '*',
+  exposeHeaders: [
+    'Retry-After',
+    'X-List-Rev',
+    'X-AI-Usage-Remaining',
+    'X-AI-Usage-Limit',
+    'X-AI-Usage-Window-Start',
+    'X-AI-Usage-Reset',
+  ],
+}))
 
 // Utility: filepath → Hono route (`api/foo/[id].ts` → `/foo/:id`)
 function toRoute(file: string) {
@@ -53,6 +63,26 @@ serve({
     // recipe. Keep this request alive without relaxing every route's timeout.
     if (req.method === 'POST' && /^\/api\/recipe\/import\/?$/.test(url.pathname)) {
       server.timeout(req, 240)
+    }
+
+    // The first nutrition view can populate several provider-backed recipe
+    // estimates (bounded and cached by the route). It needs the same room as an
+    // image/AI request; later views are cache hits and return normally.
+    if (req.method === 'GET' && /^\/api\/nutrition\/weekly\/?$/.test(url.pathname)) {
+      server.timeout(req, 120)
+    }
+
+    // A bounded six-photo Leftovers request can still take longer than the
+    // global 30-second idle timeout while uploading and waiting on vision.
+    if (req.method === 'POST' && /^\/api\/meal\/leftovers\/identify\/?$/.test(url.pathname)) {
+      server.timeout(req, 120)
+    }
+
+    // Suggestion generation has the same 120-second mobile deadline. Without
+    // this override Bun can reset a quiet Sonnet request at the global 30s
+    // idle timeout after the quota reservation has already been accepted.
+    if (req.method === 'POST' && /^\/api\/meal\/suggest\/?$/.test(url.pathname)) {
+      server.timeout(req, 120)
     }
 
     // Adding a meal through the Claude connector waits on the same aisle
