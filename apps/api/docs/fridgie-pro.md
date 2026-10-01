@@ -31,6 +31,14 @@ purchase.
   reservation. Configure these controls with
   `FRIDGIE_PRO_WEEKLY_LEFTOVERS_SCAN_LIMIT` and
   `FRIDGIE_MAX_CONCURRENT_LEFTOVERS_SCANS`.
+- Ask Fridgie (`POST /api/recipe/ask/:id`, a chat about one open recipe) is
+  Pro-only and uses its own 200-message weekly bucket at
+  `users/{uid}/system/recipeChatUsage`, plus a non-refundable 40/hour attempt
+  guard at `users/{uid}/system/recipeChatHourlyAttempts`. Configure them with
+  `FRIDGIE_PRO_WEEKLY_RECIPE_CHAT_LIMIT` and
+  `FRIDGIE_RECIPE_CHAT_HOURLY_ATTEMPT_LIMIT`. The route only ever *proposes*
+  edits, and only on a recipe whose `createdBy` is the caller; the app saves a
+  proposal through the ordinary `POST /api/recipe` after the cook taps Apply.
 - Provider dispatches also use separate, non-refundable per-account attempt
   ledgers at `users/{uid}/system/suggestHourlyAttempts` and
   `users/{uid}/system/leftoversHourlyAttempts`. They reset at the next fixed UTC

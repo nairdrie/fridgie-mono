@@ -50,6 +50,10 @@ export const models = {
    *  mealSuggest, with none of the input to lean on — quantities that balance
    *  and steps in a workable order are entirely on the model here. */
   recipeGenerate: 'claude-sonnet-5',
+  /** Ask Fridgie: questions about one open recipe, substitutions, and
+   *  proposed edits to it. Conversational and interactive, so latency matters
+   *  as much as quality — the same tier as the other recipe-writing routes. */
+  recipeChat: 'claude-sonnet-5',
   /** Sorting grocery strings into 18 fixed aisles, with the answer constrained
    *  to an enum and an RTDB cache in front so only NOVEL items ever arrive.
    *  Nothing here needs a frontier model. */
@@ -76,6 +80,12 @@ export interface JsonCallOptions {
   system: string;
   /** Per-request content. Anything that changes call to call belongs here, not in `system`. */
   user: string | Anthropic.ContentBlockParam[];
+  /**
+   * Earlier turns of a conversation, oldest first, sent ahead of `user`. Must
+   * start with a user turn. Only the final answer is held to `schema`; earlier
+   * assistant turns can be plain prose.
+   */
+  history?: Anthropic.MessageParam[];
   /** JSON Schema the response is constrained to. Objects need `additionalProperties: false`. */
   schema: Record<string, unknown>;
   /** Thinking depth and overall token spend. Defaults to `low`. */
@@ -101,6 +111,7 @@ export async function completeJson<T>({
   model,
   system,
   user,
+  history = [],
   schema,
   effort = 'low',
   maxTokens = 16000,
@@ -122,7 +133,7 @@ export async function completeJson<T>({
       ...(supportsEffort(model) ? { effort } : {}),
       format: { type: 'json_schema', schema },
     },
-    messages: [{ role: 'user', content: user }],
+    messages: [...history, { role: 'user', content: user }],
   }, {
     ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }),
     ...(maxRetries === undefined ? {} : { maxRetries }),

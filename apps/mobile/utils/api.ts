@@ -743,6 +743,52 @@ export async function identifyLeftovers(
   return res.json();
 }
 
+export interface AskFridgieTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** A complete replacement recipe Ask Fridgie offers; nothing is saved until the cook applies it. */
+export interface AskFridgieProposal {
+  summary: string;
+  recipe: {
+    name: string;
+    description: string;
+    ingredients: { name: string; quantity: string }[];
+    instructions: string[];
+    servings: number | null;
+  };
+}
+
+export interface AskFridgieResponse {
+  reply: string;
+  /** Only ever present on the caller's own recipe. */
+  proposal: AskFridgieProposal | null;
+  /** Server-decided: whether this recipe is the caller's to edit. */
+  canEdit: boolean;
+  chatUsage?: AiUsage;
+}
+
+/**
+ * One Ask Fridgie turn about a recipe. Pro-only on the server, which answers
+ * 403 `pro_required` otherwise; the conversation lives on the device and is
+ * sent whole each time.
+ */
+export async function askFridgieAboutRecipe(
+  recipeId: string,
+  messages: AskFridgieTurn[],
+  viewingServings?: number | null,
+  signal?: AbortSignal,
+): Promise<AskFridgieResponse> {
+  const res = await authorizedFetch(`${BASE_URL}/recipe/ask/${encodeURIComponent(recipeId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, ...(viewingServings ? { viewingServings } : {}) }),
+    signal,
+  }, [], AI_TIMEOUT_MS);
+  return res.json();
+}
+
 export async function saveMealPreferences(preferences: MealPreferences): Promise<MealPreferences> {
   const res = await authorizedFetch(`${BASE_URL}/meal/preferences`, {
     method: 'POST',

@@ -85,6 +85,12 @@ serve({
       server.timeout(req, 120)
     }
 
+    // Ask Fridgie answers can carry a whole proposed recipe, which can run
+    // past the 30-second idle timeout on a quiet Sonnet response.
+    if (req.method === 'POST' && /^\/api\/recipe\/ask\/[^/]+\/?$/.test(url.pathname)) {
+      server.timeout(req, 120)
+    }
+
     // Adding a meal through the Claude connector waits on the same aisle
     // sorting a meal added in the app does, which is a model call.
     if (req.method === 'POST' && url.pathname === '/mcp') {

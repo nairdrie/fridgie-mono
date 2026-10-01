@@ -66,6 +66,8 @@ const quotaLedger = new AiQuotaLedger(new FirestoreAiUsageStore());
 const leftoversScanLedger = new AiQuotaLedger(new FirestoreAiUsageStore('leftoversScanUsage'));
 const suggestionAttemptLedger = new AiAttemptLedger(new FirestoreAiUsageStore('suggestHourlyAttempts'));
 const leftoversAttemptLedger = new AiAttemptLedger(new FirestoreAiUsageStore('leftoversHourlyAttempts'));
+const recipeChatLedger = new AiQuotaLedger(new FirestoreAiUsageStore('recipeChatUsage'));
+const recipeChatAttemptLedger = new AiAttemptLedger(new FirestoreAiUsageStore('recipeChatHourlyAttempts'));
 
 const publicEntitlement = (entitlement: ResolvedEntitlement): PublicEntitlement => ({
   status: entitlement.status,
@@ -166,3 +168,25 @@ export const refundLeftoversScanUse = (uid: string, reservationId: string): Prom
 /** Consume immediately before dispatching Leftovers photos to the provider. */
 export const consumeLeftoversScanAttempt = (uid: string): Promise<AttemptRateDecision> =>
   leftoversAttemptLedger.consume(uid, hourlyAiAttemptLimits().leftoversScans);
+
+/**
+ * Ask Fridgie has its own Pro-only bucket: a conversation about one recipe is
+ * many small calls, and spending the visible suggestion allowance on "can I
+ * use butter instead?" would make both features feel stingy.
+ */
+export async function reserveRecipeChatUse(uid: string): Promise<QuotaReservation> {
+  const entitlement = await getEntitlement(uid);
+  if (entitlement.status === 'unavailable') throw new ProQuotaAccessError('entitlement_unavailable');
+  if (!entitlement.isPro) throw new ProQuotaAccessError('pro_required');
+  return recipeChatLedger.reserve(uid, aiPlans().pro.weeklyRecipeChatLimit);
+}
+
+export const completeRecipeChatUse = (uid: string, reservationId: string): Promise<boolean> =>
+  recipeChatLedger.complete(uid, reservationId);
+
+export const refundRecipeChatUse = (uid: string, reservationId: string): Promise<boolean> =>
+  recipeChatLedger.refund(uid, reservationId);
+
+/** Consume immediately before dispatching an Ask Fridgie message to the provider. */
+export const consumeRecipeChatAttempt = (uid: string): Promise<AttemptRateDecision> =>
+  recipeChatAttemptLedger.consume(uid, hourlyAiAttemptLimits().recipeChat);
