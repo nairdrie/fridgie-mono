@@ -4,6 +4,7 @@ export interface AiPlan {
   id: AccountPlan;
   weeklyAiLimit: number;
   weeklyLeftoversScanLimit: number;
+  weeklyRecipeChatLimit: number;
 }
 
 /**
@@ -21,6 +22,14 @@ export const DEFAULT_WEEKLY_AI_LIMITS: Readonly<Record<AccountPlan, number>> = O
 export const DEFAULT_WEEKLY_LEFTOVERS_SCAN_LIMIT = 50;
 
 /**
+ * Ask Fridgie messages on a recipe. Each one is a single text-only call over
+ * one recipe, far cheaper than three generated dinners, but a conversation is
+ * several of them — so it gets its own, larger bucket rather than eating into
+ * the suggestion allowance people actually watch.
+ */
+export const DEFAULT_WEEKLY_RECIPE_CHAT_LIMIT = 200;
+
+/**
  * These are deliberately separate from the user-facing weekly allowances.
  * Successful or failed provider dispatches both consume an attempt, so a
  * repeated refusal/invalid-image loop cannot turn refunds into unbounded spend.
@@ -29,6 +38,7 @@ export const DEFAULT_WEEKLY_LEFTOVERS_SCAN_LIMIT = 50;
 export const DEFAULT_HOURLY_AI_ATTEMPT_LIMITS = Object.freeze({
   mealSuggestions: 20,
   leftoversScans: 8,
+  recipeChat: 40,
 });
 
 const integerInRange = (
@@ -53,9 +63,20 @@ export function aiPlans(env: NodeJS.ProcessEnv = process.env): Readonly<Record<A
     1,
     1_000,
   );
+  const proRecipeChat = integerInRange(
+    env.FRIDGIE_PRO_WEEKLY_RECIPE_CHAT_LIMIT,
+    DEFAULT_WEEKLY_RECIPE_CHAT_LIMIT,
+    1,
+    10_000,
+  );
   return Object.freeze({
-    free: Object.freeze({ id: 'free' as const, weeklyAiLimit: free, weeklyLeftoversScanLimit: 0 }),
-    pro: Object.freeze({ id: 'pro' as const, weeklyAiLimit: pro, weeklyLeftoversScanLimit: proLeftoversScans }),
+    free: Object.freeze({ id: 'free' as const, weeklyAiLimit: free, weeklyLeftoversScanLimit: 0, weeklyRecipeChatLimit: 0 }),
+    pro: Object.freeze({
+      id: 'pro' as const,
+      weeklyAiLimit: pro,
+      weeklyLeftoversScanLimit: proLeftoversScans,
+      weeklyRecipeChatLimit: proRecipeChat,
+    }),
   });
 }
 
@@ -66,6 +87,7 @@ export function maxConcurrentLeftoversScans(env: NodeJS.ProcessEnv = process.env
 export function hourlyAiAttemptLimits(env: NodeJS.ProcessEnv = process.env): {
   mealSuggestions: number;
   leftoversScans: number;
+  recipeChat: number;
 } {
   return Object.freeze({
     mealSuggestions: integerInRange(
@@ -79,6 +101,12 @@ export function hourlyAiAttemptLimits(env: NodeJS.ProcessEnv = process.env): {
       DEFAULT_HOURLY_AI_ATTEMPT_LIMITS.leftoversScans,
       1,
       100,
+    ),
+    recipeChat: integerInRange(
+      env.FRIDGIE_RECIPE_CHAT_HOURLY_ATTEMPT_LIMIT,
+      DEFAULT_HOURLY_AI_ATTEMPT_LIMITS.recipeChat,
+      1,
+      500,
     ),
   });
 }

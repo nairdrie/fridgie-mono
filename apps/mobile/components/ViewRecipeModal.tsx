@@ -16,6 +16,7 @@ import { recipeSourceLabel } from '@/utils/recipeImport';
 // opens at the number you actually cook for instead of asking again.
 import { useAuth } from '@/context/AuthContext';
 import { useCookbook } from '@/context/CookbookContext';
+import { usePro } from '@/context/ProContext';
 import { Recipe } from '@/types/types';
 import { accentSoft, hairline, ink, inkFaint, inkMuted, primary, surface } from '@/utils/styles';
 import { GlassPressable, GlassSurface, useGlassPreferences } from '@/components/ui/Glass';
@@ -23,12 +24,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCardStyleFromTags } from '@/utils/recipeStyling';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { displayQuantity, nextUnitInCycle } from '@/utils/quantity';
 import { scaleIngredients, servingsForScale, servingsRange, servingsScale } from '@/utils/servings';
-import { getRecipe, hideRecipe, reportRecipe, saveRecipe, updateGroup, type ReportReason } from '../utils/api';
+import { getRecipe, hideRecipe, reportRecipe, saveRecipe, updateGroup, type AskFridgieProposal, type ReportReason } from '../utils/api';
 import AddToMealPlanModal from './AddToMealPlanModal'; // Import the new component
+import AskFridgie, { type AskMessage } from './AskFridgie';
 import CookMode from './CookMode';
 import InstructionText from './InstructionText';
 
@@ -94,6 +97,8 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
     const [isConfirmingRemove, setIsConfirmingRemove] = useState(false);
 
     const { user, selectedGroup, refreshGroups } = useAuth();
+    const { isPro, refresh: refreshPro } = usePro();
+    const router = useRouter();
     const { isInCookbook, addRecipe, removeRecipe } = useCookbook();
     /** On YOUR shelf — never "in the cookbook this was opened from". */
     const isCurrentlyInCookbook = isInCookbook(recipeId);
@@ -155,11 +160,21 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
     // [NEW] State for the meal plan modal
     const [isMealPlanModalVisible, setIsMealPlanModalVisible] = useState(false);
     const [isCooking, setIsCooking] = useState(false);
+    const [isAsking, setIsAsking] = useState(false);
+    /**
+     * The Ask Fridgie thread lives here rather than in the chat, so closing the
+     * chat to look something up in the recipe and opening it again picks the
+     * conversation back up. A different recipe starts a fresh one.
+     */
+    const [askMessages, setAskMessages] = useState<AskMessage[]>([]);
+    /** Set when the paywall should open once this sheet has finished leaving. */
+    const pendingPaywall = useRef(false);
 
     useEffect(() => {
         if (!isVisible) {
             setIsConfirmingRemove(false);
             setIsCooking(false);
+            setIsAsking(false);
         }
 
         if (!recipeId || !isVisible) {
@@ -177,6 +192,7 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
             setSavedAsUsual(false);
             setUnitChoices({});
             setDraftYield(null);
+            setAskMessages([]);
             try {
                 const fullRecipe = await getRecipe(recipeId);
                 setRecipe(fullRecipe);
@@ -432,7 +448,65 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
     const handleClose = () => {
         setIsConfirmingRemove(false);
         setIsCooking(false);
+        setIsAsking(false);
         onClose();
+    };
+
+    /**
+     * The paywall is a routed screen, and pushing one while this native sheet
+     * is still on screen can leave it hidden behind the sheet on iOS. So the
+     * sheet closes first and the push happens once it has gone — on iOS from
+     * the Modal's onDismiss, elsewhere (where onDismiss never fires) next tick.
+     */
+    const flushPendingPaywall = () => {
+        if (!pendingPaywall.current) return;
+        pendingPaywall.current = false;
+        router.push({ pathname: '/pro', params: { source: 'ask' } });
+    };
+
+    const openAskPaywall = () => {
+        pendingPaywall.current = true;
+        handleClose();
+        if (Platform.OS !== 'ios') setTimeout(flushPendingPaywall, 0);
+    };
+
+    /** Ask Fridgie is Pro-only; the button is shown to everyone and opens the paywall otherwise. */
+    const handleAskPress = () => {
+        if (!recipe) return;
+        if (!isPro) {
+            openAskPaywall();
+            return;
+        }
+        setIsAsking(true);
+    };
+
+    /**
+     * The server answered 403 to a reader this device thought was Pro — a
+     * lapsed subscription, usually. Refresh first so the paywall doesn't open
+     * on a stale "Pro is active".
+     */
+    const handleAskProRequired = async () => {
+        await refreshPro().catch(() => {});
+        openAskPaywall();
+    };
+
+    /**
+     * Saving what the reader accepted from Ask Fridgie. Only reachable on a
+     * recipe the server confirmed is theirs, so this is an in-place update —
+     * never a fork — through the same save the editor uses. Like `confirmYield`
+     * the response isn't adopted, to keep the byline; the fields that changed
+     * are patched in locally instead.
+     */
+    const applyAskProposal = async (proposal: AskFridgieProposal) => {
+        if (!recipe) throw new Error('No recipe open');
+        const { servings: proposedServings, ...changes } = proposal.recipe;
+        const servingsPatch = proposedServings ? { servings: proposedServings } : {};
+        await saveRecipe({ ...recipe, ...changes, ...servingsPatch });
+        setRecipe((prev) => (prev ? { ...prev, ...changes, ...servingsPatch } : prev));
+        // Rows may have moved or been swapped, so a unit tapped on row 3 no
+        // longer belongs to whatever is on row 3 now.
+        setUnitChoices({});
+        onCookbookUpdate?.();
     };
 
     const canScale = !!written && !!servings;
@@ -446,13 +520,26 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
                 animationType={reduceMotion ? "none" : "slide"}
                 transparent={true}
                 visible={isVisible}
-                onRequestClose={isCooking ? () => setIsCooking(false) : handleClose}
-                onDismiss={onDismiss}
+                onRequestClose={isCooking ? () => setIsCooking(false) : isAsking ? () => setIsAsking(false) : handleClose}
+                onDismiss={() => {
+                    flushPendingPaywall();
+                    onDismiss?.();
+                }}
             >
                 <Pressable style={styles.modalBackdrop} onPress={handleClose} />
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
                         <GlassSurface style={styles.header} intensity={70}>
+                            {recipe && (
+                                <GlassPressable
+                                    style={styles.moreButton}
+                                    onPress={handleAskPress}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={isPro ? 'Ask Fridgie about this recipe' : 'Ask Fridgie about this recipe, a Fridgie Pro feature'}
+                                >
+                                    <Ionicons name="sparkles-outline" size={19} color={primary} />
+                                </GlassPressable>
+                            )}
                             {isSomeoneElses && (
                                 <GlassPressable
                                     style={styles.moreButton}
@@ -551,6 +638,29 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
                                                         ))}
                                                     </View>
                                                 )}
+
+                                                {/* Shown to everyone; without Pro it opens the paywall.
+                                                    Placed above the ingredients because that is where
+                                                    "can I swap this?" comes up. */}
+                                                <GlassPressable
+                                                    style={styles.askCard}
+                                                    onPress={handleAskPress}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel={isPro ? 'Ask Fridgie about this recipe' : 'Ask Fridgie about this recipe, a Fridgie Pro feature'}
+                                                >
+                                                    <View style={styles.askIcon}>
+                                                        <Ionicons name="sparkles" size={18} color={primary} />
+                                                    </View>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.askTitle}>Ask Fridgie</Text>
+                                                        <Text style={styles.askText}>
+                                                            {isAuthor ? 'Swap an ingredient, tweak the recipe, or ask anything.' : 'Swap an ingredient or ask anything about this recipe.'}
+                                                        </Text>
+                                                    </View>
+                                                    {isPro
+                                                        ? <Ionicons name="chevron-forward" size={18} color={primary} />
+                                                        : <View style={styles.proBadge}><Text style={styles.proBadgeText}>PRO</Text></View>}
+                                                </GlassPressable>
 
                                                 <View style={styles.sectionHeader}>
                                                     <Text style={styles.sectionTitle}>Ingredients</Text>
@@ -827,6 +937,20 @@ export default function ViewRecipeModal({ isVisible, onClose, onDismiss, recipeI
                     </View>
                 )}
 
+                {/* Inside the sheet for the same reason as cook mode. */}
+                {isAsking && recipe && (
+                    <AskFridgie
+                        recipe={recipe}
+                        messages={askMessages}
+                        setMessages={setAskMessages}
+                        viewingServings={servings}
+                        isAuthor={isAuthor}
+                        onClose={() => setIsAsking(false)}
+                        onApply={applyAskProposal}
+                        onRequirePro={() => { void handleAskProRequired(); }}
+                    />
+                )}
+
                 {/* Also inside, for the same reason: presented from this sheet's
                     own view controller rather than from the screen's, which is
                     busy presenting this sheet. */}
@@ -907,4 +1031,10 @@ const styles = StyleSheet.create({
     primaryButton: { flex: 1, minHeight: 55, backgroundColor: primary, borderRadius: 22, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', paddingHorizontal: 10 },
     primaryButtonText: { color: '#FFF', fontSize: 14, fontWeight: '700', marginLeft: 7, flexShrink: 1 },
     removeButton: { backgroundColor: '#B8534B' },
+    askCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 20, padding: 14, borderRadius: 22, backgroundColor: surface, borderWidth: 1, borderColor: '#FFF' },
+    askIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: accentSoft, alignItems: 'center', justifyContent: 'center' },
+    askTitle: { fontSize: 15, fontWeight: '700', color: ink },
+    askText: { fontSize: 12, lineHeight: 17, color: inkMuted, marginTop: 2 },
+    proBadge: { backgroundColor: primary, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+    proBadgeText: { color: '#FFF', fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
 });

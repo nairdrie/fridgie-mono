@@ -69,11 +69,12 @@ describe('weekly AI windows and plan configuration', () => {
   });
 
   test('uses separate configurable fixed-hour provider-attempt windows', () => {
-    expect(hourlyAiAttemptLimits({})).toEqual({ mealSuggestions: 20, leftoversScans: 8 });
+    expect(hourlyAiAttemptLimits({})).toEqual({ mealSuggestions: 20, leftoversScans: 8, recipeChat: 40 });
     expect(hourlyAiAttemptLimits({
       FRIDGIE_SUGGEST_HOURLY_ATTEMPT_LIMIT: '30',
       FRIDGIE_LEFTOVERS_HOURLY_ATTEMPT_LIMIT: '12',
-    })).toEqual({ mealSuggestions: 30, leftoversScans: 12 });
+      FRIDGIE_RECIPE_CHAT_HOURLY_ATTEMPT_LIMIT: '60',
+    })).toEqual({ mealSuggestions: 30, leftoversScans: 12, recipeChat: 60 });
     expect(hourlyAiAttemptWindow(new Date('2026-09-30T12:59:59.999Z'))).toEqual({
       id: '2026-09-30T12',
       startsAt: '2026-09-30T12:00:00.000Z',

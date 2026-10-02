@@ -22,6 +22,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const SOURCE_COPY: Record<string, { eyebrow: string; title: string; subtitle: string }> = {
+  ask: {
+    eyebrow: 'ASK FRIDGIE',
+    title: 'A cook to ask, right in the recipe',
+    subtitle: 'Out of an ingredient? Ask for a swap, get help with a step, and let Fridgie update your own recipes when you say so.',
+  },
   leftovers: {
     eyebrow: 'LEFTOVERS MODE',
     title: 'Turn what you have into dinner',
@@ -50,6 +55,11 @@ const BENEFITS = [
     icon: 'sparkles-outline' as const,
     title: 'Higher AI limits',
     body: 'A substantially higher fair-use allowance for frequent meal planning.',
+  },
+  {
+    icon: 'chatbubbles-outline' as const,
+    title: 'Ask Fridgie',
+    body: 'Ask about substitutions and techniques on any recipe, and apply suggested edits to your own.',
   },
   {
     icon: 'camera-outline' as const,
@@ -183,7 +193,7 @@ export default function ProScreen() {
           <Text style={styles.eyebrow}>FRIDGIE PRO</Text>
           <Text style={styles.successTitle}>Pro is active</Text>
           <Text style={styles.successBody}>
-            Leftovers Mode, weekly nutrition analysis, higher AI limits, and an ad-free experience are active.
+            Ask Fridgie, Leftovers Mode, weekly nutrition analysis, higher AI limits, and an ad-free experience are active.
           </Text>
           {usageCopy && (
             <GlassSurface
