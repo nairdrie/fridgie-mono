@@ -1,7 +1,7 @@
 # Fridgie
 
 
-Monorepo for the Fridgie mobile app and its API.
+Monorepo for the Fridgie meal-planning mobile app and its API.
 
 ```
 apps/
