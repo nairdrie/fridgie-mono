@@ -53,6 +53,14 @@ type AggregatedItem = Item & {
   * backlink to the meal plan — see `showMealTags`.
   */
  mealNames: string[];
+ /**
+  * At least one of this row's sources was put on the list directly — typed in,
+  * or added as an extra rather than as a meal's ingredient. Such a row is never
+  * filed under "You usually have these": the staple card exists to tidy away
+  * what recipes add on the user's behalf, and second-guessing something they
+  * wrote down themselves would hide the very thing they just asked for.
+  */
+ addedDirectly: boolean;
 };
 
 /** Remembers the show/which-meal toggle across app launches. */
@@ -493,6 +501,10 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 // is enough to want the row on the list, and promoting sets it
                 // on all of them anyway.
                 stapleOverride: sources.some(s => s.stapleOverride),
+                // `some`: typing "olive oil" onto a list that already has a
+                // recipe's olive oil merges the two, and the row must stay
+                // visible — the user just said they need it.
+                addedDirectly: sources.some(s => !s.mealId),
             });
         }
 
@@ -655,6 +667,9 @@ const GroceryListView = forwardRef<GroceryListHandle, GroceryListViewProps>(({
                 // been bought, and saying "you usually have this" about it
                 // would be arguing with something that already happened.
                 !row.stapleOverride
+                // Only rows a meal put there. Something the user added to the
+                // list themselves is never hidden as "you usually have this".
+                && !(row as AggregatedItem).addedDirectly
                 // A row being edited stays put. Filing it away mid-keystroke
                 // would take the keyboard with it. Both id shapes are checked
                 // because the screen holds an aggregate's own id on focus but a
